@@ -1,3 +1,4 @@
+import 'package:url_launcher/url_launcher.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -526,6 +527,22 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
         ),
       ),
     );
+  }
+
+  Future<void> _openPdfReport() async {
+    final rawPlate = _vehicleData?['patente']?.toString().split('-').first.trim().toUpperCase() ?? '';
+    if (rawPlate.isEmpty) return;
+
+    final uri = Uri.parse('http://91.99.145.70:8000/api/patente/$rawPlate/pdf');
+    try {
+      HapticFeedback.mediumImpact();
+      final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
+      if (!launched) {
+        _showSnack('No se pudo abrir el navegador para descargar el PDF');
+      }
+    } catch (e) {
+      _showSnack('Error al intentar abrir el PDF ($e)');
+    }
   }
 
   Widget _buildVehicleSpecsCard() {

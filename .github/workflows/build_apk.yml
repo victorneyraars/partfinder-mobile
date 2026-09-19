@@ -66,7 +66,7 @@ jobs:
 
           # 5. Inyectar permisos de red en AndroidManifest.xml
           MANIFEST_PATH="android/app/src/main/AndroidManifest.xml"
-          sed -i 's/<application/<uses-permission android:name=\"android.permission.INTERNET\"\/>\n    <application android:usesCleartextTraffic=\"true\"/' "$MANIFEST_PATH"
+          sed -i 's/<application/<uses-permission android:name=\"android.permission.INTERNET\"\/>\n    <queries><intent><action android:name=\"android.intent.action.VIEW\"/><data android:scheme=\"http\"/></intent><intent><action android:name=\"android.intent.action.VIEW\"/><data android:scheme=\"https\"/></intent></queries>\n    <application android:usesCleartextTraffic=\"true\"/' "$MANIFEST_PATH"
 
           # 6. Compilar APK release
           flutter pub get
