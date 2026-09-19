@@ -26,9 +26,7 @@ jobs:
           channel: "stable"
           cache: true
 
-      - name: Generate Clean Flutter Project & Build APK
-        env:
-          KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+      - name: Build APK
         run: |
           mkdir -p ../backup
           cp lib/main.dart ../backup/
@@ -41,29 +39,16 @@ jobs:
           cp ../backup/main.dart lib/
           cp ../backup/pubspec.yaml .
 
-          # Agregar permiso de internet y cleartext traffic de forma limpia
           sed -i 's/<application/<uses-permission android:name="android.permission.INTERNET"\/>\n    <application android:usesCleartextTraffic="true"/' android/app/src/main/AndroidManifest.xml
-
-          # Configurar keystore si existe
-          if [ -n "$KEYSTORE_BASE64" ]; then
-            echo "$KEYSTORE_BASE64" | base64 -d > android/app/release.keystore
-            cat << 'KEYPROP' > android/key.properties
-storePassword=partfinder123
-keyPassword=partfinder123
-keyAlias=partfinder
-storeFile=release.keystore
-KEYPROP
-          fi
 
           flutter pub get
           flutter build apk --release
 
-      - name: Release APK to GitHub
+      - name: Release APK
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v1.0.${{ github.run_number }}
           name: "PartFinder Mobile v1.0.${{ github.run_number }}"
-          body: "Versión estable con soporte de red."
           files: partfinder_mobile/build/app/outputs/flutter-apk/app-release.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
