@@ -181,6 +181,7 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
           setState(() {
             _vehicleData = v;
           });
+          _fetchBoostrTelemetry();
         } else {
           _showSnack('No se encontraron especificaciones para $rawPlate');
         }
@@ -544,6 +545,7 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
     final statusColor = isOnline ? const Color(0xFF10B981) : const Color(0xFFF59E0B);
     final plan = _boostrStatus?['plan'] ?? 'PRO';
     final dailyLimit = _boostrStatus?['daily_limit']?.toString() ?? '100';
+    final remaining = _boostrStatus?['remaining']?.toString() ?? dailyLimit;
     final cached = _boostrStatus?['cached_plates']?.toString() ?? '0';
 
     return Container(
@@ -586,7 +588,7 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
           ),
           const Spacer(),
           Text(
-            'Cuota: $dailyLimit/día  •  Caché: $cached',
+            'Cuota: $remaining/$dailyLimit  •  Caché: $cached',
             style: const TextStyle(
               color: Color(0xFF38BDF8),
               fontSize: 11,
