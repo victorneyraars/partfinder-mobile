@@ -64,10 +64,14 @@ jobs:
               f.write(content)
           "
 
-          # 5. Inyectar permisos de red en AndroidManifest.xml
-          MANIFEST_PATH="android/app/src/main/AndroidManifest.xml"
-          sed -i 's/<application/<uses-permission android:name=\"android.permission.INTERNET\"\/>\n    <queries><intent><action android:name=\"android.intent.action.VIEW\"/><data android:scheme=\"http\"/></intent><intent><action android:name=\"android.intent.action.VIEW\"/><data android:scheme=\"https\"/></intent></queries>\n    <application android:usesCleartextTraffic=\"true\"/' "$MANIFEST_PATH"
-
+          # 5. Inyectar permisos de red y queries en AndroidManifest.xml
+          python3 -c "
+manifest = 'android/app/src/main/AndroidManifest.xml'
+with open(manifest, 'r') as f: doc = f.read()
+queries = '<queries><intent><action android:name=\"android.intent.action.VIEW\"/><data android:scheme=\"http\"/></intent><intent><action android:name=\"android.intent.action.VIEW\"/><data android:scheme=\"https\"/></intent></queries>'
+doc = doc.replace('<application', '<uses-permission android:name=\"android.permission.INTERNET\"/>\n    ' + queries + '\n    <application android:usesCleartextTraffic=\"true\"')
+with open(manifest, 'w') as f: f.write(doc)
+"
           # 6. Compilar APK release
           flutter pub get
           flutter build apk --release
