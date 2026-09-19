@@ -59,21 +59,19 @@ class _SearchScreenState extends State<SearchScreen> {
 
     try {
       final response = await http.get(Uri.parse("$baseUrl/api/patente/$patente"));
+      final jsonResponse = json.decode(utf8.decode(response.bodyBytes));
+
       if (response.statusCode == 200) {
-        final jsonResponse = json.decode(utf8.decode(response.bodyBytes));
         setState(() {
           _source = jsonResponse["source"];
           _vehicleData = jsonResponse["data"]["data"];
           _rateRemaining = jsonResponse["rate_remaining"]?.toString() ?? 'N/D';
           _rateLimit = jsonResponse["rate_limit"]?.toString() ?? 'N/D';
         });
-      } else if (response.statusCode == 404) {
-        setState(() {
-          _errorMessage = "Vehículo no encontrado para la patente ingresada.";
-        });
       } else {
+        // Capturar el mensaje detallado que viene del backend (ej: error 400 o 404)
         setState(() {
-          _errorMessage = "Error en el servidor: ${response.statusCode}";
+          _errorMessage = jsonResponse["detail"] ?? "Error en el servidor: ${response.statusCode}";
         });
       }
     } catch (e) {
@@ -143,16 +141,32 @@ class _SearchScreenState extends State<SearchScreen> {
             children: [
               TextField(
                 controller: _controller,
-                decoration: InputDecoration(
-                  labelText: "Ingrese Patente (Ej: CPRL32)",
-                  border: const OutlineInputBorder(),
-                  prefixIcon: const Icon(Icons.directions_car),
-                  suffixIcon: IconButton(
-                    icon: const Icon(Icons.search),
-                    onPressed: _consultarPatente,
-                  ),
+                textCapitalization: TextCapitalization.characters,
+                maxLength: 6,
+                inputFormatters: [
+                  FilteringTextInputFormatter.allow(RegExp(r'[a-zA-Z0-9]')),
+                ],
+                decoration: const InputDecoration(
+                  labelText: "Ingrese Patente (Ej: ABCD12)",
+                  helperText: "Formatos válidos en Chile:\n• Autos nuevos (desde 2007): 4 Letras y 2 Números (ABCD12)\n• Autos antiguos: 2 Letras y 4 Números (AB1234)\n• Motos / Otros: 3 Letras y 2-3 Números (ABC12 / ABC123)",
+                  helperMaxLines: 4,
+                  border: OutlineInputBorder(),
+                  prefixIcon: Icon(Icons.directions_car),
+                  counterText: "",
                 ),
                 onSubmitted: (_) => _consultarPatente(),
+              ),
+              const SizedBox(height: 10),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  onPressed: _consultarPatente,
+                  icon: const Icon(Icons.search),
+                  label: const Text("Consultar Patente"),
+                  style: ElevatedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                  ),
+                ),
               ),
               const SizedBox(height: 16),
               if (_rateRemaining.isNotEmpty)
@@ -174,10 +188,13 @@ class _SearchScreenState extends State<SearchScreen> {
               else if (_errorMessage != null)
                 Expanded(
                   child: Center(
-                    child: Text(
-                      _errorMessage!,
-                      style: const TextStyle(color: Colors.red, fontSize: 16),
-                      textAlign: TextAlign.center,
+                    child: Padding(
+                      padding: const EdgeInsets.all(16.0),
+                      child: Text(
+                        _errorMessage!,
+                        style: const TextStyle(color: Colors.red, fontSize: 15, fontWeight: FontWeight.w500),
+                        textAlign: TextAlign.center,
+                      ),
                     ),
                   ),
                 )
