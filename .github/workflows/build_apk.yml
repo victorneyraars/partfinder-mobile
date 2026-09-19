@@ -25,11 +25,16 @@ jobs:
           channel: "stable"
           cache: true
 
-      - name: Generate Keystore & Gradle Config
+      - name: Create Platform, Keystore and Build
         run: |
+          # 1. Crear estructura nativa limpia de Android
+          flutter create . --org com.partfinder360 --platforms=android --overwrite
+
+          # 2. Generar keystore permanente para la app
           mkdir -p android/app
           keytool -genkey -v -keystore android/app/upload-keystore.jks -keyalg RSA -keysize 2048 -validity 10000 -alias partfinder-key -storepass partfinder2026 -keypass partfinder2026 -dname "CN=PartFinder360, OU=Mobile, O=PartFinder, L=Santiago, ST=Santiago, C=CL"
           
+          # 3. Crear archivo key.properties
           cat << 'PROPS' > android/key.properties
           storePassword=partfinder2026
           keyPassword=partfinder2026
@@ -37,7 +42,7 @@ jobs:
           storeFile=upload-keystore.jks
           PROPS
 
-          # Inyectar la configuración de firma directamente en android/app/build.gradle
+          # 4. Inyectar signingConfig en build.gradle
           python3 -c "
           gradle_path = 'android/app/build.gradle'
           with open(gradle_path, 'r') as f:
@@ -70,8 +75,32 @@ jobs:
                   f.write(content)
           "
 
-      - name: Build APK Signed
-        run: |
+          # 5. Inyectar permisos y consultas en AndroidManifest.xml
+          MANIFEST_PATH="android/app/src/main/AndroidManifest.xml"
+          sed -i 's/<application/<uses-permission android:name=\"android.permission.INTERNET\"\/>\n    <application android:usesCleartextTraffic=\"true\"/' "$MANIFEST_PATH"
+          
+          python3 -c "
+          path = '$MANIFEST_PATH'
+          with open(path, 'r') as f:
+              content = f.read()
+          queries_block = '''
+          <queries>
+              <intent>
+                  <action android:name=\"android.intent.action.VIEW\" />
+                  <data android:scheme=\"http\" />
+              </intent>
+              <intent>
+                  <action android:name=\"android.intent.action.VIEW\" />
+                  <data android:scheme=\"https\" />
+              </intent>
+          </queries>
+          </manifest>'''
+          content = content.replace('</manifest>', queries_block)
+          with open(path, 'w') as f:
+              f.write(content)
+          "
+
+          # 6. Compilar APK release firmado
           flutter pub get
           flutter build apk --release
 
