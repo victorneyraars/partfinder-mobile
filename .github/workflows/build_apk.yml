@@ -24,6 +24,22 @@ jobs:
           channel: "stable"
           cache: true
 
+      - name: Create Native Android Support Structure
+        run: |
+          # Respaldar nuestro main.dart y pubspec.yaml
+          mkdir -p temp_backup
+          cp lib/main.dart temp_backup/
+          cp pubspec.yaml temp_backup/
+          
+          # Borrar la carpeta actual y crear un proyecto Flutter oficial limpio con Gradle y estructura nativa
+          cd ..
+          flutter create partfinder-mobile --org com.partfinder360 --platforms=android
+          
+          # Restaurar nuestro código y dependencias personalizados
+          cd partfinder-mobile
+          cp temp_backup/main.dart lib/
+          cp temp_backup/pubspec.yaml .
+
       - name: Install Dependencies
         run: flutter pub get
 
