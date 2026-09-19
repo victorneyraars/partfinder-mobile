@@ -26,7 +26,7 @@ jobs:
           channel: "stable"
           cache: true
 
-      - name: Build APK
+      - name: Build and Copy APK
         run: |
           mkdir -p ../backup
           cp lib/main.dart ../backup/
@@ -46,11 +46,11 @@ jobs:
 
           cp build/app/outputs/flutter-apk/app-release.apk ../app-release.apk
 
-      - name: Create Release with GitHub CLI
+      - name: Release APK to GitHub
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.1.${{ github.run_number }}
+          name: "PartFinder Mobile v1.1.${{ github.run_number }}"
+          files: app-release.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          TAG="v1.0.$(date +%s)"
-          gh release create "$TAG" ../app-release.apk \
-            --title "PartFinder Mobile $TAG" \
-            --notes "APK estable con permisos de red y subida garantizada."
