@@ -25,7 +25,7 @@ jobs:
           channel: "stable"
           cache: true
 
-      - name: Generate Keystore On-The-Fly
+      - name: Generate Keystore & Gradle Config
         run: |
           mkdir -p android/app
           keytool -genkey -v -keystore android/app/upload-keystore.jks -keyalg RSA -keysize 2048 -validity 10000 -alias partfinder-key -storepass partfinder2026 -keypass partfinder2026 -dname "CN=PartFinder360, OU=Mobile, O=PartFinder, L=Santiago, ST=Santiago, C=CL"
@@ -36,6 +36,39 @@ jobs:
           keyAlias=partfinder-key
           storeFile=upload-keystore.jks
           PROPS
+
+          # Inyectar la configuración de firma directamente en android/app/build.gradle
+          python3 -c "
+          gradle_path = 'android/app/build.gradle'
+          with open(gradle_path, 'r') as f:
+              content = f.read()
+
+          config_block = '''
+          def keystorePropertiesFile = rootProject.file(\"key.properties\")
+          def keystoreProperties = new Properties()
+          if (keystorePropertiesFile.exists()) {
+              keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+          }
+
+          android {
+              signingConfigs {
+                  release {
+                      if (keystoreProperties.hasProperty('storeFile')) {
+                          storeFile file(keystoreProperties['storeFile'])
+                          storePassword keystoreProperties['storePassword']
+                          keyAlias keystoreProperties['keyAlias']
+                          keyPassword keystoreProperties['keyPassword']
+                      }
+                  }
+              }
+          '''
+
+          if 'key.properties' not in content:
+              content = content.replace('android {', config_block)
+              content = content.replace('buildTypes {', 'buildTypes {\n        release {\n            signingConfig signingConfigs.release\n        }')
+              with open(gradle_path, 'w') as f:
+                  f.write(content)
+          "
 
       - name: Build APK Signed
         run: |
