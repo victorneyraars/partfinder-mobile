@@ -1,12 +1,14 @@
-name: Build Flutter APK
+name: Build and Release APK
 
 on:
   push:
-    branches: [ "main", "master" ]
+    branches: [ "main" ]
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
 
     steps:
       - uses: actions/checkout@v4
@@ -26,26 +28,26 @@ jobs:
 
       - name: Generate Clean Flutter Project & Build APK
         run: |
-          # 1. Guardar nuestro código fuente actual y pubspec
           mkdir -p ../backup
           cp lib/main.dart ../backup/
           cp pubspec.yaml ../backup/
 
-          # 2. Crear un proyecto Flutter totalmente limpio afuera
           cd ..
           flutter create partfinder_mobile --org com.partfinder360 --platforms=android
 
-          # 3. Mover nuestro código personalizado al proyecto limpio
           cd partfinder_mobile
           cp ../backup/main.dart lib/
           cp ../backup/pubspec.yaml .
 
-          # 4. Instalar dependencias y compilar el APK de liberación
           flutter pub get
           flutter build apk --release
 
-      - name: Upload APK Artifact
-        uses: actions/upload-artifact@v4
+      - name: Release APK to GitHub
+        uses: softprops/action-gh-release@v2
         with:
-          name: app-release
-          path: /home/runner/work/partfinder-mobile/partfinder_mobile/build/app/outputs/flutter-apk/app-release.apk
+          tag_name: v1.0.${{ github.run_number }}
+          name: "PartFinder Mobile v1.0.${{ github.run_number }}"
+          body: "Nueva versión estable de PartFinder Mobile compilada automáticamente desde GitHub Actions."
+          files: /home/runner/work/partfinder-mobile/partfinder_mobile/build/app/outputs/flutter-apk/app-release.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
