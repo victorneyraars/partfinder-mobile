@@ -9,7 +9,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-
     steps:
       - uses: actions/checkout@v4
 
@@ -31,15 +30,37 @@ jobs:
           mkdir -p ../backup
           cp lib/main.dart ../backup/
           cp pubspec.yaml ../backup/
-
           cd ..
           flutter create partfinder_mobile --org com.partfinder360 --platforms=android
           cd partfinder_mobile
-
           cp ../backup/main.dart lib/
           cp ../backup/pubspec.yaml .
-
-          sed -i 's/<application/<uses-permission android:name="android.permission.INTERNET"\/>\n    <application android:usesCleartextTraffic="true"/' android/app/src/main/AndroidManifest.xml
+          
+          # Inyectar permisos de internet, cleartext traffic y queries para url_launcher en AndroidManifest.xml
+          MANIFEST_PATH="android/app/src/main/AndroidManifest.xml"
+          sed -i 's/<application/<uses-permission android:name="android.permission.INTERNET"\/>\n    <application android:usesCleartextTraffic="true"/' "$MANIFEST_PATH"
+          
+          # Agregar bloque de queries antes del cierre del manifest
+          python3 -c "
+          path = '$MANIFEST_PATH'
+          with open(path, 'r') as f:
+              content = f.read()
+          queries_block = '''
+          <queries>
+              <intent>
+                  <action android:name=\"android.intent.action.VIEW\" />
+                  <data android:scheme=\"http\" />
+              </intent>
+              <intent>
+                  <action android:name=\"android.intent.action.VIEW\" />
+                  <data android:scheme=\"https\" />
+              </intent>
+          </queries>
+          </manifest>'''
+          content = content.replace('</manifest>', queries_block)
+          with open(path, 'w') as f:
+              f.write(content)
+          "
 
           flutter pub get
           flutter build apk --release

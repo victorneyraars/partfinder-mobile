@@ -87,6 +87,16 @@ class _SearchScreenState extends State<SearchScreen> {
     }
   }
 
+  void _copiarCampo(String label, String value) {
+    Clipboard.setData(ClipboardData(text: value));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text("¡$label copiado: $value!"),
+        duration: const Duration(seconds: 1),
+      ),
+    );
+  }
+
   void _copiarAlPortapapeles() {
     if (_vehicleData == null) return;
     final buffer = StringBuffer();
@@ -101,7 +111,7 @@ class _SearchScreenState extends State<SearchScreen> {
     Clipboard.setData(ClipboardData(text: buffer.toString()));
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
-        content: Text("¡Ficha técnica copiada al portapapeles!"),
+        content: Text("¡Ficha técnica completa copiada al portapapeles!"),
         duration: Duration(seconds: 2),
       ),
     );
@@ -219,34 +229,46 @@ class _SearchScreenState extends State<SearchScreen> {
                                 if (value == null || value.toString().trim().isEmpty) return false;
                                 return true;
                               }).map((entry) {
-                                return Padding(
-                                  padding: const EdgeInsets.symmetric(vertical: 4.0),
-                                  child: Row(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Expanded(
-                                        flex: 2,
-                                        child: Text(
-                                          "${entry.key.toUpperCase()}:",
-                                          style: const TextStyle(
-                                            fontWeight: FontWeight.w600,
-                                            fontSize: 13,
-                                            color: Colors.grey,
+                                final fieldLabel = entry.key.toUpperCase();
+                                final fieldValue = entry.value.toString();
+                                return InkWell(
+                                  onTap: () => _copiarCampo(fieldLabel, fieldValue),
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(vertical: 6.0, horizontal: 4.0),
+                                    child: Row(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Expanded(
+                                          flex: 2,
+                                          child: Text(
+                                            "$fieldLabel:",
+                                            style: const TextStyle(
+                                              fontWeight: FontWeight.w600,
+                                              fontSize: 13,
+                                              color: Colors.grey,
+                                            ),
                                           ),
                                         ),
-                                      ),
-                                      const SizedBox(width: 8),
-                                      Expanded(
-                                        flex: 3,
-                                        child: Text(
-                                          entry.value.toString(),
-                                          style: const TextStyle(
-                                            fontSize: 14,
-                                            fontWeight: FontWeight.w500,
+                                        const SizedBox(width: 8),
+                                        Expanded(
+                                          flex: 3,
+                                          child: Row(
+                                            children: [
+                                              Expanded(
+                                                child: Text(
+                                                  fieldValue,
+                                                  style: const TextStyle(
+                                                    fontSize: 14,
+                                                    fontWeight: FontWeight.w500,
+                                                  ),
+                                                ),
+                                              ),
+                                              const Icon(Icons.copy_rounded, size: 14, color: Colors.grey),
+                                            ],
                                           ),
                                         ),
-                                      ),
-                                    ],
+                                      ],
+                                    ),
                                   ),
                                 );
                               }).toList(),
