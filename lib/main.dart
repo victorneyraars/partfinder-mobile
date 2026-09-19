@@ -346,7 +346,7 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
                                   onTap: () async {
                                     Navigator.pop(ctx);
                                     final q = Uri.encodeComponent(cat['meliQuery'] as String);
-                                    final url = 'https://listado.mercadolibre.cl/' + q + '?matt_tool=56272145&matt_word=sandraalvaradochile&forceInApp=true';
+                                    final url = 'http://91.99.145.70:8000/api/r/meli?q=' + q;
                                     await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
                                   },
                                   borderRadius: BorderRadius.circular(8),
