@@ -89,6 +89,180 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
     });
   }
 
+  void _showError(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        backgroundColor: const Color(0xFFEF4444),
+        content: Text(message, style: const TextStyle(fontWeight: FontWeight.bold)),
+      ),
+    );
+  }
+
+  Future<void> _searchPlate() async {
+    final rawPlate = _plateController.text.trim().toUpperCase();
+    if (!_isPlateValid) {
+      HapticFeedback.heavyImpact();
+      _showError('Ingrese una patente chilena válida');
+      return;
+    }
+
+    FocusScope.of(context).unfocus();
+    HapticFeedback.lightImpact();
+
+    setState(() {
+      _isLoading = true;
+      _vehicleData = null;
+    });
+    _scannerController.repeat(reverse: true);
+
+    try {
+      final client = HttpClient();
+      client.connectionTimeout = const Duration(seconds: 10);
+      final url = Uri.parse('http://91.99.145.70:8000/api/patente/$rawPlate');
+      final request = await client.getUrl(url);
+      final response = await request.close();
+      final body = await response.transform(utf8.decoder).join();
+
+      if (response.statusCode == 200) {
+        final json = jsonDecode(body);
+        Map<String, dynamic>? raw;
+        if (json is Map<String, dynamic>) {
+          if (json['data'] is Map && json['data']['data'] is Map) {
+            raw = Map<String, dynamic>.from(json['data']['data']);
+          } else if (json['data'] is Map) {
+            raw = Map<String, dynamic>.from(json['data']);
+          } else {
+            raw = json;
+          }
+        }
+
+        if (raw != null && raw.isNotEmpty) {
+          final Map<String, dynamic> v = {};
+          final make = raw['make'] ?? raw['marca'] ?? '';
+          final model = raw['model'] ?? raw['modelo'] ?? '';
+          final version = raw['version'] ?? '';
+
+          v['marca'] = make.toString().toUpperCase();
+          v['modelo'] = ('$model $version').trim().toUpperCase();
+
+          final plate = raw['plate'] ?? raw['patente'] ?? rawPlate;
+          final dv = raw['dv'] != null && raw['dv'].toString().isNotEmpty ? '-${raw['dv']}' : '';
+          v['patente'] = '$plate$dv'.toUpperCase();
+
+          if (raw['year'] != null && raw['year'] != 0) v['año'] = raw['year'].toString();
+          if (raw['type'] != null && raw['type'].toString().isNotEmpty) v['tipo_vehiculo'] = raw['type'].toString();
+          if (raw['color'] != null && raw['color'].toString().trim().isNotEmpty) v['color'] = raw['color'].toString();
+          if (raw['engine'] != null && raw['engine'].toString().trim().isNotEmpty) v['numero_motor'] = raw['engine'].toString();
+          if (raw['engine_size'] != null && raw['engine_size'].toString().trim().isNotEmpty) v['cilindrada'] = '${raw['engine_size']} L';
+          if (raw['chassis'] != null && raw['chassis'].toString().trim().isNotEmpty) v['chasis_vin'] = raw['chassis'].toString();
+          if (raw['gas_type'] != null && raw['gas_type'].toString().trim().isNotEmpty) v['combustible'] = raw['gas_type'].toString();
+          if (raw['transmission'] != null && raw['transmission'].toString().trim().isNotEmpty) v['transmision'] = raw['transmission'].toString();
+          if (raw['kilometers'] != null && raw['kilometers'] != 0) v['kilometraje'] = '${raw['kilometers']} KM';
+          if (raw['manufacturer'] != null && raw['manufacturer'].toString().trim().isNotEmpty) v['fabricante'] = raw['manufacturer'].toString();
+          if (raw['country'] != null && raw['country'].toString().trim().isNotEmpty) v['pais_origen'] = raw['country'].toString();
+
+          v['repuestos_compatibles'] = 'Repuestos disponibles para ${v['marca']} ${v['modelo']}';
+
+          setState(() {
+            _vehicleData = v;
+          });
+        } else {
+          _showError('No se encontraron especificaciones para $rawPlate');
+        }
+      } else {
+        _showError('Patente no encontrada en el registro (Código ${response.statusCode})');
+      }
+    } catch (e) {
+      _showError('Error al conectar con la API de PartFinder');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+        _scannerController.stop();
+        _scannerController.reset();
+        HapticFeedback.mediumImpact();
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'PartFinder 360',
+      debugShowCheckedModeBanner: false,
+      theme: ThemeData.dark().copyWith(
+        scaffoldBackgroundColor: const Color(0xFF070A10),
+        primaryColor: const Color(0xFF00E5FF),
+        colorScheme: const ColorScheme.dark(
+          primary: Color(0xFF00E5FF),
+          secondary: Color(0xFF3B82F6),
+          surface: Color(0xFF0F172A),
+        ),
+      ),
+      home: const LicensePlateDashboard(),
+    );
+  }
+}
+
+class LicensePlateDashboard extends StatefulWidget {
+  const LicensePlateDashboard({super.key});
+
+  @override
+  State<LicensePlateDashboard> createState() => _LicensePlateDashboardState();
+}
+
+class _LicensePlateDashboardState extends State<LicensePlateDashboard>
+    with SingleTickerProviderStateMixin {
+  final TextEditingController _plateController = TextEditingController();
+  final FocusNode _focusNode = FocusNode();
+  
+  late AnimationController _scannerController;
+  late Animation<double> _scannerAnimation;
+  
+  bool _isLoading = false;
+  Map<String, dynamic>? _vehicleData;
+  String _activeFormat = "DESCONOCIDO";
+
+  @override
+  void initState() {
+    super.initState();
+    _scannerController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1400),
+    );
+    _scannerAnimation = Tween<double>(begin: -1.0, end: 1.0).animate(
+      CurvedAnimation(parent: _scannerController, curve: Curves.easeInOut),
+    );
+    _plateController.addListener(_evalPlateFormat);
+  }
+
+  @override
+  void dispose() {
+    _scannerController.dispose();
+    _plateController.dispose();
+    _focusNode.dispose();
+    super.dispose();
+  }
+
+  void _evalPlateFormat() {
+    final text = _plateController.text.replaceAll(RegExp(r'[^A-Za-z0-9]'), '').toUpperCase();
+    setState(() {
+      if (RegExp(r'^[B-DF-HJ-NP-TV-Z]{4}\d{2}$').hasMatch(text)) {
+        _activeFormat = "AUTO NUEVO (4L+2N)";
+      } else if (RegExp(r'^[A-Z]{2}\d{4}$').hasMatch(text)) {
+        _activeFormat = "CLÁSICO (2L+4N)";
+      } else if (RegExp(r'^[A-Z]{3}\d{2,3}$').hasMatch(text)) {
+        _activeFormat = "MOTO";
+      } else if (text.isNotEmpty) {
+        _activeFormat = "INGRESANDO...";
+      } else {
+        _activeFormat = "SIN FORMATO";
+      }
+    });
+  }
+
   Future<void> _searchPlate() async {
     final rawPlate = _plateController.text.replaceAll(RegExp(r'[^A-Za-z0-9]'), '').toUpperCase();
     if (rawPlate.length < 5) {
