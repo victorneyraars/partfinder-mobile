@@ -142,12 +142,16 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
     _vehicleData = {
       "patente": plate,
       "marca": "TOYOTA",
-      "modelo": "RAV4 HYBRID LIMITED",
+      "modelo": "RAV4 HYBRID LIMITED 4WD AUTOMÁTICO",
       "anio": "2023",
-      "motor": "2.5L DOHC 4-CILINDROS",
-      "vin": "JTMDJREV9PD018274",
+      "tipo_vehiculo": "STATION WAGON / SUV",
+      "color": "GRIS GRAFITO METALIZADO",
+      "configuracion_motor": "2.5L DOHC 16V 4-CILINDROS VVT-iE",
+      "numero_motor": "A25A-FXS-9182740",
+      "traccion": "ALL WHEEL DRIVE (AWD-i)",
       "combustible": "HÍBRIDO / BENCINA",
-      "traccion": "AWD",
+      "cilindrada": "2.487 CC",
+      "vin": "JTMDJREV9PD018274",
       "repuestos_compatibles": "48 repuestos verificados en catálogo",
     };
   }
@@ -501,12 +505,9 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
                   children: [
                     const Icon(Icons.directions_car_filled_rounded, color: Color(0xFF00E5FF), size: 22),
                     const SizedBox(width: 8),
-                    Flexible(
-                      child: Text(
-                        '${_vehicleData!['marca']} ${_vehicleData!['modelo']}',
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w900, color: Colors.white),
-                      ),
+                    Text(
+                      _vehicleData!['marca']?.toString().toUpperCase() ?? '',
+                      style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w900, color: Color(0xFF00E5FF), letterSpacing: 1.2),
                     ),
                   ],
                 ),
@@ -522,13 +523,23 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
               ),
             ],
           ),
-          const Divider(color: Color(0xFF334155), height: 26),
-          _specRow('PATENTE OFICIAL', _vehicleData!['patente'], isHighlight: true),
-          _specRow('AÑO MODELO', _vehicleData!['anio']),
-          _specRow('CONFIGURACIÓN MOTOR', _vehicleData!['motor']),
-          _specRow('TRACCIÓN / TRANSMISIÓN', _vehicleData!['traccion']),
-          _specRow('TIPO COMBUSTIBLE', _vehicleData!['combustible']),
-          _specRow('N° CHASIS (VIN)', _vehicleData!['vin']),
+          if (_vehicleData!['modelo'] != null) ...[
+            const SizedBox(height: 6),
+            Text(
+              _vehicleData!['modelo'].toString().toUpperCase(),
+              softWrap: true,
+              style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w900, color: Colors.white, height: 1.2),
+            ),
+          ],
+          const Divider(color: Color(0xFF334155), height: 22),
+          ..._vehicleData!.entries.where((e) {
+            final k = e.key.toLowerCase();
+            return k != 'marca' && k != 'modelo' && k != 'repuestos_compatibles';
+          }).map((e) {
+            final label = e.key.replaceAll('_', ' ').toUpperCase();
+            final isHighlight = e.key.toLowerCase() == 'patente';
+            return _specRow(label, e.value?.toString() ?? '---', isHighlight: isHighlight);
+          }),
           const SizedBox(height: 16),
           Container(
             padding: const EdgeInsets.all(12),
@@ -557,25 +568,34 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
 
   Widget _specRow(String label, String? value, {bool isHighlight = false}) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      padding: const EdgeInsets.symmetric(vertical: 5),
+      child: Column(
         children: [
-          Text(label, style: const TextStyle(color: Color(0xFF64748B), fontSize: 11, fontWeight: FontWeight.w700)),
-          const SizedBox(width: 12),
-          Flexible(
-            child: Text(
-              value ?? '---',
-              textAlign: TextAlign.end,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                color: isHighlight ? const Color(0xFF00E5FF) : Colors.white,
-                fontSize: 12,
-                fontWeight: isHighlight ? FontWeight.w900 : FontWeight.w700,
-                fontFamily: isHighlight ? 'monospace' : null,
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                flex: 4,
+                child: Text(label, style: const TextStyle(color: Color(0xFF64748B), fontSize: 11, fontWeight: FontWeight.w700)),
               ),
-            ),
+              const SizedBox(width: 8),
+              Expanded(
+                flex: 6,
+                child: SelectableText(
+                  value ?? '---',
+                  textAlign: TextAlign.end,
+                  style: TextStyle(
+                    color: isHighlight ? const Color(0xFF00E5FF) : Colors.white,
+                    fontSize: 12,
+                    fontWeight: isHighlight ? FontWeight.w900 : FontWeight.w700,
+                    fontFamily: isHighlight || label.contains('VIN') || label.contains('MOTOR') ? 'monospace' : null,
+                  ),
+                ),
+              ),
+            ],
           ),
+          const SizedBox(height: 4),
+          Divider(color: const Color(0xFF1E293B).withOpacity(0.5), height: 1),
         ],
       ),
     );
