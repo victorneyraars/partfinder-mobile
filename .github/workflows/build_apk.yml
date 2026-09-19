@@ -67,11 +67,16 @@ jobs:
           # 5. Inyectar permisos de red y queries en AndroidManifest.xml
           python3 -c "
 manifest = 'android/app/src/main/AndroidManifest.xml'
-with open(manifest, 'r') as f: doc = f.read()
+with open(manifest, 'r') as f:
+    c = f.read()
 queries = '<queries><intent><action android:name=\"android.intent.action.VIEW\"/><data android:scheme=\"http\"/></intent><intent><action android:name=\"android.intent.action.VIEW\"/><data android:scheme=\"https\"/></intent></queries>'
-doc = doc.replace('<application', '<uses-permission android:name=\"android.permission.INTERNET\"/>\n    ' + queries + '\n    <application android:usesCleartextTraffic=\"true\"')
-with open(manifest, 'w') as f: f.write(doc)
+c = c.replace('<application', '<uses-permission android:name=\"android.permission.INTERNET\"/>
+    ' + queries + '
+    <application android:usesCleartextTraffic=\"true\"')
+with open(manifest, 'w') as f:
+    f.write(c)
 "
+
           # 6. Compilar APK release
           flutter pub get
           flutter build apk --release
