@@ -25,12 +25,17 @@ jobs:
           channel: "stable"
           cache: true
 
-      - name: Decode Keystore
+      - name: Generate Keystore On-The-Fly
         run: |
           mkdir -p android/app
-          echo "${{ secrets.RELEASE_KEYSTORE_BASE64 }}" | tr -d '\n' | tr -d ' ' | base64 --decode > android/app/upload-keystore.jks
-        env:
-          RELEASE_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+          keytool -genkey -v -keystore android/app/upload-keystore.jks -keyalg RSA -keysize 2048 -validity 10000 -alias partfinder-key -storepass partfinder2026 -keypass partfinder2026 -dname "CN=PartFinder360, OU=Mobile, O=PartFinder, L=Santiago, ST=Santiago, C=CL"
+          
+          cat << 'PROPS' > android/key.properties
+          storePassword=partfinder2026
+          keyPassword=partfinder2026
+          keyAlias=partfinder-key
+          storeFile=upload-keystore.jks
+          PROPS
 
       - name: Build APK Signed
         run: |
