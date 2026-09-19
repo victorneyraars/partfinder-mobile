@@ -3,85 +3,49 @@ name: Build and Release APK
 on:
   push:
     branches: [ "main" ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
       - uses: actions/checkout@v4
 
       - name: Set up Java
         uses: actions/setup-java@v4
         with:
-          distribution: "zulu"
-          java-version: "17"
+          distribution: 'zulu'
+          java-version: '17'
 
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: "3.19.x"
-          channel: "stable"
-          cache: true
+          flutter-version: '3.19.6'
+          channel: 'stable'
 
       - name: Create Platform, Keystore and Build
         run: |
           # 1. Crear estructura nativa de Android
           flutter create --project-name partfinder_mobile --org com.partfinder360 --platforms=android --overwrite .
 
-          # 2. Restaurar tu código real de lib/ y pubspec
+          # 2. Restaurar código real de lib/ y pubspec
           git checkout -- lib/ pubspec.yaml
 
           # 3. Copiar el keystore permanente
           mkdir -p android/app
           cp keystore/upload-keystore.jks android/app/upload-keystore.jks
 
-          # 4. Inyectar signingConfig y ELIMINAR definitivamente signingConfigs.debug
-          python3 -c "
-          import re
-          gradle_path = 'android/app/build.gradle'
-          with open(gradle_path, 'r') as f:
-              content = f.read()
+          # 4. Inyectar firmas y permisos mediante script Python
+          python3 patch_android.py
 
-          signing_block = '''
-              signingConfigs {
-                  release {
-                      keyAlias 'partfinder-key'
-                      keyPassword 'partfinder2026'
-                      storeFile file('upload-keystore.jks')
-                      storePassword 'partfinder2026'
-                  }
-              }
-          '''
-          # Inyectar el bloque de firma dentro de android {
-          content = re.sub(r'android\s*\{', 'android {\n' + signing_block, content, count=1)
-
-          # Erradicar cualquier referencia a debug en release
-          content = re.sub(r'signingConfig\s*=?\s*signingConfigs\.debug', 'signingConfig signingConfigs.release', content)
-
-          with open(gradle_path, 'w') as f:
-              f.write(content)
-          "
-
-          # 5. Inyectar permisos de red y queries en AndroidManifest.xml
-          python3 -c "
-manifest = 'android/app/src/main/AndroidManifest.xml'
-with open(manifest, 'r') as f:
-    c = f.read()
-queries = '<queries><intent><action android:name=\"android.intent.action.VIEW\"/><data android:scheme=\"http\"/></intent><intent><action android:name=\"android.intent.action.VIEW\"/><data android:scheme=\"https\"/></intent></queries>'
-c = c.replace('<application', '<uses-permission android:name=\"android.permission.INTERNET\"/>
-    ' + queries + '
-    <application android:usesCleartextTraffic=\"true\"')
-with open(manifest, 'w') as f:
-    f.write(c)
-"
-
-          # 6. Compilar APK release
+          # 5. Compilar APK release
           flutter pub get
           flutter build apk --release
 
-          # 7. Validar en pantalla que el APK fue firmado con PartFinder360
+          # 6. Validar en pantalla certificado oficial
           echo "================ COMPROBACIÓN DE CERTIFICADO ================"
           keytool -printcert -jarfile build/app/outputs/flutter-apk/app-release.apk | grep "CN=PartFinder360"
           echo "=============================================================="
@@ -89,8 +53,10 @@ with open(manifest, 'w') as f:
       - name: Release APK to GitHub
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.2.${{ github.run_number }}
-          name: "PartFinder Mobile v1.2.${{ github.run_number }}"
+          tag_name: v1.2.${{ github.run_id }}
+          name: PartFinder 360 v1.2.${{ github.run_id }}
           files: build/app/outputs/flutter-apk/app-release.apk
+          draft: false
+          prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
