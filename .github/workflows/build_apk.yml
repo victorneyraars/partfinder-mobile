@@ -27,20 +27,17 @@ jobs:
 
       - name: Create Platform, Keystore and Build
         run: |
-          # 1. Asegurar nombre válido en pubspec.yaml
-          sed -i 's/^name:.*/name: partfinder_mobile/' pubspec.yaml
-
-          # 2. Crear estructura nativa de Android
+          # 1. Crear estructura nativa limpia de Android
           flutter create --project-name partfinder_mobile --org com.partfinder360 --platforms=android --overwrite .
 
-          # 3. Restaurar tu código real de PartFinder (evita que flutter create deje la plantilla demo)
+          # 2. Restaurar tu código real de PartFinder
           git checkout -- lib/ pubspec.yaml
 
-          # 4. Generar keystore permanente para la app
+          # 3. Copiar el keystore permanente del repositorio
           mkdir -p android/app
-          keytool -genkey -v -keystore android/app/upload-keystore.jks -keyalg RSA -keysize 2048 -validity 10000 -alias partfinder-key -storepass partfinder2026 -keypass partfinder2026 -dname "CN=PartFinder360, OU=Mobile, O=PartFinder, L=Santiago, ST=Santiago, C=CL"
+          cp keystore/upload-keystore.jks android/app/upload-keystore.jks
           
-          # 5. Crear archivo key.properties
+          # 4. Crear archivo key.properties apuntando a la llave fija
           cat << 'PROPS' > android/key.properties
           storePassword=partfinder2026
           keyPassword=partfinder2026
@@ -48,7 +45,7 @@ jobs:
           storeFile=upload-keystore.jks
           PROPS
 
-          # 6. Inyectar signingConfig en build.gradle
+          # 5. Inyectar signingConfig en build.gradle
           python3 -c "
           gradle_path = 'android/app/build.gradle'
           with open(gradle_path, 'r') as f:
@@ -81,7 +78,7 @@ jobs:
                   f.write(content)
           "
 
-          # 7. Inyectar permisos y consultas en AndroidManifest.xml
+          # 6. Inyectar permisos y consultas en AndroidManifest.xml
           MANIFEST_PATH="android/app/src/main/AndroidManifest.xml"
           sed -i 's/<application/<uses-permission android:name=\"android.permission.INTERNET\"\/>\n    <application android:usesCleartextTraffic=\"true\"/' "$MANIFEST_PATH"
           
@@ -106,7 +103,7 @@ jobs:
               f.write(content)
           "
 
-          # 8. Compilar APK release firmado con tu código real
+          # 7. Compilar APK release firmado
           flutter pub get
           flutter build apk --release
 
