@@ -308,7 +308,7 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
                 textCapitalization: TextCapitalization.characters,
                 inputFormatters: [
                   FilteringTextInputFormatter.allow(RegExp(r'[A-Za-z0-9]')),
-                  UpperCaseTextFormatter(),
+                  ChileanPlateFormatter(),
                 ],
                 style: const TextStyle(
                   color: Color(0xFF0F172A),
@@ -582,7 +582,36 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
   }
 }
 
-class UpperCaseTextFormatter extends TextInputFormatter {
+class ChileanPlateFormatter extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(TextEditingValue oldValue, TextEditingValue newValue) {
+    String clean = newValue.text.toUpperCase().replaceAll(RegExp(r'[^A-Z0-9]'), '');
+    if (clean.length > 6) clean = clean.substring(0, 6);
+    StringBuffer valid = StringBuffer();
+    for (int i = 0; i < clean.length; i++) {
+      String char = clean[i];
+      bool isLetter = RegExp(r'[A-Z]').hasMatch(char);
+      bool isDigit = RegExp(r'[0-9]').hasMatch(char);
+      if (i == 0 || i == 1) {
+        if (isLetter) valid.write(char); else break;
+      } else if (i == 2) {
+        if (isLetter || isDigit) valid.write(char); else break;
+      } else if (i == 3) {
+        bool isClassic = RegExp(r'[0-9]').hasMatch(valid.toString()[2]);
+        if (isClassic) {
+          if (isDigit) valid.write(char); else break;
+        } else {
+          if (isLetter || isDigit) valid.write(char); else break;
+        }
+      } else if (i >= 4) {
+        if (isDigit) valid.write(char); else break;
+      }
+    }
+    final res = valid.toString();
+    return TextEditingValue(text: res, selection: TextSelection.collapsed(offset: res.length));
+  }
+}
+class OldFormatter {
   @override
   TextEditingValue formatEditUpdate(TextEditingValue oldValue, TextEditingValue newValue) {
     return TextEditingValue(
