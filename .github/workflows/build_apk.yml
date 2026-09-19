@@ -39,6 +39,9 @@ jobs:
           cp ../backup/main.dart lib/
           cp ../backup/pubspec.yaml .
 
+          # Habilitar tráfico HTTP (Cleartext Traffic) de forma segura reemplazando la etiqueta application
+          sed -i 's/<application/<application android:usesCleartextTraffic="true"/' android/app/src/main/AndroidManifest.xml
+
           flutter pub get
           flutter build apk --release
 
@@ -47,7 +50,7 @@ jobs:
         with:
           tag_name: v1.0.${{ github.run_number }}
           name: "PartFinder Mobile v1.0.${{ github.run_number }}"
-          body: "Nueva versión estable de PartFinder Mobile compilada automáticamente desde GitHub Actions."
+          body: "Nueva versión con soporte para conexiones HTTP hacia el servidor en el VPS."
           files: /home/runner/work/partfinder-mobile/partfinder_mobile/build/app/outputs/flutter-apk/app-release.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
