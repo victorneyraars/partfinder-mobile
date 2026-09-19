@@ -24,17 +24,23 @@ jobs:
           channel: "stable"
           cache: true
 
-      - name: Configure Project Name and Dependencies
+      - name: Generate Clean Flutter Project & Build APK
         run: |
-          # Actualizar el nombre del paquete en el pubspec.yaml actual usando guion bajo
-          sed -i "s/^name:.*/name: partfinder_mobile/" pubspec.yaml
-          
-          # Renombrar el directorio actual para cumplir con Dart (de guion medio a guion bajo)
-          cd ..
-          mv partfinder-mobile partfinder_mobile
-          cd partfinder_mobile
+          # 1. Guardar nuestro código fuente actual y pubspec
+          mkdir -p ../backup
+          cp lib/main.dart ../backup/
+          cp pubspec.yaml ../backup/
 
-          # Obtener dependencias y compilar directamente aquí
+          # 2. Salir de la carpeta y crear un proyecto Flutter totalmente limpio con el nombre y organización correctos
+          cd ..
+          flutter create partfinder_mobile --org com.partfinder360 --platforms=android
+
+          # 3. Mover nuestro código personalizado al proyecto limpio
+          cd partfinder_mobile
+          cp ../backup/main.dart lib/
+          cp ../backup/pubspec.yaml .
+
+          # 4. Instalar dependencias y compilar el APK de liberación
           flutter pub get
           flutter build apk --release
 
@@ -42,4 +48,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: app-release
-          path: build/app/outputs/flutter-apk/app-release.apk
+          path: ../partfinder_mobile/build/app/outputs/flutter-apk/app-release.apk
