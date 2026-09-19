@@ -31,6 +31,55 @@ class SearchScreen extends StatefulWidget {
   State<SearchScreen> createState() => _SearchScreenState();
 }
 
+// Formateador inteligente para restringir la escritura según los patrones oficiales de patentes en Chile
+class ChileanPlateFormatter extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(
+      TextEditingValue oldValue, TextEditingValue newValue) {
+    String text = newValue.text.toUpperCase();
+    
+    if (text.length > 6) {
+      return oldValue;
+    }
+
+    int len = text.length;
+    for (int i = 0; i < len; i++) {
+      bool isLetter = RegExp(r'[A-Z]').hasMatch(text[i]);
+      bool isNumber = RegExp(r'[0-9]').hasMatch(text[i]);
+
+      if (!isLetter && !isNumber) return oldValue;
+
+      // Las primeras 2 posiciones siempre deben ser letras
+      if (i < 2 && !isLetter) return oldValue;
+    }
+
+    // Validación progresiva de prefijos válidos en Chile
+    bool isValidPartial = true;
+    if (len == 1) {
+      isValidPartial = RegExp(r'^[A-Z]$').hasMatch(text);
+    } else if (len == 2) {
+      isValidPartial = RegExp(r'^[A-Z]{2}$').hasMatch(text);
+    } else if (len == 3) {
+      isValidPartial = RegExp(r'^([A-Z]{2}[0-9]|[A-Z]{3})$').hasMatch(text);
+    } else if (len == 4) {
+      isValidPartial = RegExp(r'^([A-Z]{2}[0-9]{2}|[A-Z]{3}[0-9]|[A-Z]{4})$').hasMatch(text);
+    } else if (len == 5) {
+      isValidPartial = RegExp(r'^([A-Z]{2}[0-9]{3}|[A-Z]{3}[0-9]{2}|[A-Z]{4}[0-9])$').hasMatch(text);
+    } else if (len == 6) {
+      isValidPartial = RegExp(r'^([A-Z]{2}[0-9]{4}|[A-Z]{3}[0-9]{3}|[A-Z]{4}[0-9]{2})$').hasMatch(text);
+    }
+
+    if (!isValidPartial) {
+      return oldValue;
+    }
+
+    return TextEditingValue(
+      text: text,
+      selection: TextSelection.collapsed(offset: text.length),
+    );
+  }
+}
+
 class _SearchScreenState extends State<SearchScreen> {
   final TextEditingController _controller = TextEditingController();
   bool _isLoading = false;
@@ -69,7 +118,6 @@ class _SearchScreenState extends State<SearchScreen> {
           _rateLimit = jsonResponse["rate_limit"]?.toString() ?? 'N/D';
         });
       } else {
-        // Capturar el mensaje detallado que viene del backend (ej: error 400 o 404)
         setState(() {
           _errorMessage = jsonResponse["detail"] ?? "Error en el servidor: ${response.statusCode}";
         });
@@ -144,11 +192,11 @@ class _SearchScreenState extends State<SearchScreen> {
                 textCapitalization: TextCapitalization.characters,
                 maxLength: 6,
                 inputFormatters: [
-                  FilteringTextInputFormatter.allow(RegExp(r'[a-zA-Z0-9]')),
+                  ChileanPlateFormatter(),
                 ],
                 decoration: const InputDecoration(
                   labelText: "Ingrese Patente (Ej: ABCD12)",
-                  helperText: "Formatos válidos en Chile:\n• Autos nuevos (desde 2007): 4 Letras y 2 Números (ABCD12)\n• Autos antiguos: 2 Letras y 4 Números (AB1234)\n• Motos / Otros: 3 Letras y 2-3 Números (ABC12 / ABC123)",
+                  helperText: "Formatos oficiales en Chile:\n• Autos nuevos: 4 Letras y 2 Números (ABCD12)\n• Autos antiguos: 2 Letras y 4 Números (AB1234)\n• Motos / Otros: 3 Letras y 2-3 Números (ABC12 / ABC123)",
                   helperMaxLines: 4,
                   border: OutlineInputBorder(),
                   prefixIcon: Icon(Icons.directions_car),
