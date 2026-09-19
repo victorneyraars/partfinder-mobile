@@ -35,6 +35,8 @@ class _SearchScreenState extends State<SearchScreen> {
   Map<String, dynamic>? _vehicleData;
   String? _source;
   String? _errorMessage;
+  String _rateRemaining = '';
+  String _rateLimit = '';
 
   final String baseUrl = "http://91.99.145.70:8000";
 
@@ -47,6 +49,8 @@ class _SearchScreenState extends State<SearchScreen> {
       _vehicleData = null;
       _errorMessage = null;
       _source = null;
+      _rateRemaining = '';
+      _rateLimit = '';
     });
 
     try {
@@ -56,6 +60,8 @@ class _SearchScreenState extends State<SearchScreen> {
         setState(() {
           _source = jsonResponse["source"];
           _vehicleData = jsonResponse["data"]["data"];
+          _rateRemaining = jsonResponse["rate_remaining"]?.toString() ?? 'N/D';
+          _rateLimit = jsonResponse["rate_limit"]?.toString() ?? 'N/D';
         });
       } else if (response.statusCode == 404) {
         setState(() {
@@ -114,6 +120,18 @@ class _SearchScreenState extends State<SearchScreen> {
               Expanded(
                 child: ListView(
                   children: [
+                    if (_rateRemaining.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 12.0),
+                        child: Chip(
+                          avatar: const Icon(Icons.bolt, color: Colors.orange, size: 18),
+                          label: Text(
+                            "Consultas Boostr restantes hoy: $_rateRemaining / $_rateLimit",
+                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                          ),
+                          backgroundColor: Colors.orange.shade50,
+                        ),
+                      ),
                     Card(
                       elevation: 3,
                       child: Padding(
@@ -141,7 +159,6 @@ class _SearchScreenState extends State<SearchScreen> {
                               ],
                             ),
                             const Divider(),
-                            // Renderizar dinámicamente todas las llaves devueltas por la API
                             ..._vehicleData!.entries.where((entry) {
                               final key = entry.key.toLowerCase();
                               return !['make', 'model'].contains(key);
