@@ -1,4 +1,4 @@
-name: partfinder_app
+name: partfinder_mobile
 description: "App móvil para consultar patentes chilenas conectada a PartFinder 360"
 publish_to: "none"
 version: 1.0.0+1
