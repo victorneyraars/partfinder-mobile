@@ -183,6 +183,237 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
     }
   }
 
+  void _openPartsMarketplace() {
+    final make = _vehicleData?['marca']?.toString().toUpperCase() ?? '';
+    final model = _vehicleData?['modelo']?.toString().toUpperCase() ?? '';
+    final vehicleTitle = ('$make $model').trim();
+
+    if (vehicleTitle.isEmpty) return;
+
+    HapticFeedback.mediumImpact();
+
+    // Identificadores de Afiliado (reemplazar cuando tengas los tags oficiales)
+    const String meliAffiliateTag = ''; 
+    const String aliAffiliateTag = '';
+
+    final categories = [
+      {
+        'title': 'Filtros y Mantenimiento',
+        'subtitle': 'Aceite, aire motor y cabina polen',
+        'icon': Icons.filter_alt_rounded,
+        'meliQuery': 'filtro aceite $vehicleTitle',
+        'aliQuery': 'oil filter $vehicleTitle',
+      },
+      {
+        'title': 'Frenos y Seguridad',
+        'subtitle': 'Pastillas delanteras, traseras y discos',
+        'icon': Icons.disc_full_rounded,
+        'meliQuery': 'pastillas freno $vehicleTitle',
+        'aliQuery': 'brake pads $vehicleTitle',
+      },
+      {
+        'title': 'Sensores y Escáner OBD2',
+        'subtitle': 'Oxígeno, MAF, ABS y diagnóstico',
+        'icon': Icons.memory_rounded,
+        'meliQuery': 'sensor oxigeno $vehicleTitle',
+        'aliQuery': 'sensor $vehicleTitle obd2',
+      },
+      {
+        'title': 'Llaves con Chip y Tecomandos',
+        'subtitle': 'Carcasas, telemandos y chips vírgenes',
+        'icon': Icons.key_rounded,
+        'meliQuery': 'llave chip $vehicleTitle',
+        'aliQuery': 'car key remote $vehicleTitle',
+      },
+      {
+        'title': 'Pantallas Android y Car Play',
+        'subtitle': 'Radios específicas y cámaras de retroceso',
+        'icon': Icons.tv_rounded,
+        'meliQuery': 'radio android $vehicleTitle',
+        'aliQuery': 'android radio carplay $vehicleTitle',
+      },
+      {
+        'title': 'Amortiguadores y Tren Delantero',
+        'subtitle': 'Suspensión, bujes y terminales de dirección',
+        'icon': Icons.swap_vertical_circle_rounded,
+        'meliQuery': 'amortiguadores $vehicleTitle',
+        'aliQuery': 'shock absorber $vehicleTitle',
+      },
+    ];
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF0F172A),
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        side: BorderSide(color: Color(0xFF00E5FF), width: 1.2),
+      ),
+      builder: (ctx) {
+        return Container(
+          constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.85),
+          padding: const EdgeInsets.fromLTRB(18, 14, 18, 26),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 44,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF334155),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 14),
+              Row(
+                children: [
+                  const Icon(Icons.storefront_rounded, color: Color(0xFF00E5FF), size: 22),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'REPUESTOS: ' + vehicleTitle,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: 0.8,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 4),
+              const Text(
+                'Elige el repuesto y la plataforma de compra:',
+                style: TextStyle(color: Color(0xFF94A3B8), fontSize: 12),
+              ),
+              const SizedBox(height: 14),
+              Expanded(
+                child: ListView.separated(
+                  itemCount: categories.length,
+                  separatorBuilder: (_, __) => const SizedBox(height: 10),
+                  itemBuilder: (context, i) {
+                    final cat = categories[i];
+                    return Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF1E293B),
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: const Color(0xFF334155)),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.all(6),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF00E5FF).withOpacity(0.12),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: Icon(cat['icon'] as IconData, color: const Color(0xFF00E5FF), size: 20),
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      cat['title'] as String,
+                                      style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold),
+                                    ),
+                                    Text(
+                                      cat['subtitle'] as String,
+                                      style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 11),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 10),
+                          Row(
+                            children: [
+                              // Botón Mercado Libre Chile
+                              Expanded(
+                                child: InkWell(
+                                  onTap: () async {
+                                    Navigator.pop(ctx);
+                                    final q = Uri.encodeComponent(cat['meliQuery'] as String);
+                                    var url = 'https://listado.mercadolibre.cl/' + q;
+                                    if (meliAffiliateTag.isNotEmpty) {
+                                      url += '?matt_tool=' + meliAffiliateTag;
+                                    }
+                                    await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+                                  },
+                                  borderRadius: BorderRadius.circular(8),
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(vertical: 8),
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFFFFE600).withOpacity(0.12),
+                                      border: Border.all(color: const Color(0xFFFFE600).withOpacity(0.5)),
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                    child: const Row(
+                                      mainAxisAlignment: MainAxisAlignment.center,
+                                      children: [
+                                        Text('🇨🇱 MercadoLibre', style: TextStyle(color: Color(0xFFFFE600), fontSize: 11, fontWeight: FontWeight.w900)),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              // Botón AliExpress
+                              Expanded(
+                                child: InkWell(
+                                  onTap: () async {
+                                    Navigator.pop(ctx);
+                                    final q = Uri.encodeComponent(cat['aliQuery'] as String);
+                                    var url = 'https://es.aliexpress.com/wholesale?SearchText=' + q;
+                                    if (aliAffiliateTag.isNotEmpty) {
+                                      url += '&aff_platform=' + aliAffiliateTag;
+                                    }
+                                    await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+                                  },
+                                  borderRadius: BorderRadius.circular(8),
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(vertical: 8),
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFFFF4747).withOpacity(0.12),
+                                      border: Border.all(color: const Color(0xFFFF4747).withOpacity(0.5)),
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                    child: const Row(
+                                      mainAxisAlignment: MainAxisAlignment.center,
+                                      children: [
+                                        Text('📦 AliExpress', style: TextStyle(color: Color(0xFFFF6B6B), fontSize: 11, fontWeight: FontWeight.w900)),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   void _showSnack(String message) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -634,24 +865,33 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
             ),
           ),
           const SizedBox(height: 12),
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: const Color(0xFF1E293B),
+          Material(
+            color: Colors.transparent,
+            child: InkWell(
+              onTap: _openPartsMarketplace,
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: const Color(0xFF3B82F6).withOpacity(0.4)),
-            ),
-            child: Row(
-              children: [
-                const Icon(Icons.inventory_2_rounded, color: Color(0xFF60A5FA), size: 20),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    _vehicleData!['repuestos_compatibles'] ?? 'Consultando stock de repuestos...',
-                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: Color(0xFFE2E8F0)),
-                  ),
+              splashColor: const Color(0xFF00E5FF).withOpacity(0.2),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF1E293B),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: const Color(0xFF00E5FF).withOpacity(0.6), width: 1.2),
                 ),
-              ],
+                child: Row(
+                  children: [
+                    const Icon(Icons.storefront_rounded, color: Color(0xFF00E5FF), size: 22),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        _vehicleData!['repuestos_compatibles'] ?? 'Ver catálogo de repuestos compatibles',
+                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: Color(0xFFE2E8F0)),
+                      ),
+                    ),
+                    const Icon(Icons.arrow_forward_ios_rounded, color: Color(0xFF00E5FF), size: 14),
+                  ],
+                ),
+              ),
             ),
           ),
         ],
