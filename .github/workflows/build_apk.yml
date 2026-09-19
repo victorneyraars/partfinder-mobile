@@ -41,24 +41,9 @@ jobs:
           cp ../backup/main.dart lib/
           cp ../backup/pubspec.yaml .
 
-          # 1. Agregar permiso de Internet y Cleartext Traffic en el Manifest de forma limpia
-          python3 -c '
-          manifest_path = "android/app/src/main/AndroidManifest.xml"
-          with open(manifest_path, "r") as f:
-              content = f.read()
+          # Restaurar el script de parcheo al proyecto limpio y ejecutarlo
+          cp ../../partfinder-mobile/patch_project.py .
           
-          # Insertar permiso y usesCleartextTraffic
-          if "android.permission.INTERNET" not in content:
-              content = content.replace("<application", "<uses-permission android:name=\"android.permission.INTERNET\"/>\n    <application android:usesCleartextTraffic=\"true\"")
-          else:
-              content = content.replace("android:usesCleartextTraffic=\"true\"", "") # Evitar duplicados si ya estuviera
-              content = content.replace("<application", "<application android:usesCleartextTraffic=\"true\"")
-              
-          with open(manifest_path, "w") as f:
-              f.write(content)
-          '
-
-          # 2. Configurar Keystore fijo si existe el secreto
           if [ -n "$KEYSTORE_BASE64" ]; then
             echo "$KEYSTORE_BASE64" | base64 -d > android/app/release.keystore
             cat << 'KEYPROP' > android/key.properties
@@ -67,32 +52,9 @@ keyPassword=partfinder123
 keyAlias=partfinder
 storeFile=release.keystore
 KEYPROP
-
-            python3 -c '
-            gradle_path = "android/app/build.gradle"
-            with open(gradle_path, "r") as f:
-                content = f.read()
-
-            signing_config = """
-            signingConfigs {
-                release {
-                    storeFile file("release.keystore")
-                    storePassword "partfinder123"
-                    keyAlias "partfinder"
-                    keyPassword "partfinder123"
-                }
-            }
-            """
-            
-            if "signingConfigs {" not in content:
-                content = content.replace("buildTypes {", signing_config + "\n    buildTypes {")
-            
-            content = content.replace("signingConfig signingConfigs.debug", "signingConfig signingConfigs.release")
-            
-            with open(gradle_path, "w") as f:
-                f.write(content)
-            '
           fi
+
+          python3 patch_project.py
 
           flutter pub get
           flutter build apk --release
@@ -102,7 +64,7 @@ KEYPROP
         with:
           tag_name: v1.0.${{ github.run_number }}
           name: "PartFinder Mobile v1.0.${{ github.run_number }}"
-          body: "Versión con soporte de red, permiso de internet y firma persistente."
+          body: "Versión compilada con script Python externo, permiso de internet y firma persistente."
           files: /home/runner/work/partfinder-mobile/partfinder_mobile/build/app/outputs/flutter-apk/app-release.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
