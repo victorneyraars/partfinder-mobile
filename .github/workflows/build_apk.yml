@@ -31,14 +31,30 @@ jobs:
           cp lib/main.dart temp_backup/
           cp pubspec.yaml temp_backup/
           
-          # Crear proyecto limpio usando guion bajo (requisito de Dart)
+          # Crear proyecto limpio usando guion bajo
           cd ..
           flutter create partfinder_mobile --org com.partfinder360 --platforms=android
           
-          # Restaurar el código personalizado adaptando el nombre del paquete
+          # Restaurar el código personalizado
           cd partfinder_mobile
           cp ../partfinder-mobile/temp_backup/main.dart lib/
           cp ../partfinder-mobile/temp_backup/pubspec.yaml .
           
-          # Actualizar el nombre en pubspec.yaml a partfinder_mobile
-          sed -i s/name:
+          # Actualizar correctamente el nombre en pubspec.yaml usando comillas seguras
+          sed -i "s/^name:.*/name: partfinder_mobile/" pubspec.yaml
+
+      - name: Install Dependencies
+        run: |
+          cd ../partfinder_mobile
+          flutter pub get
+
+      - name: Build APK Release
+        run: |
+          cd ../partfinder_mobile
+          flutter build apk --release
+
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-release
+          path: ../partfinder_mobile/build/app/outputs/flutter-apk/app-release.apk
