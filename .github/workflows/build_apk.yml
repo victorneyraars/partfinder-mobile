@@ -27,8 +27,17 @@ jobs:
 
       - name: Create Platform, Keystore and Build
         run: |
-          # 1. Corregir el nombre en pubspec.yaml si tiene guion medio
-          sed -i 's/name: partfinder-mobile/name: partfinder_mobile/g' pubspec.yaml
+          # 1. Reemplazar el nombre en pubspec.yaml mediante Python de forma segura
+          python3 -c "
+          with open('pubspec.yaml', 'r') as f:
+              lines = f.readlines()
+          with open('pubspec.yaml', 'w') as f:
+              for line in lines:
+                  if line.strip().startswith('name:'):
+                      f.write('name: partfinder_mobile\n')
+                  else:
+                      f.write(line)
+          "
 
           # 2. Crear estructura nativa limpia de Android
           flutter create . --org com.partfinder360 --platforms=android --overwrite
