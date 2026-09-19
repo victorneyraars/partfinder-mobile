@@ -31,7 +31,7 @@ jobs:
           cp lib/main.dart ../backup/
           cp pubspec.yaml ../backup/
 
-          # 2. Salir de la carpeta y crear un proyecto Flutter totalmente limpio con el nombre y organización correctos
+          # 2. Crear un proyecto Flutter totalmente limpio afuera
           cd ..
           flutter create partfinder_mobile --org com.partfinder360 --platforms=android
 
@@ -48,4 +48,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: app-release
-          path: ../partfinder_mobile/build/app/outputs/flutter-apk/app-release.apk
+          path: /home/runner/work/partfinder-mobile/partfinder_mobile/build/app/outputs/flutter-apk/app-release.apk
