@@ -36,7 +36,6 @@ class _SearchScreenState extends State<SearchScreen> {
   String? _source;
   String? _errorMessage;
 
-  // URL pública de tu VPS en Hetzner
   final String baseUrl = "http://91.99.145.70:8000";
 
   Future<void> _consultarPatente() async {
@@ -52,7 +51,6 @@ class _SearchScreenState extends State<SearchScreen> {
 
     try {
       final response = await http.get(Uri.parse("$baseUrl/api/patente/$patente"));
-
       if (response.statusCode == 200) {
         final jsonResponse = json.decode(response.body);
         setState(() {
@@ -127,7 +125,7 @@ class _SearchScreenState extends State<SearchScreen> {
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
                                 Text(
-                                  "${_vehicleData!["make"]} ${_vehicleData!["model"]}",
+                                  "${_vehicleData!["make"] ?? ''} ${_vehicleData!["model"] ?? ''}".trim(),
                                   style: const TextStyle(
                                       fontSize: 20, fontWeight: FontWeight.bold),
                                 ),
@@ -143,14 +141,19 @@ class _SearchScreenState extends State<SearchScreen> {
                               ],
                             ),
                             const Divider(),
-                            Text("Patente: ${_vehicleData!["plate"]}-${_vehicleData!["dv"]}"),
-                            Text("Año: ${_vehicleData!["year"]}"),
-                            Text("Tipo: ${_vehicleData!["type"]}"),
-                            Text("Color: ${_vehicleData!["color"]}"),
-                            Text("Motor: ${_vehicleData!["engine"]} (${_vehicleData!["engine_size"]}L)"),
-                            Text("Chasis: ${_vehicleData!["chassis"]}"),
-                            Text("Kilometraje: ${_vehicleData!["kilometers"]} km"),
-                            Text("Combustible: ${_vehicleData!["gas_type"]}"),
+                            // Renderizar dinámicamente todas las llaves devueltas por la API
+                            ..._vehicleData!.entries.where((entry) {
+                              final key = entry.key.toLowerCase();
+                              return !['make', 'model'].contains(key);
+                            }).map((entry) {
+                              return Padding(
+                                padding: const EdgeInsets.symmetric(vertical: 3.0),
+                                child: Text(
+                                  "${entry.key.toUpperCase()}: ${entry.value ?? 'No disponible'}",
+                                  style: const TextStyle(fontSize: 14),
+                                ),
+                              );
+                            }).toList(),
                           ],
                         ),
                       ),
