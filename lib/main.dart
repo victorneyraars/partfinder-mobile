@@ -1,6 +1,8 @@
 import "dart:convert";
 import "package:flutter/material.dart";
+import "package:flutter/services.dart";
 import "package:http/http.dart" as http;
+import "package:url_launcher/url_launcher.dart";
 
 void main() {
   runApp(const PartFinderApp());
@@ -37,6 +39,7 @@ class _SearchScreenState extends State<SearchScreen> {
   String? _errorMessage;
   String _rateRemaining = '';
   String _rateLimit = '';
+  String _currentPlate = '';
 
   final String baseUrl = "http://91.99.145.70:8000";
 
@@ -51,6 +54,7 @@ class _SearchScreenState extends State<SearchScreen> {
       _source = null;
       _rateRemaining = '';
       _rateLimit = '';
+      _currentPlate = patente;
     });
 
     try {
@@ -80,6 +84,38 @@ class _SearchScreenState extends State<SearchScreen> {
       setState(() {
         _isLoading = false;
       });
+    }
+  }
+
+  void _copiarAlPortapapeles() {
+    if (_vehicleData == null) return;
+    final buffer = StringBuffer();
+    buffer.writeln("=== PartFinder 360 - Ficha Técnica ===");
+    buffer.writeln("Patente: $_currentPlate");
+    _vehicleData!.forEach((key, value) {
+      if (value != null && value.toString().trim().isNotEmpty) {
+        buffer.writeln("${key.toUpperCase()}: $value");
+      }
+    });
+
+    Clipboard.setData(ClipboardData(text: buffer.toString()));
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text("¡Ficha técnica copiada al portapapeles!"),
+        duration: Duration(seconds: 2),
+      ),
+    );
+  }
+
+  Future<void> _descargarPdf() async {
+    if (_currentPlate.isEmpty) return;
+    final pdfUrl = Uri.parse("$baseUrl/api/patente/$_currentPlate/pdf");
+    if (await canLaunchUrl(pdfUrl)) {
+      await launchUrl(pdfUrl, mode: LaunchMode.externalApplication);
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("No se pudo abrir el enlace del PDF.")),
+      );
     }
   }
 
@@ -147,7 +183,6 @@ class _SearchScreenState extends State<SearchScreen> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              // Encabezado adaptable (Responsive Wrap) para evitar desbordes
                               Wrap(
                                 alignment: WrapAlignment.spaceBetween,
                                 crossAxisAlignment: WrapCrossAlignment.center,
@@ -177,7 +212,6 @@ class _SearchScreenState extends State<SearchScreen> {
                                 ],
                               ),
                               const Divider(height: 24),
-                              // Filtrar campos nulos, vacíos o redundantes para una vista limpia
                               ..._vehicleData!.entries.where((entry) {
                                 final key = entry.key.toLowerCase();
                                 final value = entry.value;
@@ -216,6 +250,34 @@ class _SearchScreenState extends State<SearchScreen> {
                                   ),
                                 );
                               }).toList(),
+                              const SizedBox(height: 20),
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: ElevatedButton.icon(
+                                      onPressed: _copiarAlPortapapeles,
+                                      icon: const Icon(Icons.copy, size: 16),
+                                      label: const Text("Copiar Ficha"),
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: Colors.grey.shade200,
+                                        foregroundColor: Colors.black87,
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: ElevatedButton.icon(
+                                      onPressed: _descargarPdf,
+                                      icon: const Icon(Icons.picture_as_pdf, size: 16),
+                                      label: const Text("Reporte PDF"),
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: Colors.red.shade600,
+                                        foregroundColor: Colors.white,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ],
                           ),
                         ),
