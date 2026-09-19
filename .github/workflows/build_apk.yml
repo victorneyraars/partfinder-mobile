@@ -64,6 +64,6 @@ KEYPROP
           tag_name: v1.0.${{ github.run_number }}
           name: "PartFinder Mobile v1.0.${{ github.run_number }}"
           body: "Versión compilada correctamente con ruta relativa y firma persistente."
-          files: build/app/outputs/flutter-apk/app-release.apk
+          files: partfinder_mobile/build/app/outputs/flutter-apk/app-release.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
