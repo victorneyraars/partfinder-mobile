@@ -1,3 +1,4 @@
+import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
 import 'dart:async';
 import 'dart:convert';
@@ -52,9 +53,26 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
   Map<String, dynamic>? _vehicleData;
   String _activeFormat = "DESCONOCIDO";
 
+  
+  Map<String, dynamic>? _boostrStatus;
+
+  Future<void> _fetchBoostrTelemetry() async {
+    try {
+      final res = await http.get(
+        Uri.parse('http://91.99.145.70:8000/api/boostr/status'),
+      ).timeout(const Duration(seconds: 4));
+      if (res.statusCode == 200) {
+        setState(() {
+          _boostrStatus = json.decode(utf8.decode(res.bodyBytes));
+        });
+      }
+    } catch (_) {}
+  }
+
   @override
   void initState() {
     super.initState();
+    _fetchBoostrTelemetry();
     _scannerController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1400),
@@ -257,6 +275,65 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+
+          // Monitor de Telemetría Boostr API & Caché PostgreSQL
+          Container(
+            margin: const EdgeInsets.only(bottom: 14),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+            decoration: BoxDecoration(
+              color: const Color(0xFF0F172A),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(
+                color: (_boostrStatus?['status'] == 'ONLINE')
+                    ? const Color(0xFF10B981).withOpacity(0.5)
+                    : const Color(0xFF334155),
+              ),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 9,
+                  height: 9,
+                  decoration: BoxDecoration(
+                    color: (_boostrStatus?['status'] == 'ONLINE')
+                        ? const Color(0xFF10B981)
+                        : const Color(0xFFF59E0B),
+                    shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(
+                        color: ((_boostrStatus?['status'] == 'ONLINE')
+                                ? const Color(0xFF10B981)
+                                : const Color(0xFFF59E0B))
+                            .withOpacity(0.7),
+                        blurRadius: 6,
+                        spreadRadius: 2,
+                      )
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  'BOOSTR API ' + (_boostrStatus?['plan'] ?? 'PRO'),
+                  style: const TextStyle(
+                    color: Color(0xFFE2E8F0),
+                    fontSize: 11,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 0.5,
+                  ),
+                ),
+                const Spacer(),
+                Text(
+                  'Cuota: ' + (_boostrStatus?['daily_limit']?.toString() ?? '100') + '/día  •  Caché: ' + (_boostrStatus?['cached_plates']?.toString() ?? '0'),
+                  style: const TextStyle(
+                    color: Color(0xFF38BDF8),
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+
               Center(
                 child: Container(
                   width: 44,
