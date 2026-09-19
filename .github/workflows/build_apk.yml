@@ -41,7 +41,6 @@ jobs:
           cp ../backup/main.dart lib/
           cp ../backup/pubspec.yaml .
 
-          # Restaurar el script de parcheo al proyecto limpio y ejecutarlo
           cp ../../partfinder-mobile/patch_project.py .
           
           if [ -n "$KEYSTORE_BASE64" ]; then
@@ -64,7 +63,7 @@ KEYPROP
         with:
           tag_name: v1.0.${{ github.run_number }}
           name: "PartFinder Mobile v1.0.${{ github.run_number }}"
-          body: "Versión compilada con script Python externo, permiso de internet y firma persistente."
-          files: /home/runner/work/partfinder-mobile/partfinder_mobile/build/app/outputs/flutter-apk/app-release.apk
+          body: "Versión compilada correctamente con ruta relativa y firma persistente."
+          files: build/app/outputs/flutter-apk/app-release.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
