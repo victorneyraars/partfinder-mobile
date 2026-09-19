@@ -58,7 +58,7 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
       vsync: this,
       duration: const Duration(milliseconds: 1400),
     );
-    _scannerAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
+    _scannerAnimation = Tween<double>(begin: -1.0, end: 1.0).animate(
       CurvedAnimation(parent: _scannerController, curve: Curves.easeInOut),
     );
     _plateController.addListener(_evalPlateFormat);
@@ -259,13 +259,11 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
       ),
       child: Stack(
         children: [
-          // Remaches esquinas
           _buildRivet(top: 8, left: 10),
           _buildRivet(top: 8, right: 10),
           _buildRivet(bottom: 8, left: 10),
           _buildRivet(bottom: 8, right: 10),
 
-          // Membrete oficial Chile
           Positioned(
             top: 10,
             left: 0,
@@ -299,7 +297,6 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
             ),
           ),
 
-          // Campo de texto patente estampado
           Center(
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 24),
@@ -336,30 +333,29 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
             ),
           ),
 
-          // Animación Escáner Láser
           if (_isLoading)
-            AnimatedBuilder(
-              animation: _scannerAnimation,
-              builder: (context, child) {
-                return Positioned(
-                  left: 320 * _scannerAnimation.value,
-                  top: 0,
-                  bottom: 0,
-                  child: Container(
-                    width: 4,
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF00E5FF),
-                      boxShadow: [
-                        BoxShadow(
-                          color: const Color(0xFF00E5FF).withOpacity(0.9),
-                          blurRadius: 12,
-                          spreadRadius: 3,
-                        ),
-                      ],
+            Positioned.fill(
+              child: AnimatedBuilder(
+                animation: _scannerAnimation,
+                builder: (context, child) {
+                  return Align(
+                    alignment: Alignment(_scannerAnimation.value, 0.0),
+                    child: Container(
+                      width: 4,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF00E5FF),
+                        boxShadow: [
+                          BoxShadow(
+                            color: const Color(0xFF00E5FF).withOpacity(0.9),
+                            blurRadius: 12,
+                            spreadRadius: 3,
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
-                );
-              },
+                  );
+                },
+              ),
             ),
         ],
       ),
@@ -421,7 +417,7 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
   }
 
   Widget _buildScanButton() {
-    return SizedBox(
+    return Container(
       width: double.infinity,
       constraints: const BoxConstraints(maxWidth: 360),
       height: 54,
@@ -500,15 +496,20 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Row(
-                children: [
-                  const Icon(Icons.directions_car_filled_rounded, color: Color(0xFF00E5FF), size: 22),
-                  const SizedBox(width: 8),
-                  Text(
-                    '${_vehicleData!['marca']} ${_vehicleData!['modelo']}',
-                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w900, color: Colors.white),
-                  ),
-                ],
+              Expanded(
+                child: Row(
+                  children: [
+                    const Icon(Icons.directions_car_filled_rounded, color: Color(0xFF00E5FF), size: 22),
+                    const SizedBox(width: 8),
+                    Flexible(
+                      child: Text(
+                        '${_vehicleData!['marca']} ${_vehicleData!['modelo']}',
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w900, color: Colors.white),
+                      ),
+                    ),
+                  ],
+                ),
               ),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
@@ -561,13 +562,18 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Text(label, style: const TextStyle(color: Color(0xFF64748B), fontSize: 11, fontWeight: FontWeight.w700)),
-          Text(
-            value ?? '---',
-            style: TextStyle(
-              color: isHighlight ? const Color(0xFF00E5FF) : Colors.white,
-              fontSize: 12,
-              fontWeight: isHighlight ? FontWeight.w900 : FontWeight.w700,
-              fontFamily: isHighlight ? 'monospace' : null,
+          const SizedBox(width: 12),
+          Flexible(
+            child: Text(
+              value ?? '---',
+              textAlign: TextAlign.end,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: isHighlight ? const Color(0xFF00E5FF) : Colors.white,
+                fontSize: 12,
+                fontWeight: isHighlight ? FontWeight.w900 : FontWeight.w700,
+                fontFamily: isHighlight ? 'monospace' : null,
+              ),
             ),
           ),
         ],
