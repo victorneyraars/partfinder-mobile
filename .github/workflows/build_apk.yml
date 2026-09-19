@@ -41,8 +41,18 @@ jobs:
           cp ../backup/main.dart lib/
           cp ../backup/pubspec.yaml .
 
-          cp ../../partfinder-mobile/patch_project.py .
-          
+          # 1. Inyectar permiso de Internet y Cleartext Traffic directamente
+          python3 -c '
+          manifest_path = "android/app/src/main/AndroidManifest.xml"
+          with open(manifest_path, "r") as f:
+              content = f.read()
+          if "android.permission.INTERNET" not in content:
+              content = content.replace("<application", "<uses-permission android:name=\"android.permission.INTERNET\"/>\n    <application android:usesCleartextTraffic=\"true\"")
+          with open(manifest_path, "w") as f:
+              f.write(content)
+          '
+
+          # 2. Configurar firma persistente si existe el secreto
           if [ -n "$KEYSTORE_BASE64" ]; then
             echo "$KEYSTORE_BASE64" | base64 -d > android/app/release.keystore
             cat << 'KEYPROP' > android/key.properties
@@ -51,9 +61,28 @@ keyPassword=partfinder123
 keyAlias=partfinder
 storeFile=release.keystore
 KEYPROP
-          fi
 
-          python3 patch_project.py
+            python3 -c '
+            gradle_path = "android/app/build.gradle"
+            with open(gradle_path, "r") as f:
+                content = f.read()
+            signing_config = """
+            signingConfigs {
+                release {
+                    storeFile file("release.keystore")
+                    storePassword "partfinder123"
+                    keyAlias "partfinder"
+                    keyPassword "partfinder123"
+                }
+            }
+            """
+            if "signingConfigs {" not in content:
+                content = content.replace("buildTypes {", signing_config + "\n    buildTypes {")
+            content = content.replace("signingConfig signingConfigs.debug", "signingConfig signingConfigs.release")
+            with open(gradle_path, "w") as f:
+                f.write(content)
+            '
+          fi
 
           flutter pub get
           flutter build apk --release
@@ -63,7 +92,7 @@ KEYPROP
         with:
           tag_name: v1.0.${{ github.run_number }}
           name: "PartFinder Mobile v1.0.${{ github.run_number }}"
-          body: "Versión compilada correctamente con ruta relativa y firma persistente."
+          body: "Versión definitiva con permisos de red y firma persistente."
           files: partfinder_mobile/build/app/outputs/flutter-apk/app-release.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
