@@ -609,6 +609,31 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
             return _specRow(label, e.value?.toString() ?? '---', isHighlight: isHighlight);
           }),
           const SizedBox(height: 16),
+          SizedBox(
+            width: double.infinity,
+            height: 48,
+            child: ElevatedButton.icon(
+              onPressed: _openPdfReport,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF00E5FF).withOpacity(0.15),
+                foregroundColor: const Color(0xFF00E5FF),
+                side: const BorderSide(color: Color(0xFF00E5FF), width: 1.5),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                elevation: 0,
+              ),
+              icon: const Icon(Icons.picture_as_pdf_rounded, color: Color(0xFF00E5FF), size: 22),
+              label: const Text(
+                'DESCARGAR INFORME OFICIAL (PDF)',
+                style: TextStyle(
+                  color: Color(0xFF00E5FF),
+                  fontSize: 13,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 1.1,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
           Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
