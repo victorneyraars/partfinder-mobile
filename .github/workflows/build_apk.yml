@@ -25,42 +25,15 @@ jobs:
           channel: "stable"
           cache: true
 
-      - name: Build APK Clean
+      - name: Decode Keystore
         run: |
-          mkdir -p ../backup
-          cp lib/main.dart ../backup/
-          cp pubspec.yaml ../backup/
-          cd ..
-          flutter create partfinder_mobile --org com.partfinder360 --platforms=android
-          cd partfinder_mobile
-          cp ../backup/main.dart lib/
-          cp ../backup/pubspec.yaml .
-          
-          # Inyectar permisos de red, cleartext traffic y queries para url_launcher en AndroidManifest.xml
-          MANIFEST_PATH="android/app/src/main/AndroidManifest.xml"
-          sed -i 's/<application/<uses-permission android:name="android.permission.INTERNET"\/>\n    <application android:usesCleartextTraffic="true"/' "$MANIFEST_PATH"
-          
-          python3 -c "
-          path = '$MANIFEST_PATH'
-          with open(path, 'r') as f:
-              content = f.read()
-          queries_block = '''
-          <queries>
-              <intent>
-                  <action android:name=\"android.intent.action.VIEW\" />
-                  <data android:scheme=\"http\" />
-              </intent>
-              <intent>
-                  <action android:name=\"android.intent.action.VIEW\" />
-                  <data android:scheme=\"https\" />
-              </intent>
-          </queries>
-          </manifest>'''
-          content = content.replace('</manifest>', queries_block)
-          with open(path, 'w') as f:
-              f.write(content)
-          "
+          mkdir -p android/app
+          echo "${{ secrets.RELEASE_KEYSTORE_BASE64 }}" | base64 --decode > android/app/upload-keystore.jks
+        env:
+          RELEASE_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
 
+      - name: Build APK Signed
+        run: |
           flutter pub get
           flutter build apk --release
 
@@ -69,6 +42,6 @@ jobs:
         with:
           tag_name: v1.2.${{ github.run_number }}
           name: "PartFinder Mobile v1.2.${{ github.run_number }}"
-          files: /home/runner/work/partfinder-mobile/partfinder_mobile/build/app/outputs/flutter-apk/app-release.apk
+          files: build/app/outputs/flutter-apk/app-release.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
