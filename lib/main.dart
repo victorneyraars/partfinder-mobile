@@ -1215,17 +1215,16 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
           onPageFinished: (_) {
             setState(() => _isLoading = false);
             SystemChannels.textInput.invokeMethod('TextInput.hide');
-            _injectIsolatedCaptchaOnly();
+            _injectCleanCaptchaBox();
           },
         ),
       )
       ..loadRequest(Uri.parse('https://www.prt.cl/Paginas/RevisionTecnica.aspx'));
   }
 
-  void _injectIsolatedCaptchaOnly() {
+  void _injectCleanCaptchaBox() {
     final js = """
       (function() {
-        // 1. Viewport fijo
         var m = document.querySelector('meta[name="viewport"]');
         if (!m) {
           m = document.createElement('meta');
@@ -1234,7 +1233,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
         }
         m.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no';
 
-        // 2. Rellenar patente en el input subyacente
+        // Llenar patente de forma transparente
         document.querySelectorAll('input[type="text"]').forEach(function(inp) {
           if (inp.id.toLowerCase().includes('patente') || inp.name.toLowerCase().includes('patente')) {
             if (inp.value !== '${widget.targetPlate}') {
@@ -1245,13 +1244,11 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
           }
         });
 
-        // 3. Estilos de aislamiento total absoluto
-        var s = document.getElementById('pf-pure-style') || document.createElement('style');
-        s.id = 'pf-pure-style';
+        var s = document.getElementById('pf-clean-captcha-style') || document.createElement('style');
+        s.id = 'pf-clean-captcha-style';
         s.innerHTML = `
-          /* Fondo de toda la ventana */
           html, body {
-            background: #0F172A !important;
+            background-color: #0F172A !important;
             margin: 0 !important;
             padding: 0 !important;
             width: 100vw !important;
@@ -1259,46 +1256,39 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             overflow: hidden !important;
           }
 
-          /* Ocultar ABSOLUTAMENTE TODO el sitio web (imágenes, textos, tablas, menús) */
+          /* Ocultar SharePoint por completo */
           #s4-workspace, #s4-bodyContainer, header, nav, footer,
           .ms-main, form > *:not(#pf-captcha-host), img, table {
             display: none !important;
-            visibility: hidden !important;
-            opacity: 0 !important;
           }
 
-          /* Contenedor flotante exclusivo en el centro de la pantalla */
+          /* Contenedor exacto del Checkbox "No soy un robot" */
           #pf-captcha-host {
-            display: flex !important;
-            visibility: visible !important;
-            opacity: 1 !important;
             position: fixed !important;
             left: 50% !important;
             top: 45% !important;
+            width: 304px !important;
+            height: 78px !important;
             transform: translate(-50%, -50%) !important;
             -webkit-transform: translate(-50%, -50%) !important;
-            z-index: 2147483640 !important;
-            justify-content: center !important;
-            align-items: center !important;
+            z-index: 1000 !important;
             background: transparent !important;
+            border-radius: 4px !important;
+            box-shadow: 0 4px 18px rgba(0,0,0,0.5) !important;
+            overflow: hidden !important;
           }
 
-          #pf-captcha-host * {
-            visibility: visible !important;
-            opacity: 1 !important;
+          #pf-captcha-host iframe {
+            width: 304px !important;
+            height: 78px !important;
+            border: none !important;
           }
 
-          .g-recaptcha-bubble-arrow {
-            display: none !important;
-          }
-
-          /* Cuadro de fotos centrado en la pantalla cuando se abre */
+          /* El desafío fotográfico sólo se muestra si está activo */
           div:has(iframe[src*="bframe"]),
           div:has(iframe[title*="challenge"]),
           div:has(iframe[title*="desafío"]),
           .pf-bframe-centered {
-            visibility: visible !important;
-            opacity: 1 !important;
             position: fixed !important;
             left: 50% !important;
             top: 50% !important;
@@ -1308,37 +1298,30 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             z-index: 2147483647 !important;
             pointer-events: auto !important;
           }
-          div:has(iframe[src*="bframe"]) * {
-            visibility: visible !important;
-            opacity: 1 !important;
-          }
         `;
         document.head.appendChild(s);
 
-        // 4. Mover el captcha al contenedor host exclusivo
-        function isolateCaptchaNode() {
-          var captcha = document.querySelector('.g-recaptcha') || document.querySelector('iframe[src*="anchor"]');
-          if (captcha) {
+        function mountCaptcha() {
+          var anchor = document.querySelector('iframe[src*="anchor"]');
+          if (anchor) {
             var host = document.getElementById('pf-captcha-host');
             if (!host) {
               host = document.createElement('div');
               host.id = 'pf-captcha-host';
               document.body.appendChild(host);
             }
-            var target = captcha.classList && captcha.classList.contains('g-recaptcha') ? captcha : (captcha.closest('div') || captcha);
-            if (target.parentElement !== host) {
-              host.appendChild(target);
+            if (anchor.parentElement !== host) {
+              host.appendChild(anchor);
             }
           }
         }
 
-        isolateCaptchaNode();
+        mountCaptcha();
 
-        // Ciclo reactivo continuo
         setInterval(function() {
-          isolateCaptchaNode();
+          mountCaptcha();
 
-          // Centrar las fotos si aparecen
+          // Centrado dinámico del popup de fotos cuando se abre
           var bframe = document.querySelector('iframe[src*="bframe"]');
           if (bframe) {
             var c = bframe;
