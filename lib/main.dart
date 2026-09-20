@@ -44,6 +44,7 @@ class LicensePlateDashboard extends StatefulWidget {
 
 class _LicensePlateDashboardState extends State<LicensePlateDashboard>
     with SingleTickerProviderStateMixin {
+  String _selectedEngine = \'boostr\';
   final TextEditingController _plateController = TextEditingController();
   final FocusNode _focusNode = FocusNode();
   
