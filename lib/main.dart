@@ -1261,32 +1261,36 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
   void _injectZeroFlickerEngine() {
     final js = """
       (function() {
-        // Estilos limpios sin romper SharePoint
-        var s = document.getElementById('pf-engine-style') || document.createElement('style');
-        s.id = 'pf-engine-style';
+        // 1. Estilo: Ocultar SharePoint y banners, manteniendo el formulario y los resultados
+        var s = document.getElementById('pf-prt-style') || document.createElement('style');
+        s.id = 'pf-prt-style';
         s.innerHTML = `
           header, nav, footer, #suiteBarLeft, #suiteBarRight, #s4-ribbonrow,
-          .banner, img[src*="logo"], img[src*="Banner"], a[href*="Home"],
-          div.ms-dialogHidden, #sideNavBox {
+          .banner, img[src*="Banner"], a[href*="Home"], #sideNavBox,
+          div[id*="EnlacesRelacionados"], #s4-titlerow {
             display: none !important;
           }
           body, #s4-workspace, #s4-bodyContainer {
             background-color: #0F172A !important;
             color: #FFFFFF !important;
           }
-          .ms-main, table {
-            background-color: transparent !important;
+          /* Estilo para que la tabla de resultados oficial resalte limpia en móvil */
+          #ContentPlaceHolder1_accordionContent, #vehiculox {
+            background-color: #1E293B !important;
+            color: #FFFFFF !important;
+            border-radius: 8px !important;
+            padding: 8px !important;
           }
         `;
         document.head.appendChild(s);
 
-        // Rellenar patente si el campo existe y está vacío
+        // 2. Rellenar input de patente oficial
         var inputs = document.querySelectorAll('input[type="text"]');
         for (var i = 0; i < inputs.length; i++) {
           var inp = inputs[i];
           if ((inp.id && inp.id.toLowerCase().includes('patente')) || 
               (inp.name && inp.name.toLowerCase().includes('patente')) || 
-              (inp.placeholder && inp.placeholder.toLowerCase().includes('patente'))) {
+              (inp.parentElement && inp.parentElement.id === 'patenteContainer')) {
             if (!inp.value || inp.value.trim() === '') {
               inp.value = '${widget.targetPlate}';
               inp.dispatchEvent(new Event('input', { bubbles: true }));
@@ -1295,81 +1299,94 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
           }
         }
 
-        var __submitted = false;
-        var __scraped = false;
+        // Avisar a Flutter que la página cargó y está lista
+        if (window.PrtBridge && !window.__pfReadySent) {
+          window.__pfReadySent = true;
+          window.PrtBridge.postMessage('CAPTCHA_READY');
+        }
 
-        // Bucle continuo: detecta resolución de captcha Y detecta aparición de la tabla técnica
+        var __submitted = false;
+        var __extracted = false;
+
+        // 3. Vigilante de resolución y extracción directa por IDs oficiales
         var watcher = setInterval(function() {
-          // A. Si ya hay token y no hemos pulsado la lupa -> pulsarla
+          // A. Si se resuelve el token y no hemos pulsado buscar -> presionar el botón oficial
           var tokenArea = document.querySelector('textarea[name="g-recaptcha-response"], textarea#g-recaptcha-response');
           if (!__submitted && tokenArea && tokenArea.value && tokenArea.value.trim().length > 30) {
             __submitted = true;
             if (window.PrtBridge) window.PrtBridge.postMessage('SEARCHING');
 
-            var btn = document.querySelector('input[type="image"], input[id*="Buscar" i], input[id*="Consultar" i], input[id*="ImageButton" i]');
-            if (!btn) {
-              var img = document.querySelector('img[src*="lupa" i], img[src*="search" i]');
-              if (img) btn = img.closest('a, button, input');
-            }
-            if (!btn) btn = document.querySelector('input[type="submit"], button[type="submit"]');
-
-            if (btn) {
-              btn.click();
+            var btnBuscar = document.getElementById('ContentPlaceHolder1_buscar') || 
+                            document.querySelector('input[name*="buscar"]') ||
+                            document.querySelector('input[src*="flecha.png"]');
+            if (btnBuscar) {
+              btnBuscar.click();
             } else if (typeof WebForm_DoPostBackWithOptions === 'function') {
               try { WebForm_DoPostBackWithOptions(new WebForm_PostBackOptions('', '', true, '', '', false, false)); } catch(e) {}
-            } else if (document.forms.length > 0) {
-              document.forms[0].submit();
             }
           }
 
-          // B. Detección continua de tabla con resultados
-          if (!__scraped) {
-            var data = {
-              patente: '${widget.targetPlate}',
-              marca: '',
-              modelo: '',
-              anio: '',
-              tipo: '',
-              nro_motor: '',
-              chasis: '',
-              vin: '',
-              sello: '',
-              fuente: 'PRT Oficial'
-            };
-            var rows = document.querySelectorAll('tr');
-            rows.forEach(function(r) {
-              var cols = r.querySelectorAll('td, th');
-              if (cols.length >= 2) {
-                var k = (cols[0].innerText || '').toLowerCase().replace(':', '').replace('.', '').trim();
-                var v = (cols[1].innerText || '').trim();
-                if (k === 'marca') data.marca = v;
-                else if (k === 'modelo') data.modelo = v;
-                else if (k.includes('año') || k.includes('ano')) data.anio = v;
-                else if (k === 'tipo') data.tipo = v;
-                else if (k.includes('motor')) data.nro_motor = v;
-                else if (k.includes('chasis')) data.chasis = v;
-              }
-            });
+          // B. Extracción de datos usando los selectores oficiales descubiertos
+          if (!__extracted) {
+            var vehiculoBox = document.getElementById('vehiculox') || 
+                              document.getElementById('ContentPlaceHolder1_accordionContent');
+            
+            if (vehiculoBox && vehiculoBox.innerText && vehiculoBox.innerText.toLowerCase().includes('marca')) {
+              var fullText = vehiculoBox.innerText;
+              
+              var data = {
+                patente: '${widget.targetPlate}',
+                marca: '',
+                modelo: '',
+                anio: '',
+                tipo: '',
+                nro_motor: '',
+                chasis: '',
+                vin: '',
+                sello: '',
+                fuente: 'PRT Oficial'
+              };
 
-            if (data.marca || data.modelo || data.nro_motor || data.chasis) {
-              __scraped = true;
-              clearInterval(watcher);
-              if (window.PrtBridge) {
-                window.PrtBridge.postMessage('DATA:' + JSON.stringify(data));
+              function extractField(label) {
+                var lines = fullText.split('\n').map(function(l) { return l.trim(); }).filter(Boolean);
+                for (var i = 0; i < lines.length; i++) {
+                  var lineClean = lines[i].toLowerCase().replace(':', '').replace('.', '').trim();
+                  if (lineClean === label.toLowerCase().replace(':', '').replace('.', '').trim()) {
+                    if (i + 1 < lines.length) return lines[i + 1].trim();
+                  }
+                }
+                return '';
+              }
+
+              data.tipo = extractField('Tipo');
+              data.marca = extractField('Marca');
+              data.modelo = extractField('Modelo');
+              data.anio = extractField('Año Fab') || extractField('Año');
+              data.nro_motor = extractField('N° Motor') || extractField('N Motor') || extractField('Motor');
+              data.chasis = extractField('N° Chasis') || extractField('N Chasis') || extractField('Chasis');
+              data.vin = extractField('N° Vin') || extractField('VIN');
+              data.sello = extractField('Tipo Sello') || extractField('Sello');
+
+              if (data.marca || data.modelo || data.nro_motor || data.chasis) {
+                __extracted = true;
+                clearInterval(watcher);
+                if (window.PrtBridge) {
+                  window.PrtBridge.postMessage('DATA:' + JSON.stringify(data));
+                }
               }
             }
 
-            // C. Detección de error de patente no encontrada
-            var pageText = (document.body ? document.body.innerText : '');
-            if (pageText.includes('La placa ingresada') || pageText.includes('no registra')) {
-              __scraped = true;
+            // C. Detección de error de patente inexistente
+            var pageBody = document.body ? document.body.innerText : '';
+            if (pageBody.includes('La placa ingresada') || pageBody.includes('no registra')) {
+              __extracted = true;
               clearInterval(watcher);
               if (window.PrtBridge) {
                 window.PrtBridge.postMessage('ERROR:Patente no registra información en PRT.');
               }
             }
           }
-        }, 300);
+        }, 250);
       })();
     """;
     _controller.runJavaScript(js);
