@@ -161,7 +161,7 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
         try {
           final dynamic errJson = jsonDecode(body);
           if (errJson is Map && (errJson['require_prt_solve'] == true || (errJson['detail'] is Map && errJson['detail']['require_prt_solve'] == true))) {
-            _showPrtCaptchaModal(rawPlate);
+            _openPrtVerificationScreen(rawPlate);
             return;
           }
         } catch (_) {}
@@ -187,337 +187,21 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
   // ==========================================
   // MODAL INTERACTIVO PRT (HUMAN-IN-THE-LOOP)
   // ==========================================
-  void _showPrtCaptchaModal(String targetPlate) {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (BuildContext ctx) {
-        bool isExtracting = false;
-        late final WebViewController controller;
-
-        controller = WebViewController()
-          ..setJavaScriptMode(JavaScriptMode.unrestricted)
-          ..setUserAgent("Mozilla/5.0 (Linux; Android 11; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Mobile Safari/537.36")
-          ..setNavigationDelegate(
-            NavigationDelegate(
-              onPageFinished: (String url) {
-                final jsMultistepEngine = """
-                  (function() {
-                    // 1. Viewport estándar de alta compatibilidad
-                    var meta = document.querySelector('meta[name="viewport"]');
-                    if (!meta) {
-                      meta = document.createElement('meta');
-                      meta.name = 'viewport';
-                      document.head.appendChild(meta);
-                    }
-                    meta.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no';
-
-                    // 2. Limpieza de elementos superiores para ganar espacio vertical
-                    var style = document.createElement('style');
-                    style.innerHTML = `
-                      header, nav, footer, #suiteBar, #s4-titlerow, #titleAreaBox, .banner,
-                      [id*="Logo"], [id*="siteIcon"], [class*="logo"],
-                      img[src*="logo"], img[src*="Logo"], img[src*="prt"], img[src*="PRT"],
-                      img[src*="afiche"], img[src*="banner"], table[id*="calendario"] {
-                        display: none !important;
-                      }
-                      html, body, #s4-workspace, #s4-bodyContainer, form {
-                        width: 100% !important;
-                        max-width: 100vw !important;
-                        overflow-x: hidden !important;
-                        margin: 0 !important;
-                        padding: 2px !important;
-                        box-sizing: border-box !important;
-                      }
-                      input[type="text"] {
-                        font-size: 22px !important;
-                        height: 46px !important;
-                        font-weight: 800 !important;
-                        text-align: center !important;
-                        border: 2px solid #0284C7 !important;
-                        border-radius: 8px !important;
-                        margin: 4px auto !important;
-                        display: block !important;
-                        max-width: 240px !important;
-                      }
-                      .g-recaptcha {
-                        display: flex !important;
-                        justify-content: center !important;
-                        align-items: center !important;
-                        margin: 6px auto !important;
-                        width: 100% !important;
-                      }
-                    `;
-                    document.head.appendChild(style);
-
-                    // 3. Ocultar menús de texto residuales ("Home", "Calendario", etc.)
-                    document.querySelectorAll('a, span, td').forEach(function(el) {
-                      var txt = (el.innerText || '').trim().toLowerCase();
-                      if (txt === 'home' || txt === 'calendario' || txt === 'consideraciones' || txt === 'plantas') {
-                        var container = el.closest('tr') || el.closest('ul') || el.closest('table') || el.closest('div');
-                        if (container && container !== document.body) {
-                          container.style.setProperty('display', 'none', 'important');
-                        }
-                      }
-                    });
-
-                    // 4. Autocompletar la patente objetivo
-                    var inputs = document.querySelectorAll('input[type="text"]');
-                    inputs.forEach(function(inp) {
-                      if (inp.id.toLowerCase().includes('patente') || inp.name.toLowerCase().includes('patente')) {
-                        inp.value = '$targetPlate';
-                        inp.dispatchEvent(new Event('input', { bubbles: true }));
-                        inp.dispatchEvent(new Event('change', { bubbles: true }));
-                      }
-                    });
-
-                    // 5. Centrado inicial en el formulario
-                    setTimeout(function() {
-                      var anchor = document.querySelector('.g-recaptcha') || document.querySelector('input[type="text"]');
-                      if (anchor) {
-                        anchor.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                      }
-                    }, 350);
-
-                    // 6. MOTOR REACTIVO CONTINUO MULTI-PASO PARA RECAPTCHA
-                    function enforceChallengeCentering() {
-                      var iframes = document.querySelectorAll('iframe');
-                      for (var i = 0; i < iframes.length; i++) {
-                        var f = iframes[i];
-                        var src = (f.src || f.getAttribute('src') || '').toLowerCase();
-                        
-                        // Localizar exclusivamente el iframe de las fotos (bframe)
-                        if (src.indexOf('bframe') !== -1) {
-                          var container = f;
-                          while (container.parentElement && container.parentElement !== document.body && container.parentElement !== document.documentElement) {
-                            container = container.parentElement;
-                          }
-
-                          if (container && container !== document.body && container.style) {
-                            var topVal = parseInt(container.style.top || '0', 10);
-                            var styleObj = window.getComputedStyle(container);
-                            var isVisible = topVal > -1000 &&
-                                            styleObj.display !== 'none' &&
-                                            styleObj.visibility !== 'hidden' &&
-                                            styleObj.opacity !== '0';
-
-                            if (isVisible) {
-                              var winW = window.innerWidth || document.documentElement.clientWidth;
-                              var winH = window.innerHeight || document.documentElement.clientHeight;
-
-                              var scaleW = (winW * 0.94) / 400;
-                              var scaleH = (winH * 0.82) / 585;
-                              var scale = Math.min(scaleW, scaleH);
-
-                              if (scale > 0.85) scale = 0.85;
-                              if (scale < 0.58) scale = 0.58;
-
-                              // Re-aplicar posición fija y centrado en cada ciclo
-                              if (container.style.position !== 'fixed' || container.style.top !== '46%') {
-                                container.style.setProperty('position', 'fixed', 'important');
-                                container.style.setProperty('top', '46%', 'important');
-                                container.style.setProperty('left', '50%', 'important');
-                                container.style.setProperty('bottom', 'auto', 'important');
-                                container.style.setProperty('right', 'auto', 'important');
-                                container.style.setProperty('margin', '0', 'important');
-                                container.style.setProperty('transform', 'translate(-50%, -50%) scale(' + scale.toFixed(3) + ')', 'important');
-                                container.style.setProperty('-webkit-transform', 'translate(-50%, -50%) scale(' + scale.toFixed(3) + ')', 'important');
-                                container.style.setProperty('transform-origin', 'center center', 'important');
-                                container.style.setProperty('-webkit-transform-origin', 'center center', 'important');
-                                container.style.setProperty('z-index', '2147483647', 'important');
-                              }
-                            }
-                          }
-                          break;
-                        }
-                      }
-
-                      // Auto-scroll hacia la tabla de resultados cuando se emitan
-                      var infoHeader = Array.from(document.querySelectorAll('div, td, th, span, b, a')).find(function(el) {
-                        return el.innerText && el.innerText.includes('Información del Vehículo');
-                      });
-                      if (infoHeader) {
-                        var table = infoHeader.closest('table') || infoHeader;
-                        var tText = table.innerText || '';
-                        if (tText.includes('Marca') || tText.includes('Tipo') || tText.includes('Modelo') || tText.includes('Patente')) {
-                          table.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                        }
-                      }
-                    }
-
-                    // Ejecución continua a 50ms para neutralizar reescrituras de Google
-                    setInterval(enforceChallengeCentering, 50);
-
-                    // Observador de mutaciones del DOM como respaldo instantáneo
-                    var obs = new MutationObserver(enforceChallengeCentering);
-                    obs.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['style', 'class'] });
-                  })();
-                """;
-                controller.runJavaScript(jsMultistepEngine);
-              },
-            ),
-          )
-          ..loadRequest(Uri.parse('https://www.prt.cl/Paginas/RevisionTecnica.aspx'));
-
-        return StatefulBuilder(
-          builder: (context, setModalState) {
-            return Container(
-              height: MediaQuery.of(context).size.height * 0.96,
-              decoration: const BoxDecoration(
-                color: Color(0xFF0F172A),
-                borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-              ),
-              child: Column(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Row(
-                          children: const [
-                            Icon(Icons.verified_user_rounded, color: Color(0xFF10B981), size: 20),
-                            SizedBox(width: 8),
-                            Text(
-                              'Verificación Oficial PRT',
-                              style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
-                            ),
-                          ],
-                        ),
-                        IconButton(
-                          icon: const Icon(Icons.close, color: Colors.white70),
-                          onPressed: () => Navigator.pop(context),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 16, vertical: 0),
-                    child: Text(
-                      'Resuelve el captcha, pulsa la lupa del portal y presiona Extraer.',
-                      style: TextStyle(color: Color(0xFF94A3B8), fontSize: 12),
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Expanded(
-                    child: Container(
-                      margin: const EdgeInsets.symmetric(horizontal: 2),
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(14),
-                        color: Colors.white,
-                      ),
-                      clipBehavior: Clip.antiAlias,
-                      child: WebViewWidget(controller: controller),
-                    ),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.all(8.0),
-                    child: ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF10B981),
-                        minimumSize: const Size(double.infinity, 48),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                      ),
-                      icon: isExtracting
-                          ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                          : const Icon(Icons.save_rounded, color: Colors.white),
-                      label: Text(
-                        isExtracting ? 'Extrayendo datos oficiales...' : 'Completado: Extraer y Guardar',
-                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15),
-                      ),
-                      onPressed: isExtracting ? null : () async {
-                        setModalState(() => isExtracting = true);
-                        try {
-                          final jsScraper = """
-                            (function() {
-                              var result = {};
-                              var rows = document.querySelectorAll('tr');
-                              rows.forEach(function(r) {
-                                var cells = r.querySelectorAll('td, th');
-                                for (var i = 0; i < cells.length - 1; i++) {
-                                  var k = cells[i].innerText.trim().toLowerCase();
-                                  var v = cells[i+1].innerText.trim();
-                                  if (!v) continue;
-                                  if (k.includes('marca')) result['make'] = v;
-                                  else if (k.includes('modelo')) result['model'] = v;
-                                  else if (k.includes('año') || k.includes('fabricaci')) result['year'] = v;
-                                  else if (k.includes('tipo')) result['type'] = v;
-                                  else if (k.includes('motor')) result['engine_number'] = v;
-                                  else if (k.includes('chasis') || k.includes('vin')) result['vin'] = v;
-                                  else if (k.includes('color')) result['color'] = v;
-                                  else if (k.includes('combustible')) result['fuel'] = v;
-                                }
-                              });
-
-                              var b = document.body.innerText;
-                              var matchTxt = function(regex) {
-                                var m = b.match(regex);
-                                return m ? m[1].trim() : null;
-                              };
-                              if (!result['make']) result['make'] = matchTxt(/marca\\s*[:\\t]\\s*([A-Za-z0-9\\- ]+)/i);
-                              if (!result['model']) result['model'] = matchTxt(/modelo\\s*[:\\t]\\s*([A-Za-z0-9\\- ]+)/i);
-                              if (!result['year']) result['year'] = matchTxt(/a[ñn]o(?:\\s*de\\s*fabricaci[oó]n)?\\s*[:\\t]\\s*([0-9]{4})/i);
-                              if (!result['type']) result['type'] = matchTxt(/tipo(?:\\s*veh[ií]culo)?\\s*[:\\t]\\s*([A-Za-z0-9\\- ]+)/i);
-                              if (!result['engine_number']) result['engine_number'] = matchTxt(/n[uú]mero\\s*motor\\s*[:\\t]\\s*([A-Za-z0-9\\-]+)/i);
-                              if (!result['vin']) result['vin'] = matchTxt(/(?:chasis|vin)\\s*[:\\t]\\s*([A-Za-z0-9\\-]+)/i);
-                              if (!result['color']) result['color'] = matchTxt(/color\\s*[:\\t]\\s*([A-Za-z0-9\\- ]+)/i);
-                              if (!result['fuel']) result['fuel'] = matchTxt(/combustible\\s*[:\\t]\\s*([A-Za-z0-9\\- ]+)/i);
-
-                              return JSON.stringify(result);
-                            })();
-                          """;
-
-                          final rawResult = await controller.runJavaScriptReturningResult(jsScraper);
-                          String cleanJson = rawResult.toString();
-                          if (cleanJson.startsWith('"') && cleanJson.endsWith('"')) {
-                            cleanJson = json.decode(cleanJson);
-                          }
-                          final Map<String, dynamic> scraped = json.decode(cleanJson);
-
-                          if (scraped.isEmpty || (scraped['make'] == null && scraped['model'] == null)) {
-                            _showSnack('No se detectó la tabla de información. Pulsa la lupa en el portal antes de guardar.');
-                            return;
-                          }
-
-                          scraped['patente'] = targetPlate;
-                          scraped['data_source'] = 'PRT_SCRAPING';
-
-                          final saveRes = await http.post(
-                            Uri.parse('http://91.99.145.70:8000/api/vehicle/cache'),
-                            headers: {'Content-Type': 'application/json'},
-                            body: json.encode({
-                              'plate': targetPlate,
-                              'data': scraped,
-                            }),
-                          );
-
-                          if (saveRes.statusCode == 200) {
-                            if (mounted) {
-                              Navigator.pop(context);
-                              setState(() {
-                                _vehicleData = scraped;
-                              });
-                              _fetchBoostrTelemetry();
-                              _showSnack('¡Vehículo verificado en PRT y guardado en caché permanente!');
-                            }
-                          } else {
-                            _showSnack('Error guardando en el servidor.');
-                          }
-                        } catch (e) {
-                          _showSnack('Error extrayendo datos: $e');
-                        } finally {
-                          setModalState(() => isExtracting = false);
-                        }
-                      },
-                    ),
-                  ),
-                ],
-              ),
-            );
+  void _openPrtVerificationScreen(String targetPlate) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => PrtVerificationScreen(
+          targetPlate: targetPlate,
+          onVehicleSaved: (scraped) {
+            setState(() {
+              _vehicleData = scraped;
+            });
+            _fetchBoostrTelemetry();
+            _showSnack('¡Vehículo verificado en PRT y guardado en caché permanente!');
           },
-        );
-      },
+        ),
+      ),
     );
   }
 
@@ -1491,6 +1175,269 @@ class OldFormatter {
     return TextEditingValue(
       text: newValue.text.toUpperCase(),
       selection: newValue.selection,
+    );
+  }
+}
+
+// ============================================================================
+// PANTALLA COMPLETA DEDICADA DE VERIFICACIÓN PRT (ESTÁNDAR DE LA INDUSTRIA)
+// ============================================================================
+class PrtVerificationScreen extends StatefulWidget {
+  final String targetPlate;
+  final Function(Map<String, dynamic>) onVehicleSaved;
+
+  const PrtVerificationScreen({
+    super.key,
+    required this.targetPlate,
+    required this.onVehicleSaved,
+  });
+
+  @override
+  State<PrtVerificationScreen> createState() => _PrtVerificationScreenState();
+}
+
+class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
+  bool _isLoading = true;
+  bool _isSaving = false;
+  late final WebViewController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = WebViewController()
+      ..setJavaScriptMode(JavaScriptMode.unrestricted)
+      ..setUserAgent("Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36")
+      ..addJavaScriptChannel(
+        'PrtBridge',
+        onMessageReceived: (JavaScriptMessage message) {
+          _handleAutoScraped(message.message);
+        },
+      )
+      ..setNavigationDelegate(
+        NavigationDelegate(
+          onPageStarted: (_) => setState(() => _isLoading = true),
+          onPageFinished: (String url) {
+            setState(() => _isLoading = false);
+            _injectOptimization();
+          },
+        ),
+      )
+      ..loadRequest(Uri.parse('https://www.prt.cl/Paginas/RevisionTecnica.aspx'));
+  }
+
+  void _injectOptimization() {
+    final js = """
+      (function() {
+        var meta = document.querySelector('meta[name="viewport"]');
+        if (!meta) {
+          meta = document.createElement('meta');
+          meta.name = 'viewport';
+          document.head.appendChild(meta);
+        }
+        meta.content = 'width=device-width, initial-scale=1.0, user-scalable=yes';
+
+        var style = document.createElement('style');
+        style.innerHTML = `
+          header, nav, footer, #suiteBar, #s4-titlerow, #titleAreaBox, .banner,
+          [id*="Logo"], [id*="siteIcon"], [class*="logo"],
+          img[src*="logo"], img[src*="Logo"], img[src*="prt"], img[src*="PRT"],
+          img[src*="afiche"], img[src*="banner"], table[id*="calendario"] {
+            display: none !important;
+          }
+          html, body, #s4-workspace, #s4-bodyContainer {
+            width: 100% !important;
+            overflow-x: hidden !important;
+            overflow-y: auto !important;
+            -webkit-overflow-scrolling: touch !important;
+            margin: 0 !important;
+            padding: 6px !important;
+          }
+          input[type="text"] {
+            font-size: 24px !important;
+            height: 48px !important;
+            font-weight: 900 !important;
+            text-align: center !important;
+            border: 2px solid #0284C7 !important;
+            border-radius: 8px !important;
+            margin: 6px auto !important;
+            display: block !important;
+            max-width: 250px !important;
+          }
+          .g-recaptcha {
+            display: flex !important;
+            justify-content: center !important;
+            margin: 10px auto !important;
+          }
+        `;
+        document.head.appendChild(style);
+
+        // Autocompletar la patente objetivo
+        var inputs = document.querySelectorAll('input[type="text"]');
+        inputs.forEach(function(inp) {
+          if (inp.id.toLowerCase().includes('patente') || inp.name.toLowerCase().includes('patente')) {
+            inp.value = '${widget.targetPlate}';
+            inp.dispatchEvent(new Event('input', { bubbles: true }));
+            inp.dispatchEvent(new Event('change', { bubbles: true }));
+          }
+        });
+
+        // Detector automático de resultados: cuando aparezca la tabla, extraer inmediatamente
+        function checkAndExtract() {
+          var res = {};
+          var rows = document.querySelectorAll('tr');
+          rows.forEach(function(r) {
+            var cells = r.querySelectorAll('td, th');
+            for (var i = 0; i < cells.length - 1; i++) {
+              var k = cells[i].innerText.trim().toLowerCase();
+              var v = cells[i+1].innerText.trim();
+              if (!v) continue;
+              if (k.includes('marca')) res['make'] = v;
+              else if (k.includes('modelo')) res['model'] = v;
+              else if (k.includes('año') || k.includes('fabricaci')) res['year'] = v;
+              else if (k.includes('tipo')) res['type'] = v;
+              else if (k.includes('motor')) res['engine_number'] = v;
+              else if (k.includes('chasis') || k.includes('vin')) res['vin'] = v;
+              else if (k.includes('color')) res['color'] = v;
+              else if (k.includes('combustible')) res['fuel'] = v;
+            }
+          });
+
+          if (res.make || res.model) {
+            if (window.PrtBridge) {
+              window.PrtBridge.postMessage(JSON.stringify(res));
+            }
+          }
+        }
+
+        var obs = new MutationObserver(checkAndExtract);
+        obs.observe(document.body, { childList: true, subtree: true });
+      })();
+    """;
+    _controller.runJavaScript(js);
+  }
+
+  void _handleAutoScraped(String rawJson) async {
+    if (_isSaving) return;
+    setState(() => _isSaving = true);
+
+    try {
+      final Map<String, dynamic> scraped = json.decode(rawJson);
+      scraped['patente'] = widget.targetPlate;
+      scraped['data_source'] = 'PRT_SCRAPING';
+
+      final res = await http.post(
+        Uri.parse('http://91.99.145.70:8000/api/vehicle/cache'),
+        headers: {'Content-Type': 'application/json'},
+        body: json.encode({
+          'plate': widget.targetPlate,
+          'data': scraped,
+        }),
+      );
+
+      if (res.statusCode == 200 && mounted) {
+        widget.onVehicleSaved(scraped);
+        Navigator.pop(context);
+      }
+    } catch (_) {
+    } finally {
+      if (mounted) setState(() => _isSaving = false);
+    }
+  }
+
+  Future<void> _manualExtract() async {
+    setState(() => _isSaving = true);
+    try {
+      final jsScraper = """
+        (function() {
+          var result = {};
+          var rows = document.querySelectorAll('tr');
+          rows.forEach(function(r) {
+            var cells = r.querySelectorAll('td, th');
+            for (var i = 0; i < cells.length - 1; i++) {
+              var k = cells[i].innerText.trim().toLowerCase();
+              var v = cells[i+1].innerText.trim();
+              if (!v) continue;
+              if (k.includes('marca')) result['make'] = v;
+              else if (k.includes('modelo')) result['model'] = v;
+              else if (k.includes('año') || k.includes('fabricaci')) result['year'] = v;
+              else if (k.includes('tipo')) result['type'] = v;
+              else if (k.includes('motor')) result['engine_number'] = v;
+              else if (k.includes('chasis') || k.includes('vin')) result['vin'] = v;
+              else if (k.includes('color')) result['color'] = v;
+              else if (k.includes('combustible')) result['fuel'] = v;
+            }
+          });
+          return JSON.stringify(result);
+        })();
+      """;
+
+      final rawResult = await _controller.runJavaScriptReturningResult(jsScraper);
+      String cleanJson = rawResult.toString();
+      if (cleanJson.startsWith('"') && cleanJson.endsWith('"')) {
+        cleanJson = json.decode(cleanJson);
+      }
+      final Map<String, dynamic> scraped = json.decode(cleanJson);
+
+      if (scraped.isEmpty || (scraped['make'] == null && scraped['model'] == null)) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No se detectaron datos. Pulsa la lupa en el portal antes de extraer.')),
+        );
+        return;
+      }
+
+      _handleAutoScraped(json.encode(scraped));
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error en extracción: $e')),
+      );
+    } finally {
+      if (mounted) setState(() => _isSaving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFF0F172A),
+      appBar: AppBar(
+        backgroundColor: const Color(0xFF0F172A),
+        elevation: 0,
+        leading: IconButton(
+          icon: const Icon(Icons.close, color: Colors.white),
+          onPressed: () => Navigator.pop(context),
+        ),
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Verificación Oficial PRT',
+              style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+            ),
+            Text(
+              'Patente: ${widget.targetPlate}',
+              style: const TextStyle(color: Color(0xFF10B981), fontSize: 12, fontWeight: FontWeight.bold),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton.icon(
+            onPressed: _isSaving ? null : _manualExtract,
+            icon: _isSaving
+                ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                : const Icon(Icons.save, color: Color(0xFF10B981), size: 18),
+            label: const Text('Extraer', style: TextStyle(color: Color(0xFF10B981), fontWeight: FontWeight.bold)),
+          ),
+        ],
+        bottom: _isLoading || _isSaving
+            ? const PreferredSize(
+                preferredSize: Size.fromHeight(2),
+                child: LinearProgressIndicator(color: Color(0xFF10B981), backgroundColor: Color(0xFF1E293B)),
+              )
+            : null,
+      ),
+      body: SafeArea(
+        child: WebViewWidget(controller: _controller),
+      ),
     );
   }
 }
