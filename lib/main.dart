@@ -1218,9 +1218,12 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
       )
       ..setNavigationDelegate(
         NavigationDelegate(
+          onPageStarted: (_) {
+            SystemChannels.textInput.invokeMethod('TextInput.hide');
+          },
           onPageFinished: (_) {
             SystemChannels.textInput.invokeMethod('TextInput.hide');
-            _injectStableEngine();
+            _startBulletproofLoop();
           },
         ),
       )
@@ -1269,77 +1272,80 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
     }
   }
 
-  void _injectStableEngine() {
+  void _startBulletproofLoop() {
     final js = """
       (function() {
-        var m = document.querySelector('meta[name="viewport"]');
-        if (!m) {
-          m = document.createElement('meta');
-          m.name = 'viewport';
-          document.head.appendChild(m);
-        }
-        m.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no';
-
-        function injectStyle() {
-          var s = document.getElementById('pf-stable-style');
-          if (!s) {
-            s = document.createElement('style');
-            s.id = 'pf-stable-style';
-            document.head.appendChild(s);
+        var css = `
+          html, body {
+            background-color: #0F172A !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            width: 100vw !important;
+            height: 100vh !important;
+            overflow: hidden !important;
           }
-          s.innerHTML = `
-            html, body {
-              background-color: #0F172A !important;
-              margin: 0 !important;
-              padding: 0 !important;
-              width: 100vw !important;
-              height: 100vh !important;
-              overflow: hidden !important;
-            }
+          #s4-workspace, #s4-bodyContainer, header, nav, footer,
+          .ms-main, img, table, .banner, div[id*="WebPartWPQ"] {
+            display: none !important;
+          }
+          #pf-captcha-host {
+            position: fixed !important;
+            left: 50% !important;
+            top: 45% !important;
+            width: 304px !important;
+            height: 78px !important;
+            transform: translate(-50%, -50%) !important;
+            -webkit-transform: translate(-50%, -50%) !important;
+            z-index: 10000 !important;
+            background: transparent !important;
+            border-radius: 4px !important;
+            box-shadow: 0 4px 18px rgba(0,0,0,0.5) !important;
+            overflow: hidden !important;
+            display: flex !important;
+            justify-content: center !important;
+            align-items: center !important;
+          }
+          #pf-captcha-host iframe {
+            width: 304px !important;
+            height: 78px !important;
+            border: none !important;
+          }
+          div:has(iframe[src*="bframe"]),
+          div:has(iframe[title*="challenge"]),
+          div:has(iframe[title*="desafío"]),
+          .pf-bframe-centered {
+            position: fixed !important;
+            left: 50% !important;
+            top: 50% !important;
+            transform: translate(-50%, -50%) scale(var(--pf-scale, 0.90)) !important;
+            -webkit-transform: translate(-50%, -50%) scale(var(--pf-scale, 0.90)) !important;
+            transform-origin: center center !important;
+            z-index: 2147483647 !important;
+            pointer-events: auto !important;
+          }
+        `;
 
-            #s4-workspace, #s4-bodyContainer, header, nav, footer,
-            .ms-main, form > *:not(#pf-captcha-host), img, table {
-              display: none !important;
-            }
-
-            #pf-captcha-host {
-              position: fixed !important;
-              left: 50% !important;
-              top: 45% !important;
-              width: 304px !important;
-              height: 78px !important;
-              transform: translate(-50%, -50%) !important;
-              -webkit-transform: translate(-50%, -50%) !important;
-              z-index: 1000 !important;
-              background: transparent !important;
-              border-radius: 4px !important;
-              box-shadow: 0 4px 18px rgba(0,0,0,0.5) !important;
-              overflow: hidden !important;
-            }
-
-            #pf-captcha-host iframe {
-              width: 304px !important;
-              height: 78px !important;
-              border: none !important;
-            }
-
-            div:has(iframe[src*="bframe"]),
-            div:has(iframe[title*="challenge"]),
-            div:has(iframe[title*="desafío"]),
-            .pf-bframe-centered {
-              position: fixed !important;
-              left: 50% !important;
-              top: 50% !important;
-              transform: translate(-50%, -50%) scale(var(--pf-scale, 0.90)) !important;
-              -webkit-transform: translate(-50%, -50%) scale(var(--pf-scale, 0.90)) !important;
-              transform-origin: center center !important;
-              z-index: 2147483647 !important;
-              pointer-events: auto !important;
-            }
-          `;
+        function applyCss() {
+          var styleEl = document.getElementById('pf-bulletproof-style');
+          if (!styleEl) {
+            styleEl = document.createElement('style');
+            styleEl.id = 'pf-bulletproof-style';
+            (document.head || document.documentElement).appendChild(styleEl);
+          }
+          if (styleEl.innerHTML !== css) {
+            styleEl.innerHTML = css;
+          }
         }
 
-        injectStyle();
+        applyCss();
+
+        var meta = document.querySelector('meta[name="viewport"]');
+        if (!meta) {
+          meta = document.createElement('meta');
+          meta.name = 'viewport';
+          (document.head || document.documentElement).appendChild(meta);
+        }
+        meta.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no';
 
         document.querySelectorAll('input[type="text"]').forEach(function(inp) {
           if (inp.id.toLowerCase().includes('patente') || inp.name.toLowerCase().includes('patente')) {
@@ -1351,8 +1357,8 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
           }
         });
 
-        function mountCaptcha() {
-          var anchor = document.querySelector('iframe[src*="anchor"]');
+        function isolateCaptcha() {
+          var anchor = document.querySelector('iframe[src*="anchor"]') || document.querySelector('.g-recaptcha');
           if (anchor) {
             var host = document.getElementById('pf-captcha-host');
             if (!host) {
@@ -1360,13 +1366,14 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
               host.id = 'pf-captcha-host';
               document.body.appendChild(host);
             }
-            if (anchor.parentElement !== host) {
-              host.appendChild(anchor);
+            var target = anchor.tagName === 'IFRAME' ? anchor : (anchor.querySelector('iframe') || anchor);
+            if (target && target.parentElement !== host) {
+              host.appendChild(target);
             }
           }
         }
 
-        mountCaptcha();
+        isolateCaptcha();
 
         function clickLupa() {
           var btn = document.querySelector('input[src*="lupa" i], input[src*="buscar" i], [id*="Buscar" i], a[title*="Buscar" i]');
@@ -1403,8 +1410,8 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
         window.__pfData = { plate: '${widget.targetPlate}' };
 
         setInterval(function() {
-          injectStyle();
-          mountCaptcha();
+          applyCss();
+          isolateCaptcha();
 
           var bframe = document.querySelector('iframe[src*="bframe"]');
           if (bframe) {
