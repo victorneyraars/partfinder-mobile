@@ -1379,7 +1379,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             else if (t.includes('sello')) { data.sello = getNextVal(el); foundAny = true; }
           });
 
-          if (foundAny || /revisi[oó]n t[eé]cnica/i.test(bodyText)) {
+          if (searchTriggered && foundAny && (data.marca || data.modelo || data.nro_motor || data.chasis)) {
             if (window.PrtBridge) {
               window.PrtBridge.postMessage('DATA:' + JSON.stringify(data));
               return true;
