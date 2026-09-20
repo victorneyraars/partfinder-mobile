@@ -1198,6 +1198,7 @@ class PrtVerificationScreen extends StatefulWidget {
 
 class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
   bool _isReady = false;
+  bool _isSaving = false;
   String _statusMessage = 'Preparando verificación...';
   late final WebViewController _controller;
 
@@ -1213,31 +1214,76 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
       ..addJavaScriptChannel(
         'PrtBridge',
         onMessageReceived: (JavaScriptMessage message) {
-          if (message.message == 'CAPTCHA_READY') {
-            if (mounted && !_isReady) {
-              setState(() {
-                _isReady = true;
-                _statusMessage = 'Toca la casilla para verificar';
-              });
-            }
-          }
+          _handleBridge(message.message);
         },
       )
       ..setNavigationDelegate(
         NavigationDelegate(
           onPageStarted: (_) {
-            if (mounted) setState(() => _isReady = false);
+            if (mounted && !_isSaving) setState(() => _isReady = false);
           },
           onPageFinished: (_) {
             SystemChannels.textInput.invokeMethod('TextInput.hide');
-            _injectZeroFlickerEngine();
+            _injectProtectedEngine();
           },
         ),
       )
       ..loadRequest(Uri.parse('https://www.prt.cl/Paginas/RevisionTecnica.aspx'));
   }
 
-  void _injectZeroFlickerEngine() {
+  void _handleBridge(String raw) {
+    if (raw == 'CAPTCHA_READY') {
+      if (mounted && !_isReady) {
+        setState(() {
+          _isReady = true;
+          _statusMessage = 'Toca la casilla para verificar';
+        });
+      }
+      return;
+    }
+
+    if (raw == 'CAPTCHA_SOLVED') {
+      if (mounted) {
+        setState(() {
+          _isSaving = true;
+          _statusMessage = '¡Captcha verificado! Obteniendo ficha técnica...';
+        });
+      }
+      return;
+    }
+
+    try {
+      final Map<String, dynamic> data = json.decode(raw);
+      _saveAndExit(data);
+    } catch (_) {}
+  }
+
+  Future<void> _saveAndExit(Map<String, dynamic> scraped) async {
+    if (!mounted) return;
+    setState(() {
+      _isSaving = true;
+      _statusMessage = '¡Ficha obtenida! Guardando vehículo...';
+    });
+
+    try {
+      scraped['patente'] = widget.targetPlate;
+      scraped['data_source'] = 'PRT_SCRAPING';
+      scraped.remove('revisions');
+
+      await http.post(
+        Uri.parse('http://91.99.145.70:8000/api/vehicle/cache'),
+        headers: {'Content-Type': 'application/json'},
+        body: json.encode({'plate': widget.targetPlate, 'data': scraped}),
+      ).timeout(const Duration(seconds: 5));
+    } catch (_) {}
+
+    if (mounted) {
+      widget.onVehicleSaved(scraped);
+      Navigator.pop(context);
+    }
+  }
+
+  void _injectProtectedEngine() {
     final js = """
       (function() {
         var m = document.querySelector('meta[name="viewport"]');
@@ -1259,7 +1305,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
           }
         });
 
-        // 2. CSS que oculta absolutamente todo SharePoint
+        // 2. CSS PROTEGIDO (Intacto, idéntico al que funciona perfectamente)
         var s = document.getElementById('pf-clean-captcha-style') || document.createElement('style');
         s.id = 'pf-clean-captcha-style';
         s.innerHTML = `
@@ -1329,7 +1375,6 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             if (anchor.parentElement !== host) {
               host.appendChild(anchor);
             }
-            // Notificar a Flutter que el captcha ya está aislado y listo para verse
             if (window.PrtBridge && !window.__pfNotifiedReady) {
               window.__pfNotifiedReady = true;
               window.PrtBridge.postMessage('CAPTCHA_READY');
@@ -1339,9 +1384,45 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
 
         mountCaptcha();
 
+        function clickLupa() {
+          var btn = document.querySelector('input[src*="lupa" i], input[src*="buscar" i], [id*="Buscar" i], a[title*="Buscar" i]');
+          if (!btn) {
+            var inp = document.querySelector('input[type="text"]');
+            if (inp && inp.parentElement) {
+              btn = inp.parentElement.querySelector('input[type="image"], input[type="submit"], button, a, img');
+            }
+          }
+          if (btn) {
+            btn = btn.closest('a') || btn.closest('button') || btn;
+            try {
+              btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+              if (typeof btn.click === 'function') btn.click();
+            } catch(e) {}
+          }
+        }
+
+        function expandVehicleTab() {
+          var els = document.querySelectorAll('a, span, div, td, b');
+          for (var i = 0; i < els.length; i++) {
+            var t = (els[i].textContent || '').trim().toLowerCase();
+            if (t.includes('información del vehículo') || t.includes('informacion del vehiculo')) {
+              var target = els[i].closest('a') || els[i].closest('div[onclick]') || els[i].closest('td') || els[i];
+              try {
+                target.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+                if (typeof target.click === 'function') target.click();
+              } catch(e) {}
+              return;
+            }
+          }
+        }
+
+        window.__pfData = { plate: '${widget.targetPlate}' };
+
+        // Bucle continuo para detección de visto bueno y extracción de datos
         setInterval(function() {
           mountCaptcha();
 
+          // Centrado del cuadro de fotos
           var bframe = document.querySelector('iframe[src*="bframe"]');
           if (bframe) {
             var c = bframe;
@@ -1360,7 +1441,95 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
               }
             }
           }
-        }, 100);
+
+          // A) Detección de Captcha Resuelto (Visto Verde)
+          var token = '';
+          try {
+            if (window.grecaptcha && window.grecaptcha.getResponse) token = window.grecaptcha.getResponse();
+          } catch(e) {}
+          if (!token) {
+            var ta = document.querySelector('textarea[name="g-recaptcha-response"], #g-recaptcha-response');
+            if (ta && ta.value) token = ta.value;
+          }
+
+          if (token && token.length > 20 && !window.__pfSearched) {
+            window.__pfSearched = true;
+            if (window.PrtBridge) window.PrtBridge.postMessage('CAPTCHA_SOLVED');
+            clickLupa();
+            setTimeout(clickLupa, 400);
+          }
+
+          // B) Extracción de la Ficha Técnica
+          var d = window.__pfData;
+
+          document.querySelectorAll('tr').forEach(function(r) {
+            var cells = Array.from(r.querySelectorAll('td, th')).map(function(c) {
+              return (c.textContent || '').trim().split(' ').filter(Boolean).join(' ');
+            }).filter(Boolean);
+
+            for (var i = 0; i < cells.length; i++) {
+              var label = cells[i].toLowerCase();
+              var val = (i + 1 < cells.length) ? cells[i + 1] : '';
+
+              if (cells[i].indexOf(':') !== -1) {
+                var parts = cells[i].split(':');
+                label = parts[0].toLowerCase();
+                val = parts.slice(1).join(':').trim();
+              }
+
+              if (label.indexOf('marca') !== -1 && label.indexOf('modelo') === -1) {
+                if (val && !d.make) d.make = val;
+              } else if (label.indexOf('modelo') !== -1) {
+                if (val && !d.model) d.model = val;
+              } else if (label.indexOf('año') !== -1 || label.indexOf('fabricaci') !== -1) {
+                if (val && !d.year) d.year = val;
+              } else if (label.indexOf('tipo') !== -1 && label.indexOf('sello') === -1) {
+                if (val && !d.type) d.type = val;
+              } else if (label.indexOf('motor') !== -1) {
+                if (val && !d.engine_number) d.engine_number = val;
+              } else if (label.indexOf('chasis') !== -1) {
+                if (val && !d.chassis) d.chassis = val;
+              } else if (label.indexOf('vin') !== -1) {
+                if (val && !d.vin) d.vin = val;
+              } else if (label.indexOf('sello') !== -1) {
+                if (val && !d.seal_type) d.seal_type = val;
+              }
+            }
+          });
+
+          // Respaldo por texto general en el documento
+          var bodyTxt = document.body.innerText || document.body.textContent || '';
+          function findTxt(regex) {
+            var match = bodyTxt.match(regex);
+            return match && match[1] ? match[1].trim() : '';
+          }
+
+          if (!d.make) d.make = findTxt(/Marca\s*[:\t\n]+\s*([A-Za-z0-9\s\-]+)/i);
+          if (!d.model) d.model = findTxt(/Modelo\s*[:\t\n]+\s*([A-Za-z0-9\s\-]+)/i);
+          if (!d.year) d.year = findTxt(/A[ñn]o(?:\s+de\s+Fabricaci[oó]n)?\s*[:\t\n]+\s*([0-9]{4})/i);
+          if (!d.type) d.type = findTxt(/Tipo(?:\s+de\s+Veh[ií]culo)?\s*[:\t\n]+\s*([A-Za-z0-9\s\-]+)/i);
+          if (!d.engine_number) d.engine_number = findTxt(/Motor\s*[:\t\n]+\s*([A-Za-z0-9\s\-]+)/i);
+          if (!d.chassis) d.chassis = findTxt(/Chasis\s*[:\t\n]+\s*([A-Za-z0-9\s\-]+)/i);
+          if (!d.vin) d.vin = findTxt(/VIN\s*[:\t\n]+\s*([A-Za-z0-9\s\-]+)/i);
+          if (!d.seal_type) d.seal_type = findTxt(/Sello(?:\s+Verde|\s+Rojo|\s+Amarillo)?/i);
+
+          // Si el portal ya respondió con los acordeones pero la ficha está colapsada, expandirla
+          var onResults = bodyTxt.includes('Volver a Consultar') || bodyTxt.includes('Información del Vehículo');
+          if (onResults && (!d.make || !d.model)) {
+            if (!window.__pfTabOpened || Date.now() - window.__pfTabOpened > 1200) {
+              window.__pfTabOpened = Date.now();
+              expandVehicleTab();
+            }
+          }
+
+          // C) Notificar a Flutter y cerrar
+          if (d.make || d.model) {
+            if (window.PrtBridge && !window.__pfSent) {
+              window.__pfSent = true;
+              window.PrtBridge.postMessage(JSON.stringify(d));
+            }
+          }
+        }, 120);
       })();
     """;
     _controller.runJavaScript(js);
@@ -1398,7 +1567,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             alignment: Alignment.centerLeft,
             child: Row(
               children: [
-                if (!_isReady)
+                if (!_isReady || _isSaving)
                   const SizedBox(
                     width: 14,
                     height: 14,
@@ -1423,14 +1592,14 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
       body: SafeArea(
         child: Stack(
           children: [
-            // WebView siempre renderizando en fondo oscuro nativo
+            // Vista limpia protegida
             AnimatedOpacity(
-              opacity: _isReady ? 1.0 : 0.0,
+              opacity: _isReady && !_isSaving ? 1.0 : 0.0,
               duration: const Duration(milliseconds: 220),
               child: WebViewWidget(controller: _controller),
             ),
-            // Pantalla de carga nativa sin parpadeos mientras monta el captcha
-            if (!_isReady)
+            // Pantalla de carga nativa al inicializar
+            if (!_isReady && !_isSaving)
               Container(
                 color: const Color(0xFF0F172A),
                 width: double.infinity,
@@ -1443,6 +1612,29 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
                     Text(
                       'Conectando con portal PRT...',
                       style: TextStyle(color: Color(0xFF94A3B8), fontSize: 13, fontWeight: FontWeight.w600),
+                    ),
+                  ],
+                ),
+              ),
+            // Pantalla de guardado automático al marcar el visto verde
+            if (_isSaving)
+              Container(
+                color: const Color(0xFF0F172A),
+                width: double.infinity,
+                height: double.infinity,
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: const [
+                    CircularProgressIndicator(color: Color(0xFF10B981), strokeWidth: 3),
+                    SizedBox(height: 20),
+                    Text(
+                      'Extrayendo ficha técnica oficial...',
+                      style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+                    ),
+                    SizedBox(height: 6),
+                    Text(
+                      'Guardando en base de datos permanente',
+                      style: TextStyle(color: Color(0xFF94A3B8), fontSize: 13),
                     ),
                   ],
                 ),
