@@ -188,203 +188,213 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
   // MODAL INTERACTIVO PRT (HUMAN-IN-THE-LOOP)
   // ==========================================
   void _showPrtCaptchaModal(String targetPlate) {
-    late final WebViewController controller;
-    bool isExtracting = false;
-
-    controller = WebViewController()
-      ..setJavaScriptMode(JavaScriptMode.unrestricted)
-      ..setNavigationDelegate(
-        NavigationDelegate(
-          onPageFinished: (String url) {
-            final jsCleanAndFocus = """
-              (function() {
-                // 1. Inyectar Viewport Responsive
-                var meta = document.querySelector('meta[name="viewport"]');
-                if (!meta) {
-                  meta = document.createElement('meta');
-                  meta.name = 'viewport';
-                  document.head.appendChild(meta);
-                }
-                meta.content = 'width=device-width, initial-scale=1.0, maximum-scale=2.5, user-scalable=yes';
-
-                // 2. Inyectar estilos CSS limpios para móvil
-                var style = document.createElement('style');
-                style.innerHTML = `
-                  body {
-                    zoom: 1.15 !important;
-                    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
-                    padding: 8px !important;
-                  }
-                  /* Ocultar afiches gigantes, calendarios y decoraciones irrelevantes */
-                  img[src*="banner"], img[src*="afiche"], img[src*="digital"],
-                  table[id*="calendario"], .banner, header, footer {
-                    display: none !important;
-                  }
-                  /* Agrandar campo de patente */
-                  input[type="text"] {
-                    font-size: 20px !important;
-                    height: 44px !important;
-                    font-weight: bold !important;
-                    text-transform: uppercase !important;
-                    text-align: center !important;
-                    border: 2px solid #0284C7 !important;
-                    border-radius: 8px !important;
-                    margin: 8px 0 !important;
-                  }
-                  /* Botón consultar del portal */
-                  input[type="submit"], input[type="button"] {
-                    font-size: 16px !important;
-                    padding: 8px 16px !important;
-                    background-color: #0284C7 !important;
-                    color: white !important;
-                    border-radius: 8px !important;
-                    font-weight: bold !important;
-                  }
-                  /* Tabla de resultados */
-                  table {
-                    font-size: 14px !important;
-                    width: 100% !important;
-                  }
-                `;
-                document.head.appendChild(style);
-
-                // 3. Remover imágenes grandes que tapan la pantalla
-                document.querySelectorAll('img').forEach(function(img) {
-                  if (img.width > 220 || img.height > 120) {
-                    img.style.display = 'none';
-                  }
-                });
-
-                // 4. Ocultar tabla de meses si existe
-                document.querySelectorAll('table').forEach(function(tbl) {
-                  if (tbl.innerText.includes('Enero') && tbl.innerText.includes('Febrero')) {
-                    tbl.style.display = 'none';
-                  }
-                });
-
-                // 5. Rellenar la patente y centrar la vista en el formulario
-                var inputs = document.querySelectorAll('input[type="text"]');
-                var targetInput = null;
-                inputs.forEach(function(i) {
-                  if (i.id.toLowerCase().includes('patente') || i.name.toLowerCase().includes('patente')) {
-                    i.value = '$targetPlate';
-                    targetInput = i;
-                  }
-                });
-
-                if (targetInput) {
-                  targetInput.scrollIntoView({behavior: 'smooth', block: 'center'});
-                }
-              })();
-            """;
-            controller.runJavaScript(jsCleanAndFocus);
-          },
-        ),
-      )
-      ..loadRequest(Uri.parse('https://www.prt.cl/paginas/revisiontecnica.aspx'));
-
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: const Color(0xFF0F172A),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (ctx) {
+      backgroundColor: Colors.transparent,
+      builder: (BuildContext ctx) {
+        bool isExtracting = false;
+        late final WebViewController controller;
+
+        controller = WebViewController()
+          ..setJavaScriptMode(JavaScriptMode.unrestricted)
+          ..setUserAgent("Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Mobile Safari/537.36")
+          ..setNavigationDelegate(
+            NavigationDelegate(
+              onPageFinished: (String url) {
+                final jsAutoCenterAndObserve = """
+                  (function() {
+                    // 1. Inyectar Viewport y estilos limpios
+                    var meta = document.querySelector('meta[name="viewport"]');
+                    if (!meta) {
+                      meta = document.createElement('meta');
+                      meta.name = 'viewport';
+                      document.head.appendChild(meta);
+                    }
+                    meta.content = 'width=device-width, initial-scale=1.0, maximum-scale=2.0, user-scalable=yes';
+
+                    var style = document.createElement('style');
+                    style.innerHTML = `
+                      header, nav, footer, #suiteBar, #s4-titlerow, .banner,
+                      img[src*="logo"], img[src*="banner"], img[src*="afiche"],
+                      table[id*="calendario"] {
+                        display: none !important;
+                      }
+                      body {
+                        padding-top: 10px !important;
+                        zoom: 1.05 !important;
+                      }
+                      input[type="text"] {
+                        font-size: 22px !important;
+                        height: 48px !important;
+                        font-weight: 900 !important;
+                        text-align: center !important;
+                        border: 2px solid #0284C7 !important;
+                        border-radius: 8px !important;
+                      }
+                    `;
+                    document.head.appendChild(style);
+
+                    // 2. Rellenar patente
+                    var inputs = document.querySelectorAll('input[type="text"]');
+                    inputs.forEach(function(inp) {
+                      if (inp.id.toLowerCase().includes('patente') || inp.name.toLowerCase().includes('patente')) {
+                        inp.value = '$targetPlate';
+                      }
+                    });
+
+                    // 3. CENTRAR EL CAPTCHA INICIALMENTE
+                    setTimeout(function() {
+                      var captchaEl = document.querySelector('.g-recaptcha, iframe[src*="recaptcha"]') || document.querySelector('input[type="text"]');
+                      if (captchaEl) {
+                        captchaEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                      }
+                    }, 600);
+
+                    // 4. OBSERVER: CENTRAR AUTOMÁTICAMENTE LA INFORMACIÓN AL APARECER
+                    var observer = new MutationObserver(function() {
+                      var infoSections = Array.from(document.querySelectorAll('div, td, th, span, b, a')).filter(function(el) {
+                        return el.innerText && el.innerText.includes('Información del Vehículo');
+                      });
+                      if (infoSections.length > 0) {
+                        infoSections[0].scrollIntoView({ behavior: 'smooth', block: 'start' });
+                      }
+                    });
+                    observer.observe(document.body, { childList: true, subtree: true });
+                  })();
+                """;
+                controller.runJavaScript(jsAutoCenterAndObserve);
+              },
+            ),
+          )
+          ..loadRequest(Uri.parse('https://www.prt.cl/Paginas/RevisionTecnica.aspx'));
+
         return StatefulBuilder(
-          builder: (modalCtx, setModalState) {
+          builder: (context, setModalState) {
             return Container(
-              height: MediaQuery.of(context).size.height * 0.85,
-              padding: const EdgeInsets.all(16),
+              height: MediaQuery.of(context).size.height * 0.90,
+              decoration: const BoxDecoration(
+                color: Color(0xFF0F172A),
+                borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+              ),
               child: Column(
                 children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Row(
-                        children: const [
-                          Icon(Icons.verified_user, color: Color(0xFF10B981), size: 20),
-                          SizedBox(width: 8),
-                          Text(
-                            'Verificación Oficial PRT',
-                            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
-                          ),
-                        ],
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.close, color: Colors.white70),
-                        onPressed: () => Navigator.pop(modalCtx),
-                      ),
-                    ],
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Row(
+                          children: const [
+                            Icon(Icons.verified_user_rounded, color: Color(0xFF10B981), size: 20),
+                            SizedBox(width: 8),
+                            Text(
+                              'Verificación Oficial PRT',
+                              style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
+                            ),
+                          ],
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.close, color: Colors.white70),
+                          onPressed: () => Navigator.pop(context),
+                        ),
+                      ],
+                    ),
                   ),
-                  const SizedBox(height: 4),
-                  Text(
-                    'Patente $targetPlate no está en caché local. Resuelve el captcha oficial para registrarla de por vida.',
-                    style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 12),
+                  const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 20, vertical: 2),
+                    child: Text(
+                      'Resuelve el captcha oficial. La vista se centrará automáticamente en la información.',
+                      style: TextStyle(color: Color(0xFF94A3B8), fontSize: 12),
+                    ),
                   ),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 8),
                   Expanded(
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(12),
+                    child: Container(
+                      margin: const EdgeInsets.symmetric(horizontal: 16),
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(16),
+                        color: Colors.white,
+                      ),
+                      clipBehavior: Clip.antiAlias,
                       child: WebViewWidget(controller: controller),
                     ),
                   ),
-                  const SizedBox(height: 12),
-                  SizedBox(
-                    width: double.infinity,
-                    height: 48,
+                  Padding(
+                    padding: const EdgeInsets.all(16.0),
                     child: ElevatedButton.icon(
                       style: ElevatedButton.styleFrom(
                         backgroundColor: const Color(0xFF10B981),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        minimumSize: const Size(double.infinity, 50),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                       ),
-                      icon: isExtracting 
-                          ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                          : const Icon(Icons.save, color: Colors.white),
+                      icon: isExtracting
+                          ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                          : const Icon(Icons.save_rounded, color: Colors.white),
                       label: Text(
-                        isExtracting ? 'Guardando en caché...' : 'Completado: Extraer y Guardar',
-                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                        isExtracting ? 'Extrayendo datos oficiales...' : 'Completado: Extraer y Guardar',
+                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15),
                       ),
                       onPressed: isExtracting ? null : () async {
                         setModalState(() => isExtracting = true);
                         try {
-                          final jsResult = await controller.runJavaScriptReturningResult("""
+                          final jsScraper = """
                             (function() {
-                              var text = document.body.innerText;
-                              return JSON.stringify({
-                                make: "CONSULTADO_PRT",
-                                modelo: "REVISION TECNICA",
-                                anio: "2021",
-                                tipo_vehiculo: "AUTOMOVIL",
-                                numero_motor: "PRT-MOT-" + "$targetPlate",
-                                chasis_vin: "PRT-VIN-" + "$targetPlate",
-                                combustible: "GASOLINA",
-                                kilometraje: "120000 KM",
-                                color: "NO INFORMADO",
-                                raw_text: text.substring(0, 300)
+                              var result = {};
+                              var rows = document.querySelectorAll('tr');
+                              rows.forEach(function(r) {
+                                var cells = r.querySelectorAll('td, th');
+                                for (var i = 0; i < cells.length - 1; i++) {
+                                  var k = cells[i].innerText.trim().toLowerCase();
+                                  var v = cells[i+1].innerText.trim();
+                                  if (!v) continue;
+                                  if (k.includes('marca')) result['make'] = v;
+                                  else if (k.includes('modelo')) result['model'] = v;
+                                  else if (k.includes('año') || k.includes('fabricacion') || k.includes('fabricación')) result['year'] = v;
+                                  else if (k.includes('tipo')) result['type'] = v;
+                                  else if (k.includes('motor')) result['engine_number'] = v;
+                                  else if (k.includes('chasis') || k.includes('vin')) result['vin'] = v;
+                                  else if (k.includes('color')) result['color'] = v;
+                                  else if (k.includes('combustible')) result['fuel'] = v;
+                                }
                               });
+                              return JSON.stringify(result);
                             })();
-                          """);
+                          """;
 
-                          final dynamic decoded = jsonDecode(jsResult.toString());
-                          final Map<String, dynamic> extractedData = decoded is String ? jsonDecode(decoded) : Map<String, dynamic>.from(decoded);
+                          final rawResult = await controller.runJavaScriptReturningResult(jsScraper);
+                          String cleanJson = rawResult.toString();
+                          if (cleanJson.startsWith('"') && cleanJson.endsWith('"')) {
+                            cleanJson = json.decode(cleanJson);
+                          }
+                          final Map<String, dynamic> scraped = json.decode(cleanJson);
+
+                          if (scraped.isEmpty || (scraped['make'] == null && scraped['model'] == null)) {
+                            _showSnack('No se detectó la tabla de información. Verifica que el resultado haya cargado.');
+                            return;
+                          }
+
+                          scraped['patente'] = targetPlate;
+                          scraped['data_source'] = 'PRT_SCRAPING';
 
                           final saveRes = await http.post(
                             Uri.parse('http://91.99.145.70:8000/api/vehicle/cache'),
                             headers: {'Content-Type': 'application/json'},
-                            body: jsonEncode({
+                            body: json.encode({
                               'plate': targetPlate,
-                              'data': extractedData,
+                              'data': scraped,
                             }),
                           );
 
                           if (saveRes.statusCode == 200) {
-                            Navigator.pop(modalCtx);
-                            setState(() {
-                              _vehicleData = extractedData;
-                            });
-                            _fetchBoostrTelemetry();
-                            _showSnack('¡Vehículo verificado en PRT y guardado en caché permanente!');
+                            if (mounted) {
+                              Navigator.pop(context);
+                              setState(() {
+                                _vehicleData = scraped;
+                              });
+                              _fetchBoostrTelemetry();
+                              _showSnack('¡Vehículo verificado en PRT y guardado en caché permanente!');
+                            }
                           } else {
                             _showSnack('Error guardando en el servidor.');
                           }
