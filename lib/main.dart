@@ -1215,14 +1215,14 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
           onPageFinished: (_) {
             setState(() => _isLoading = false);
             SystemChannels.textInput.invokeMethod('TextInput.hide');
-            _injectPureCaptchaIsolator();
+            _injectCurtainEngine();
           },
         ),
       )
       ..loadRequest(Uri.parse('https://www.prt.cl/Paginas/RevisionTecnica.aspx'));
   }
 
-  void _injectPureCaptchaIsolator() {
+  void _injectCurtainEngine() {
     final js = """
       (function() {
         var m = document.querySelector('meta[name="viewport"]');
@@ -1233,33 +1233,41 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
         }
         m.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no';
 
-        // Estilos para eliminar TODO el SharePoint de raíz
-        var s = document.getElementById('pf-pure-style') || document.createElement('style');
-        s.id = 'pf-pure-style';
+        // 1. Inyectar cortina de ocultamiento y estilos de elevación
+        var s = document.getElementById('pf-curtain-style') || document.createElement('style');
+        s.id = 'pf-curtain-style';
         s.innerHTML = `
-          html, body {
-            background-color: #0F172A !important;
-            margin: 0 !important;
-            padding: 0 !important;
+          /* Cortina oscura que cubre todo el sitio web de SharePoint */
+          #pf-dark-curtain {
+            position: fixed !important;
+            top: 0 !important;
+            left: 0 !important;
             width: 100vw !important;
             height: 100vh !important;
-            overflow: hidden !important;
+            background-color: #0F172A !important;
+            z-index: 2000000 !important;
+            pointer-events: auto !important;
           }
-          #s4-workspace, #s4-bodyContainer, .ms-main, form > table, header, nav, footer {
-            display: none !important;
-          }
-          #pf-captcha-wrapper {
+
+          /* Elevar únicamente la cajita del captcha por encima de la cortina */
+          .g-recaptcha,
+          div:has(iframe[src*="anchor"]),
+          iframe[src*="anchor"] {
             position: fixed !important;
             left: 50% !important;
-            top: 40% !important;
+            top: 42% !important;
             transform: translate(-50%, -50%) !important;
             -webkit-transform: translate(-50%, -50%) !important;
-            z-index: 9999999 !important;
-            display: flex !important;
-            justify-content: center !important;
-            align-items: center !important;
+            z-index: 2000005 !important;
+            pointer-events: auto !important;
             background: transparent !important;
           }
+
+          .g-recaptcha-bubble-arrow {
+            display: none !important;
+          }
+
+          /* Elevar y centrar el cuadro de fotos del desafío */
           div:has(iframe[src*="bframe"]),
           div:has(iframe[title*="challenge"]),
           div:has(iframe[title*="desafío"]),
@@ -1271,11 +1279,19 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             -webkit-transform: translate(-50%, -50%) scale(var(--pf-scale, 0.90)) !important;
             transform-origin: center center !important;
             z-index: 2147483647 !important;
+            pointer-events: auto !important;
           }
         `;
         document.head.appendChild(s);
 
-        // 1. Rellenar patente en el input antes de esconderlo
+        // 2. Crear la cortina física en el DOM si no existe
+        if (!document.getElementById('pf-dark-curtain')) {
+          var curtain = document.createElement('div');
+          curtain.id = 'pf-dark-curtain';
+          document.body.appendChild(curtain);
+        }
+
+        // 3. Rellenar la patente de forma transparente en el input subyacente
         document.querySelectorAll('input[type="text"]').forEach(function(inp) {
           if (inp.id.toLowerCase().includes('patente') || inp.name.toLowerCase().includes('patente')) {
             if (inp.value !== '${widget.targetPlate}') {
@@ -1283,33 +1299,19 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
               inp.dispatchEvent(new Event('input', { bubbles: true }));
               inp.dispatchEvent(new Event('change', { bubbles: true }));
             }
+            inp.blur();
           }
         });
 
-        // 2. Extraer el recaptcha y anclarlo solo en pantalla
+        // 4. Mantener la escala adecuada de las fotos
         setInterval(function() {
-          var captcha = document.querySelector('.g-recaptcha') || document.querySelector('iframe[src*="anchor"]');
-          if (captcha) {
-            var wrapper = document.getElementById('pf-captcha-wrapper');
-            if (!wrapper) {
-              wrapper = document.createElement('div');
-              wrapper.id = 'pf-captcha-wrapper';
-              document.body.appendChild(wrapper);
-            }
-            var targetEl = captcha.classList && captcha.classList.contains('g-recaptcha') ? captcha : (captcha.closest('div') || captcha);
-            if (targetEl.parentElement !== wrapper) {
-              wrapper.appendChild(targetEl);
-            }
-          }
-
-          // Escalar el cuadro de imágenes si aparece
           var bframe = document.querySelector('iframe[src*="bframe"]');
           if (bframe) {
             var c = bframe;
             while (c.parentElement && c.parentElement !== document.body && c.parentElement.tagName !== 'HTML') {
               c = c.parentElement;
             }
-            if (c && c !== document.body) {
+            if (c && c !== document.body && c.tagName !== 'FORM') {
               var winW = window.innerWidth || document.documentElement.clientWidth;
               var winH = window.innerHeight || document.documentElement.clientHeight;
               var scale = Math.min((winW - 16) / 400, (winH - 80) / 580);
@@ -1321,7 +1323,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
               }
             }
           }
-        }, 150);
+        }, 120);
       })();
     """;
     _controller.runJavaScript(js);
