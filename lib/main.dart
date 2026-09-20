@@ -198,96 +198,93 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
 
         controller = WebViewController()
           ..setJavaScriptMode(JavaScriptMode.unrestricted)
-          ..setUserAgent("Mozilla/5.0 (Linux; Android 11; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Mobile Safari/537.36")
+          ..setUserAgent("Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Mobile Safari/537.36")
           ..setNavigationDelegate(
             NavigationDelegate(
               onPageFinished: (String url) {
-                final jsSurgicalFix = """
+                final jsFluidCentering = """
                   (function() {
-                    // 1. Viewport estándar adaptable
+                    // 1. Viewport estándar de alta fidelidad sin restricciones
                     var meta = document.querySelector('meta[name="viewport"]');
                     if (!meta) {
                       meta = document.createElement('meta');
                       meta.name = 'viewport';
                       document.head.appendChild(meta);
                     }
-                    meta.content = 'width=device-width, initial-scale=1.0, maximum-scale=2.0, user-scalable=yes';
+                    meta.content = 'width=device-width, initial-scale=1.0';
 
-                    // 2. Estilos limpios sin romper el layout
+                    // 2. Estilos fluidos: reset de tablas y centrado nativo de .g-recaptcha
                     var style = document.createElement('style');
                     style.innerHTML = `
                       header, nav, footer, #suiteBar, #s4-titlerow, .banner,
-                      img[src*="afiche"], table[id*="calendario"] {
+                      img[src*="afiche"], img[src*="banner"], table[id*="calendario"] {
                         display: none !important;
                       }
-                      body {
+                      html, body, #s4-workspace, #s4-bodyContainer, form {
+                        width: 100% !important;
+                        max-width: 100vw !important;
+                        overflow-x: hidden !important;
                         margin: 0 !important;
-                        padding: 6px !important;
-                        zoom: 1.0 !important;
+                        padding: 4px !important;
+                        box-sizing: border-box !important;
+                      }
+                      table, tr, td {
+                        max-width: 100vw !important;
+                        box-sizing: border-box !important;
                       }
                       input[type="text"] {
-                        font-size: 20px !important;
-                        height: 44px !important;
+                        font-size: 22px !important;
+                        height: 48px !important;
                         font-weight: 800 !important;
                         text-align: center !important;
                         border: 2px solid #0284C7 !important;
                         border-radius: 8px !important;
+                        margin: 8px auto !important;
+                        display: block !important;
+                        max-width: 240px !important;
+                      }
+                      /* Centrado nativo del contenedor de reCAPTCHA */
+                      .g-recaptcha, div[class*="recaptcha"] {
+                        display: flex !important;
+                        justify-content: center !important;
+                        align-items: center !important;
+                        margin: 12px auto !important;
+                        width: 100% !important;
                       }
                     `;
                     document.head.appendChild(style);
 
-                    // 3. Rellenar la patente objetivo
+                    // 3. Autocompletar la patente en el formulario
                     var inputs = document.querySelectorAll('input[type="text"]');
                     inputs.forEach(function(inp) {
                       if (inp.id.toLowerCase().includes('patente') || inp.name.toLowerCase().includes('patente')) {
                         inp.value = '$targetPlate';
+                        inp.dispatchEvent(new Event('input', { bubbles: true }));
+                        inp.dispatchEvent(new Event('change', { bubbles: true }));
                       }
                     });
 
-                    // 4. Centrar la vista en el formulario (patente + checkbox)
+                    // 4. Centrado suave y único al cargar la página (sin temporizadores ni bucles invasivos)
                     setTimeout(function() {
-                      var targetInput = document.querySelector('input[type="text"]');
-                      if (targetInput) {
-                        targetInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                      var anchor = document.querySelector('.g-recaptcha') || document.querySelector('input[type="text"]');
+                      if (anchor) {
+                        anchor.scrollIntoView({ behavior: 'smooth', block: 'center' });
                       }
                     }, 400);
 
-                    // 5. CENTRADO QUIRÚRGICO EXCLUSIVO PARA EL DESAFÍO FOTOGRÁFICO DE GOOGLE (bframe)
-                    setInterval(function() {
-                      var bframe = document.querySelector('iframe[src*="bframe"]');
-                      if (bframe) {
-                        // Buscar el contenedor flotante directo de Google en el body
-                        var cur = bframe;
-                        while (cur.parentElement && cur.parentElement !== document.body) {
-                          cur = cur.parentElement;
-                        }
-                        if (cur && cur !== document.body) {
-                          // Solo si Google lo está mostrando (no cuando está en top: -10000px)
-                          if (cur.offsetTop > -5000) {
-                            cur.style.setProperty('position', 'fixed', 'important');
-                            cur.style.setProperty('top', '50%', 'important');
-                            cur.style.setProperty('left', '50%', 'important');
-                            cur.style.setProperty('transform', 'translate(-50%, -50%) scale(0.92)', 'important');
-                            cur.style.setProperty('transform-origin', 'center center', 'important');
-                            cur.style.setProperty('z-index', '2147483647', 'important');
-                          }
-                        }
-                      }
-                    }, 100);
-
-                    // 6. Centrar resultados cuando aparezcan
+                    // 5. Desplazar la vista suavemente al aparecer los resultados
                     var observer = new MutationObserver(function() {
-                      var infoSections = Array.from(document.querySelectorAll('div, td, th, span, b, a')).filter(function(el) {
+                      var sections = Array.from(document.querySelectorAll('div, td, th, span, b, a')).filter(function(el) {
                         return el.innerText && el.innerText.includes('Información del Vehículo');
                       });
-                      if (infoSections.length > 0) {
-                        infoSections[0].scrollIntoView({ behavior: 'smooth', block: 'start' });
+                      if (sections.length > 0) {
+                        sections[0].scrollIntoView({ behavior: 'smooth', block: 'start' });
                       }
                     });
                     observer.observe(document.body, { childList: true, subtree: true });
                   })();
                 """;
-                controller.runJavaScript(jsSurgicalFix);
+                controller.runJavaScript(jsFluidCentering);
               },
             ),
           )
@@ -328,7 +325,7 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
                   const Padding(
                     padding: EdgeInsets.symmetric(horizontal: 16, vertical: 2),
                     child: Text(
-                      'Resuelve el captcha "No soy un robot" y pulsa Extraer.',
+                      'Toca "No soy un robot", pulsa la lupa y guarda la información.',
                       style: TextStyle(color: Color(0xFF94A3B8), fontSize: 12),
                     ),
                   ),
