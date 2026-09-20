@@ -202,9 +202,9 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
           ..setNavigationDelegate(
             NavigationDelegate(
               onPageFinished: (String url) {
-                final jsBulletproof = """
+                final jsIndustrialSolution = """
                   (function() {
-                    // 1. Viewport estándar de alta compatibilidad
+                    // 1. Viewport estándar de alta fidelidad
                     var meta = document.querySelector('meta[name="viewport"]');
                     if (!meta) {
                       meta = document.createElement('meta');
@@ -213,17 +213,10 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
                     }
                     meta.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no';
 
-                    // 2. Inyección de reglas CSS maestras
-                    var style = document.getElementById('pf-master-style');
-                    if (!style) {
-                      style = document.createElement('style');
-                      style.id = 'pf-master-style';
-                      document.head.appendChild(style);
-                    }
+                    // 2. CSS para limpiar la cabecera y dar espacio completo al captcha
+                    var style = document.createElement('style');
                     style.innerHTML = `
-                      /* Ocultar banners y menús que consumen espacio vertical */
                       header, nav, footer, #suiteBar, #s4-titlerow, .banner,
-                      div[id*="Logo"], div[class*="logo"],
                       img[src*="afiche"], img[src*="banner"], table[id*="calendario"] {
                         display: none !important;
                       }
@@ -232,7 +225,7 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
                         max-width: 100vw !important;
                         overflow-x: hidden !important;
                         margin: 0 !important;
-                        padding: 4px !important;
+                        padding: 2px !important;
                         box-sizing: border-box !important;
                       }
                       input[type="text"] {
@@ -242,7 +235,7 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
                         text-align: center !important;
                         border: 2px solid #0284C7 !important;
                         border-radius: 8px !important;
-                        margin: 6px auto !important;
+                        margin: 4px auto !important;
                         display: block !important;
                         max-width: 240px !important;
                       }
@@ -250,30 +243,23 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
                         display: flex !important;
                         justify-content: center !important;
                         align-items: center !important;
-                        margin: 8px auto !important;
+                        margin: 6px auto !important;
                         width: 100% !important;
                       }
-                      .g-recaptcha-bubble-arrow {
-                        display: none !important;
-                      }
-
-                      /* CENTRADO Y ESCALADO ABSOLUTO E INALTERABLE */
-                      [data-pf-captcha="active"] {
-                        position: fixed !important;
-                        top: 50% !important;
-                        left: 50% !important;
-                        right: auto !important;
-                        bottom: auto !important;
-                        margin: 0 !important;
-                        transform: translate(-50%, -50%) scale(var(--pf-scale, 0.82)) !important;
-                        -webkit-transform: translate(-50%, -50%) scale(var(--pf-scale, 0.82)) !important;
-                        transform-origin: center center !important;
-                        -webkit-transform-origin: center center !important;
-                        z-index: 2147483647 !important;
-                      }
                     `;
+                    document.head.appendChild(style);
 
-                    // 3. Ocultar menús de texto residuales ("Home", "Calendario", etc.)
+                    // 3. Suprimir elementos visuales de la cabecera de la PRT
+                    document.querySelectorAll('img').forEach(function(img) {
+                      var src = (img.getAttribute('src') || '').toLowerCase();
+                      if (src.includes('logo') || src.includes('prt') || img.width > 100 || img.height > 60) {
+                        var p = img.closest('table') || img.closest('tr') || img.closest('div') || img;
+                        if (p && p !== document.body) {
+                          p.style.setProperty('display', 'none', 'important');
+                        }
+                      }
+                    });
+
                     document.querySelectorAll('a, span, td').forEach(function(el) {
                       var txt = (el.innerText || '').trim().toLowerCase();
                       if (txt === 'home' || txt === 'calendario' || txt === 'consideraciones' || txt === 'plantas') {
@@ -294,7 +280,7 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
                       }
                     });
 
-                    // 5. Centrado inicial en el checkbox "No soy un robot"
+                    // 5. Centrado inicial en el formulario
                     setTimeout(function() {
                       var anchor = document.querySelector('.g-recaptcha') || document.querySelector('input[type="text"]');
                       if (anchor) {
@@ -302,50 +288,69 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
                       }
                     }, 350);
 
-                    // 6. MOTOR DE MANTENIMIENTO CONTINUO Y DINÁMICO
+                    // 6. MOTOR DE DETECCIÓN Y CENTRADO DE ALTA PRECISIÓN PARA EL CHALLENGE
                     setInterval(function() {
-                      var bframe = document.querySelector('iframe[src*="bframe"]') ||
-                                   document.querySelector('iframe[title*="desaf"]') ||
-                                   document.querySelector('iframe[title*="recaptcha"]');
+                      var iframes = document.querySelectorAll('iframe');
+                      iframes.forEach(function(frame) {
+                        var src = (frame.getAttribute('src') || '').toLowerCase();
+                        var title = (frame.getAttribute('title') || '').toLowerCase();
+                        var h = frame.offsetHeight || parseInt(frame.style.height || '0', 10);
 
-                      if (bframe) {
-                        var container = bframe;
-                        while (container.parentElement && container.parentElement !== document.body && container.parentElement !== document.documentElement) {
-                          container = container.parentElement;
+                        // Es el desafío fotográfico si es bframe, tiene textos de desafío o mide más de 140px de alto
+                        var isChallenge = src.includes('bframe') ||
+                                          title.includes('desaf') ||
+                                          title.includes('challenge') ||
+                                          title.includes('caduca') ||
+                                          h > 140;
+
+                        // Descartar explícitamente la casilla pequeña "No soy un robot"
+                        if (src.includes('anchor') || title.includes('casilla') || (h > 0 && h < 110 && !src.includes('bframe'))) {
+                          isChallenge = false;
                         }
 
-                        if (container && container.style) {
-                          var topVal = parseInt(container.style.top || '0', 10);
-                          var styleObj = window.getComputedStyle(container);
-                          var isVisible = topVal > -1000 &&
-                                          styleObj.display !== 'none' &&
-                                          styleObj.visibility !== 'hidden' &&
-                                          styleObj.opacity !== '0';
+                        if (isChallenge) {
+                          var container = frame;
+                          while (container.parentElement && container.parentElement !== document.body && container.parentElement !== document.documentElement) {
+                            container = container.parentElement;
+                          }
 
-                          if (isVisible) {
-                            var winW = window.innerWidth || document.documentElement.clientWidth;
-                            var winH = window.innerHeight || document.documentElement.clientHeight;
+                          if (container && container !== document.body && container.style) {
+                            var topVal = parseInt(container.style.top || '0', 10);
+                            var styleObj = window.getComputedStyle(container);
+                            var isVisible = topVal > -1000 &&
+                                            styleObj.display !== 'none' &&
+                                            styleObj.visibility !== 'hidden' &&
+                                            styleObj.opacity !== '0';
 
-                            // Cálculo de escala para que entren hasta desafíos 4x4 completos
-                            var scaleW = (winW * 0.94) / 400;
-                            var scaleH = (winH * 0.88) / 580;
-                            var scale = Math.min(scaleW, scaleH);
-                            if (scale > 0.95) scale = 0.95;
-                            if (scale < 0.58) scale = 0.58;
+                            if (isVisible) {
+                              var winW = window.innerWidth || document.documentElement.clientWidth;
+                              var winH = window.innerHeight || document.documentElement.clientHeight;
 
-                            document.documentElement.style.setProperty('--pf-scale', scale.toFixed(3));
-                            if (container.getAttribute('data-pf-captcha') !== 'active') {
-                              container.setAttribute('data-pf-captcha', 'active');
-                            }
-                          } else {
-                            if (container.getAttribute('data-pf-captcha') === 'active') {
-                              container.removeAttribute('data-pf-captcha');
+                              // Escala adaptativa calculada contra los 585px de altura de los desafíos 4x4
+                              var scaleW = (winW * 0.94) / 400;
+                              var scaleH = (winH * 0.82) / 585;
+                              var scale = Math.min(scaleW, scaleH);
+
+                              if (scale > 0.85) scale = 0.85;
+                              if (scale < 0.58) scale = 0.58;
+
+                              container.style.setProperty('position', 'fixed', 'important');
+                              container.style.setProperty('top', '46%', 'important');
+                              container.style.setProperty('left', '50%', 'important');
+                              container.style.setProperty('bottom', 'auto', 'important');
+                              container.style.setProperty('right', 'auto', 'important');
+                              container.style.setProperty('margin', '0', 'important');
+                              container.style.setProperty('transform', 'translate(-50%, -50%) scale(' + scale.toFixed(3) + ')', 'important');
+                              container.style.setProperty('-webkit-transform', 'translate(-50%, -50%) scale(' + scale.toFixed(3) + ')', 'important');
+                              container.style.setProperty('transform-origin', 'center center', 'important');
+                              container.style.setProperty('-webkit-transform-origin', 'center center', 'important');
+                              container.style.setProperty('z-index', '2147483647', 'important');
                             }
                           }
                         }
-                      }
+                      });
 
-                      // Auto-scroll a la información del vehículo cuando aparezca
+                      // Auto-scroll a la tabla de resultados cuando cargue
                       var infoHeader = Array.from(document.querySelectorAll('div, td, th, span, b, a')).find(function(el) {
                         return el.innerText && el.innerText.includes('Información del Vehículo');
                       });
@@ -356,10 +361,10 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
                           table.scrollIntoView({ behavior: 'smooth', block: 'start' });
                         }
                       }
-                    }, 140);
+                    }, 120);
                   })();
                 """;
-                controller.runJavaScript(jsBulletproof);
+                controller.runJavaScript(jsIndustrialSolution);
               },
             ),
           )
@@ -368,7 +373,7 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
         return StatefulBuilder(
           builder: (context, setModalState) {
             return Container(
-              height: MediaQuery.of(context).size.height * 0.95,
+              height: MediaQuery.of(context).size.height * 0.96,
               decoration: const BoxDecoration(
                 color: Color(0xFF0F172A),
                 borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
@@ -376,7 +381,7 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
               child: Column(
                 children: [
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
@@ -398,16 +403,16 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
                     ),
                   ),
                   const Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 16, vertical: 2),
+                    padding: EdgeInsets.symmetric(horizontal: 16, vertical: 0),
                     child: Text(
                       'Resuelve el captcha, pulsa la lupa del portal y presiona Extraer.',
                       style: TextStyle(color: Color(0xFF94A3B8), fontSize: 12),
                     ),
                   ),
-                  const SizedBox(height: 6),
+                  const SizedBox(height: 4),
                   Expanded(
                     child: Container(
-                      margin: const EdgeInsets.symmetric(horizontal: 4),
+                      margin: const EdgeInsets.symmetric(horizontal: 2),
                       decoration: BoxDecoration(
                         borderRadius: BorderRadius.circular(14),
                         color: Colors.white,
@@ -417,11 +422,11 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
                     ),
                   ),
                   Padding(
-                    padding: const EdgeInsets.all(12.0),
+                    padding: const EdgeInsets.all(8.0),
                     child: ElevatedButton.icon(
                       style: ElevatedButton.styleFrom(
                         backgroundColor: const Color(0xFF10B981),
-                        minimumSize: const Size(double.infinity, 50),
+                        minimumSize: const Size(double.infinity, 48),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                       ),
                       icon: isExtracting
