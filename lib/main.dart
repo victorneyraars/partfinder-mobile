@@ -1197,8 +1197,8 @@ class PrtVerificationScreen extends StatefulWidget {
 }
 
 class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
-  bool _isLoading = true;
-  String _statusMessage = 'Toca la casilla para verificar';
+  bool _isReady = false;
+  String _statusMessage = 'Preparando verificación...';
   late final WebViewController _controller;
 
   @override
@@ -1208,21 +1208,36 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
 
     _controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
+      ..setBackgroundColor(const Color(0xFF0F172A))
       ..setUserAgent("Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36")
+      ..addJavaScriptChannel(
+        'PrtBridge',
+        onMessageReceived: (JavaScriptMessage message) {
+          if (message.message == 'CAPTCHA_READY') {
+            if (mounted && !_isReady) {
+              setState(() {
+                _isReady = true;
+                _statusMessage = 'Toca la casilla para verificar';
+              });
+            }
+          }
+        },
+      )
       ..setNavigationDelegate(
         NavigationDelegate(
-          onPageStarted: (_) => setState(() => _isLoading = true),
+          onPageStarted: (_) {
+            if (mounted) setState(() => _isReady = false);
+          },
           onPageFinished: (_) {
-            setState(() => _isLoading = false);
             SystemChannels.textInput.invokeMethod('TextInput.hide');
-            _injectCleanCaptchaBox();
+            _injectZeroFlickerEngine();
           },
         ),
       )
       ..loadRequest(Uri.parse('https://www.prt.cl/Paginas/RevisionTecnica.aspx'));
   }
 
-  void _injectCleanCaptchaBox() {
+  void _injectZeroFlickerEngine() {
     final js = """
       (function() {
         var m = document.querySelector('meta[name="viewport"]');
@@ -1233,7 +1248,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
         }
         m.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no';
 
-        // Llenar patente de forma transparente
+        // 1. Rellenar patente en el input subyacente
         document.querySelectorAll('input[type="text"]').forEach(function(inp) {
           if (inp.id.toLowerCase().includes('patente') || inp.name.toLowerCase().includes('patente')) {
             if (inp.value !== '${widget.targetPlate}') {
@@ -1244,6 +1259,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
           }
         });
 
+        // 2. CSS que oculta absolutamente todo SharePoint
         var s = document.getElementById('pf-clean-captcha-style') || document.createElement('style');
         s.id = 'pf-clean-captcha-style';
         s.innerHTML = `
@@ -1284,7 +1300,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             border: none !important;
           }
 
-          /* El desafío fotográfico sólo se muestra si está activo */
+          /* Desafío fotográfico centrado cuando se active */
           div:has(iframe[src*="bframe"]),
           div:has(iframe[title*="challenge"]),
           div:has(iframe[title*="desafío"]),
@@ -1313,6 +1329,11 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             if (anchor.parentElement !== host) {
               host.appendChild(anchor);
             }
+            // Notificar a Flutter que el captcha ya está aislado y listo para verse
+            if (window.PrtBridge && !window.__pfNotifiedReady) {
+              window.__pfNotifiedReady = true;
+              window.PrtBridge.postMessage('CAPTCHA_READY');
+            }
           }
         }
 
@@ -1321,7 +1342,6 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
         setInterval(function() {
           mountCaptcha();
 
-          // Centrado dinámico del popup de fotos cuando se abre
           var bframe = document.querySelector('iframe[src*="bframe"]');
           if (bframe) {
             var c = bframe;
@@ -1340,7 +1360,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
               }
             }
           }
-        }, 120);
+        }, 100);
       })();
     """;
     _controller.runJavaScript(js);
@@ -1378,7 +1398,14 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             alignment: Alignment.centerLeft,
             child: Row(
               children: [
-                const Icon(Icons.touch_app_rounded, color: Color(0xFF38BDF8), size: 16),
+                if (!_isReady)
+                  const SizedBox(
+                    width: 14,
+                    height: 14,
+                    child: CircularProgressIndicator(color: Color(0xFF38BDF8), strokeWidth: 2),
+                  )
+                else
+                  const Icon(Icons.touch_app_rounded, color: Color(0xFF38BDF8), size: 16),
                 const SizedBox(width: 8),
                 Text(
                   _statusMessage,
@@ -1394,7 +1421,34 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
         ),
       ),
       body: SafeArea(
-        child: WebViewWidget(controller: _controller),
+        child: Stack(
+          children: [
+            // WebView siempre renderizando en fondo oscuro nativo
+            AnimatedOpacity(
+              opacity: _isReady ? 1.0 : 0.0,
+              duration: const Duration(milliseconds: 220),
+              child: WebViewWidget(controller: _controller),
+            ),
+            // Pantalla de carga nativa sin parpadeos mientras monta el captcha
+            if (!_isReady)
+              Container(
+                color: const Color(0xFF0F172A),
+                width: double.infinity,
+                height: double.infinity,
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: const [
+                    CircularProgressIndicator(color: Color(0xFF38BDF8), strokeWidth: 2.5),
+                    SizedBox(height: 16),
+                    Text(
+                      'Conectando con portal PRT...',
+                      style: TextStyle(color: Color(0xFF94A3B8), fontSize: 13, fontWeight: FontWeight.w600),
+                    ),
+                  ],
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }
