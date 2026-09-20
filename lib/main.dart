@@ -1,3 +1,13 @@
+import 'dart:math';
+import 'package:webview_flutter/webview_flutter.dart';
+import 'package:http/http.dart' as http;
+import 'package:url_launcher/url_launcher.dart';
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+
 
 String _getFreshRandomChileanPlate() {
   const letters = 'BCDFGHJKLPRSTVWXYZ';
@@ -9,15 +19,7 @@ String _getFreshRandomChileanPlate() {
   int num = 10 + rand.nextInt(90);
   return '$p$num';
 }
-import 'dart:math';
-import 'package:webview_flutter/webview_flutter.dart';
-import 'package:http/http.dart' as http;
-import 'package:url_launcher/url_launcher.dart';
-import 'dart:async';
-import 'dart:convert';
-import 'dart:io';
-import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
+
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
