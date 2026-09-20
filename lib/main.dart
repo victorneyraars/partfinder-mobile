@@ -202,56 +202,41 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
           ..setNavigationDelegate(
             NavigationDelegate(
               onPageFinished: (String url) {
-                final jsMasterCentering = """
+                final jsSurgicalFix = """
                   (function() {
-                    // 1. Viewport ajustado a pantalla completa sin zoom que desplace
+                    // 1. Viewport estándar adaptable
                     var meta = document.querySelector('meta[name="viewport"]');
                     if (!meta) {
                       meta = document.createElement('meta');
                       meta.name = 'viewport';
                       document.head.appendChild(meta);
                     }
-                    meta.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no';
+                    meta.content = 'width=device-width, initial-scale=1.0, maximum-scale=2.0, user-scalable=yes';
 
-                    // 2. Estilos para limpiar la web y centrar el formulario
+                    // 2. Estilos limpios sin romper el layout
                     var style = document.createElement('style');
                     style.innerHTML = `
                       header, nav, footer, #suiteBar, #s4-titlerow, .banner,
-                      img[src*="logo"], img[src*="banner"], img[src*="afiche"],
-                      table[id*="calendario"] {
+                      img[src*="afiche"], table[id*="calendario"] {
                         display: none !important;
                       }
                       body {
                         margin: 0 !important;
-                        padding: 8px !important;
-                        display: flex !important;
-                        flex-direction: column !important;
-                        align-items: center !important;
-                        overflow-x: hidden !important;
+                        padding: 6px !important;
+                        zoom: 1.0 !important;
                       }
-                      /* Centrar la caja de la patente */
                       input[type="text"] {
-                        font-size: 22px !important;
-                        height: 48px !important;
-                        font-weight: 900 !important;
+                        font-size: 20px !important;
+                        height: 44px !important;
+                        font-weight: 800 !important;
                         text-align: center !important;
                         border: 2px solid #0284C7 !important;
                         border-radius: 8px !important;
-                        margin: 6px auto !important;
-                        display: block !important;
                       }
                     `;
                     document.head.appendChild(style);
 
-                    // 3. Ocultar la barra azul de menú ('Home', 'Calendario', etc.)
-                    document.querySelectorAll('td, div, tr, table, ul, li').forEach(function(el) {
-                      if (el.children.length === 0 && (el.innerText === 'Home' || el.innerText === 'Calendario' || el.innerText === 'Plantas')) {
-                        var p = el.closest('table') || el.closest('ul') || el.closest('div');
-                        if (p) p.style.setProperty('display', 'none', 'important');
-                      }
-                    });
-
-                    // 4. Rellenar la patente objetivo automáticamente
+                    // 3. Rellenar la patente objetivo
                     var inputs = document.querySelectorAll('input[type="text"]');
                     inputs.forEach(function(inp) {
                       if (inp.id.toLowerCase().includes('patente') || inp.name.toLowerCase().includes('patente')) {
@@ -259,41 +244,38 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
                       }
                     });
 
-                    // 5. CENTRADO FORZADO CONTINUO DEL DESAFÍO FOTOGRÁFICO DE RECAPTCHA
-                    setInterval(function() {
-                      var iframes = document.querySelectorAll('iframe');
-                      iframes.forEach(function(f) {
-                        var src = f.getAttribute('src') || '';
-                        var title = f.getAttribute('title') || '';
-                        // Detectar el iframe que contiene las fotos del captcha
-                        if (src.includes('bframe') || (title.includes('recaptcha') && !title.includes('casilla') && !title.includes('robot'))) {
-                          var container = f;
-                          while (container.parentElement && container.parentElement !== document.body && container.parentElement.tagName !== 'HTML') {
-                            container = container.parentElement;
-                          }
-                          if (container && container !== document.body) {
-                            container.style.setProperty('position', 'fixed', 'important');
-                            container.style.setProperty('top', '50%', 'important');
-                            container.style.setProperty('left', '50%', 'important');
-                            container.style.setProperty('transform', 'translate(-50%, -50%)', 'important');
-                            container.style.setProperty('z-index', '2147483647', 'important');
-                            container.style.setProperty('margin', '0', 'important');
-                            container.style.setProperty('max-width', '98vw', 'important');
-                          }
-                          f.style.setProperty('max-width', '96vw', 'important');
-                        }
-                      });
-                    }, 120);
-
-                    // 6. Centrar vista en el captcha al cargar
+                    // 4. Centrar la vista en el formulario (patente + checkbox)
                     setTimeout(function() {
-                      var captchaEl = document.querySelector('.g-recaptcha, iframe[src*="anchor"]') || document.querySelector('input[type="text"]');
-                      if (captchaEl) {
-                        captchaEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                      var targetInput = document.querySelector('input[type="text"]');
+                      if (targetInput) {
+                        targetInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
                       }
-                    }, 500);
+                    }, 400);
 
-                    // 7. Auto-scroll a la información del vehículo cuando aparezca
+                    // 5. CENTRADO QUIRÚRGICO EXCLUSIVO PARA EL DESAFÍO FOTOGRÁFICO DE GOOGLE (bframe)
+                    setInterval(function() {
+                      var bframe = document.querySelector('iframe[src*="bframe"]');
+                      if (bframe) {
+                        // Buscar el contenedor flotante directo de Google en el body
+                        var cur = bframe;
+                        while (cur.parentElement && cur.parentElement !== document.body) {
+                          cur = cur.parentElement;
+                        }
+                        if (cur && cur !== document.body) {
+                          // Solo si Google lo está mostrando (no cuando está en top: -10000px)
+                          if (cur.offsetTop > -5000) {
+                            cur.style.setProperty('position', 'fixed', 'important');
+                            cur.style.setProperty('top', '50%', 'important');
+                            cur.style.setProperty('left', '50%', 'important');
+                            cur.style.setProperty('transform', 'translate(-50%, -50%) scale(0.92)', 'important');
+                            cur.style.setProperty('transform-origin', 'center center', 'important');
+                            cur.style.setProperty('z-index', '2147483647', 'important');
+                          }
+                        }
+                      }
+                    }, 100);
+
+                    // 6. Centrar resultados cuando aparezcan
                     var observer = new MutationObserver(function() {
                       var infoSections = Array.from(document.querySelectorAll('div, td, th, span, b, a')).filter(function(el) {
                         return el.innerText && el.innerText.includes('Información del Vehículo');
@@ -305,7 +287,7 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
                     observer.observe(document.body, { childList: true, subtree: true });
                   })();
                 """;
-                controller.runJavaScript(jsMasterCentering);
+                controller.runJavaScript(jsSurgicalFix);
               },
             ),
           )
@@ -314,7 +296,7 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
         return StatefulBuilder(
           builder: (context, setModalState) {
             return Container(
-              height: MediaQuery.of(context).size.height * 0.92,
+              height: MediaQuery.of(context).size.height * 0.94,
               decoration: const BoxDecoration(
                 color: Color(0xFF0F172A),
                 borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
@@ -346,7 +328,7 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
                   const Padding(
                     padding: EdgeInsets.symmetric(horizontal: 16, vertical: 2),
                     child: Text(
-                      'El captcha y las fotos aparecerán centrados. Resuélvelo y pulsa Extraer.',
+                      'Resuelve el captcha "No soy un robot" y pulsa Extraer.',
                       style: TextStyle(color: Color(0xFF94A3B8), fontSize: 12),
                     ),
                   ),
@@ -383,7 +365,6 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
                           final jsScraper = """
                             (function() {
                               var result = {};
-                              // 1. Recorrer celdas de la tabla
                               var rows = document.querySelectorAll('tr');
                               rows.forEach(function(r) {
                                 var cells = r.querySelectorAll('td, th');
@@ -402,20 +383,19 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
                                 }
                               });
 
-                              // 2. Respaldo por expresiones regulares sobre el texto de la página
                               var b = document.body.innerText;
                               var matchTxt = function(regex) {
                                 var m = b.match(regex);
                                 return m ? m[1].trim() : null;
                               };
-                              if (!result['make']) result['make'] = matchTxt(/marca\s*[:\t]\s*([A-Za-z0-9\- ]+)/i);
-                              if (!result['model']) result['model'] = matchTxt(/modelo\s*[:\t]\s*([A-Za-z0-9\- ]+)/i);
-                              if (!result['year']) result['year'] = matchTxt(/a[ñn]o(?:\s*de\s*fabricaci[oó]n)?\s*[:\t]\s*([0-9]{4})/i);
-                              if (!result['type']) result['type'] = matchTxt(/tipo(?:\s*veh[ií]culo)?\s*[:\t]\s*([A-Za-z0-9\- ]+)/i);
-                              if (!result['engine_number']) result['engine_number'] = matchTxt(/n[uú]mero\s*motor\s*[:\t]\s*([A-Za-z0-9\-]+)/i);
-                              if (!result['vin']) result['vin'] = matchTxt(/(?:chasis|vin)\s*[:\t]\s*([A-Za-z0-9\-]+)/i);
-                              if (!result['color']) result['color'] = matchTxt(/color\s*[:\t]\s*([A-Za-z0-9\- ]+)/i);
-                              if (!result['fuel']) result['fuel'] = matchTxt(/combustible\s*[:\t]\s*([A-Za-z0-9\- ]+)/i);
+                              if (!result['make']) result['make'] = matchTxt(/marca\\s*[:\\t]\\s*([A-Za-z0-9\\- ]+)/i);
+                              if (!result['model']) result['model'] = matchTxt(/modelo\\s*[:\\t]\\s*([A-Za-z0-9\\- ]+)/i);
+                              if (!result['year']) result['year'] = matchTxt(/a[ñn]o(?:\\s*de\\s*fabricaci[oó]n)?\\s*[:\\t]\\s*([0-9]{4})/i);
+                              if (!result['type']) result['type'] = matchTxt(/tipo(?:\\s*veh[ií]culo)?\\s*[:\\t]\\s*([A-Za-z0-9\\- ]+)/i);
+                              if (!result['engine_number']) result['engine_number'] = matchTxt(/n[uú]mero\\s*motor\\s*[:\\t]\\s*([A-Za-z0-9\\-]+)/i);
+                              if (!result['vin']) result['vin'] = matchTxt(/(?:chasis|vin)\\s*[:\\t]\\s*([A-Za-z0-9\\-]+)/i);
+                              if (!result['color']) result['color'] = matchTxt(/color\\s*[:\\t]\\s*([A-Za-z0-9\\- ]+)/i);
+                              if (!result['fuel']) result['fuel'] = matchTxt(/combustible\\s*[:\\t]\\s*([A-Za-z0-9\\- ]+)/i);
 
                               return JSON.stringify(result);
                             })();
