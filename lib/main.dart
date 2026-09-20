@@ -1,3 +1,14 @@
+
+String _getFreshRandomChileanPlate() {
+  const letters = 'BCDFGHJKLPRSTVWXYZ';
+  final rand = Random();
+  String p = '';
+  for (int i = 0; i < 4; i++) {
+    p += letters[rand.nextInt(letters.length)];
+  }
+  int num = 10 + rand.nextInt(90);
+  return '$p$num';
+}
 import 'dart:math';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:http/http.dart' as http;
@@ -46,7 +57,7 @@ class LicensePlateDashboard extends StatefulWidget {
 class _LicensePlateDashboardState extends State<LicensePlateDashboard>
     with SingleTickerProviderStateMixin {
   String _selectedEngine = 'prt';
-  final TextEditingController _plateController = TextEditingController();
+  final TextEditingController _plateController = TextEditingController(text: _getFreshRandomChileanPlate());
   final FocusNode _focusNode = FocusNode();
   
   late AnimationController _scannerController;
@@ -54,7 +65,7 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
   
   bool _isLoading = false;
   Map<String, dynamic>? _vehicleData;
-  String _activeFormat = "DESCONOCIDO";
+  String _activeFormat = "AUTO NUEVO (4L+2N)";
 
   
   Map<String, dynamic>? _boostrStatus;
