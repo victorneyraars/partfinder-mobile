@@ -1242,6 +1242,8 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
                 _statusMessage = 'Toca la casilla para verificar';
               });
             }
+          } else if (msg.startsWith('DEBUG:')) {
+            debugPrint('[PRT_LOG] ' + msg);
           } else if (msg == 'SEARCHING') {
             if (mounted) {
               setState(() {
@@ -1450,17 +1452,38 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
           // Detección automática del token reCAPTCHA resuelto
           if (!searchTriggered) {
             var tokenInput = document.querySelector('textarea[name="g-recaptcha-response"], textarea#g-recaptcha-response');
-            if (tokenInput && tokenInput.value && tokenInput.value.length > 20) {
+            if (tokenInput && tokenInput.value && tokenInput.value.trim().length > 20) {
               searchTriggered = true;
               if (window.PrtBridge) {
                 window.PrtBridge.postMessage('SEARCHING');
               }
-              // Disparar submit o botón Buscar
-              var btn = document.querySelector('input[type="submit"][value*="Buscar"], input[id*="Buscar"], button[id*="Buscar"], input[type="submit"]');
-              if (btn) {
-                btn.click();
-              } else if (document.forms.length > 0) {
-                document.forms[0].submit();
+
+              // Buscar el botón o link específico de revisión técnica
+              var candidates = Array.from(document.querySelectorAll('input[type="submit"], input[type="button"], button, a'));
+              var targetBtn = null;
+
+              // Prioridad 1: Botón cuyo texto o ID contenga "consultar" o "buscar" cerca de la patente
+              for (var i = 0; i < candidates.length; i++) {
+                var el = candidates[i];
+                var str = ((el.value || '') + ' ' + (el.id || '') + ' ' + (el.name || '') + ' ' + (el.innerText || '')).toLowerCase();
+                if ((str.includes('buscar') || str.includes('consultar')) && !str.includes('searchbox')) {
+                  targetBtn = el;
+                  break;
+                }
+              }
+
+              if (targetBtn) {
+                if (window.PrtBridge) window.PrtBridge.postMessage('DEBUG:Clicking: ' + (targetBtn.id || targetBtn.value || targetBtn.tagName));
+                targetBtn.click();
+              } else {
+                // Si no hay botón explícito, invocar PostBack de SharePoint o submit del form de contenido
+                var mainForm = document.forms['aspnetForm'] || document.forms[0];
+                if (mainForm) {
+                  if (typeof WebForm_DoPostBackWithOptions === 'function') {
+                    if (window.PrtBridge) window.PrtBridge.postMessage('DEBUG:Invoking WebForm_DoPostBack');
+                  }
+                  mainForm.submit();
+                }
               }
             }
           }
