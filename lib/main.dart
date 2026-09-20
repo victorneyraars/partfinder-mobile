@@ -1198,7 +1198,7 @@ class PrtVerificationScreen extends StatefulWidget {
 
 class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
   bool _isLoading = true;
-  String _statusMessage = 'Toca "No soy un robot" para continuar';
+  String _statusMessage = 'Toca la casilla para verificar';
   late final WebViewController _controller;
 
   @override
@@ -1215,30 +1215,18 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
           onPageFinished: (_) {
             setState(() => _isLoading = false);
             SystemChannels.textInput.invokeMethod('TextInput.hide');
-            _injectFocusSetup();
+            _injectPureCaptchaUI();
           },
         ),
       )
       ..loadRequest(Uri.parse('https://www.prt.cl/Paginas/RevisionTecnica.aspx'));
   }
 
-  void _injectFocusSetup() {
+  void _injectPureCaptchaUI() {
     final js = """
       (function() {
-        // 1. Limpieza física del DOM: eliminar nodos basura en lugar de sólo CSS
-        function cleanJunk() {
-          var selectors = [
-            'header', 'nav', 'footer', '#suiteBar', '#s4-titlerow', '#titleAreaBox',
-            'img[src*="afiche" i]', 'img[src*="banner" i]', 'img[src*="prt" i]', 'img[src*="logo" i]',
-            'table[id*="calendario" i]', '.ms-core-navigation', '#sideNavBox', 'td[id*="RightCell"]'
-          ];
-          selectors.forEach(function(sel) {
-            document.querySelectorAll(sel).forEach(function(el) {
-              try { el.remove(); } catch(e) { el.style.display = 'none'; }
-            });
-          });
-
-          // Asegurar viewport adaptado sin zoom horizontal descontrolado
+        function isolateCaptcha() {
+          // Viewport adaptado y bloqueado contra zoom desfasado
           var m = document.querySelector('meta[name="viewport"]');
           if (!m) {
             m = document.createElement('meta');
@@ -1247,80 +1235,106 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
           }
           m.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no';
 
-          // Fondo oscuro unificado y ajuste de ancho
-          document.body.style.backgroundColor = '#0F172A';
-          document.body.style.color = '#F8FAFC';
-          document.body.style.maxWidth = '100vw';
-          document.body.style.overflowX = 'hidden';
+          // Autocompletar patente en el input oculto
+          document.querySelectorAll('input[type="text"]').forEach(function(inp) {
+            if (inp.id.toLowerCase().includes('patente') || inp.name.toLowerCase().includes('patente')) {
+              if (inp.value !== '${widget.targetPlate}') {
+                inp.value = '${widget.targetPlate}';
+                inp.dispatchEvent(new Event('input', { bubbles: true }));
+                inp.dispatchEvent(new Event('change', { bubbles: true }));
+              }
+              inp.blur();
+            }
+          });
+
+          // Inyectar CSS de Aislamiento Total
+          var s = document.getElementById('pf-pure-captcha-style');
+          if (!s) {
+            s = document.createElement('style');
+            s.id = 'pf-pure-captcha-style';
+            document.head.appendChild(s);
+          }
+          s.innerHTML = `
+            /* Ocultar absolutamente todo el contenido institucional */
+            html, body {
+              background-color: #0F172A !important;
+              margin: 0 !important;
+              padding: 0 !important;
+              overflow: hidden !important;
+              width: 100vw !important;
+              height: 100vh !important;
+            }
+            body > * {
+              visibility: hidden !important;
+            }
+
+            /* Hacer visible únicamente el contenedor reCAPTCHA y centrarlo */
+            .g-recaptcha, div:has(iframe[src*="anchor"]) {
+              visibility: visible !important;
+              position: fixed !important;
+              left: 50% !important;
+              top: 35% !important;
+              transform: translate(-50%, -50%) !important;
+              -webkit-transform: translate(-50%, -50%) !important;
+              z-index: 1000 !important;
+              margin: 0 !important;
+              padding: 0 !important;
+            }
+            .g-recaptcha * {
+              visibility: visible !important;
+            }
+            .g-recaptcha-bubble-arrow {
+              display: none !important;
+            }
+
+            /* Centrado simétrico de las fotos del desafío */
+            div:has(iframe[src*="bframe"]),
+            div:has(iframe[title*="challenge"]),
+            div:has(iframe[title*="desafío"]),
+            .pf-bframe-centered {
+              visibility: visible !important;
+              position: fixed !important;
+              left: 50% !important;
+              top: 50% !important;
+              right: auto !important;
+              bottom: auto !important;
+              transform: translate(-50%, -50%) scale(var(--pf-scale, 0.90)) !important;
+              -webkit-transform: translate(-50%, -50%) scale(var(--pf-scale, 0.90)) !important;
+              transform-origin: center center !important;
+              z-index: 2147483647 !important;
+              pointer-events: auto !important;
+            }
+            div:has(iframe[src*="bframe"]) * {
+              visibility: visible !important;
+            }
+          `;
         }
 
-        cleanJunk();
+        isolateCaptcha();
 
-        // 2. Colocar la patente y desenfocar
-        var plateInput = null;
-        document.querySelectorAll('input[type="text"]').forEach(function(inp) {
-          if (inp.id.toLowerCase().includes('patente') || inp.name.toLowerCase().includes('patente')) {
-            plateInput = inp;
-            inp.value = '${widget.targetPlate}';
-            inp.dispatchEvent(new Event('input', { bubbles: true }));
-            inp.dispatchEvent(new Event('change', { bubbles: true }));
-            inp.style.fontSize = '24px';
-            inp.style.fontWeight = 'bold';
-            inp.style.textAlign = 'center';
-            inp.style.background = '#1E293B';
-            inp.style.color = '#38BDF8';
-            inp.style.border = '2px solid #0284C7';
-            inp.style.borderRadius = '8px';
-            inp.blur();
-          }
-        });
-
-        // 3. Centrado del desafío fotográfico de reCAPTCHA
-        var s = document.getElementById('pf-captcha-style') || document.createElement('style');
-        s.id = 'pf-captcha-style';
-        s.innerHTML = `
-          div:has(iframe[src*="bframe"]),
-          div:has(iframe[title*="challenge"]),
-          div:has(iframe[title*="desafío"]),
-          .pf-centered-active {
-            position: fixed !important;
-            left: 50% !important;
-            right: auto !important;
-            transform: translateX(-50%) scale(var(--pf-scale, 0.90)) !important;
-            -webkit-transform: translateX(-50%) scale(var(--pf-scale, 0.90)) !important;
-            transform-origin: top center !important;
-            z-index: 2147483647 !important;
-          }
-        `;
-        document.head.appendChild(s);
-
-        // 4. Auto-Scroll suave directo hacia el Captcha
-        setTimeout(function() {
-          var captcha = document.querySelector('.g-recaptcha, iframe[src*="recaptcha"]');
-          if (captcha) {
-            captcha.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          }
-        }, 300);
-
-        // Bucle de mantenimiento de escala y centrado para las fotos del captcha
+        // Ciclo para mantener centrado y escala reactiva en móviles
         setInterval(function() {
-          cleanJunk();
+          isolateCaptcha();
 
           var bframe = document.querySelector('iframe[src*="bframe"]');
           if (bframe) {
-            var c = bframe;
-            while (c.parentElement && c.parentElement !== document.body && c.parentElement.tagName !== 'HTML') c = c.parentElement;
-            if (c && c !== document.body && c.tagName !== 'FORM') {
+            var container = bframe;
+            while (container.parentElement && container.parentElement !== document.body && container.parentElement.tagName !== 'HTML') {
+              container = container.parentElement;
+            }
+            if (container && container !== document.body && container.tagName !== 'FORM') {
               var winW = window.innerWidth || document.documentElement.clientWidth;
               var winH = window.innerHeight || document.documentElement.clientHeight;
-              var scale = Math.min((winW - 14) / 400, (winH - 100) / 580);
-              if (scale > 1.0) scale = 1.0;
-              if (scale < 0.72) scale = 0.72;
-              document.documentElement.style.setProperty('--pf-scale', scale.toFixed(3));
-              if (!c.classList.contains('pf-centered-active')) c.classList.add('pf-centered-active');
+              var targetScale = Math.min((winW - 16) / 400, (winH - 80) / 580);
+              if (targetScale > 1.0) targetScale = 1.0;
+              if (targetScale < 0.72) targetScale = 0.72;
+              document.documentElement.style.setProperty('--pf-scale', targetScale.toFixed(3));
+              if (!container.classList.contains('pf-bframe-centered')) {
+                container.classList.add('pf-bframe-centered');
+              }
             }
           }
-        }, 200);
+        }, 120);
       })();
     """;
     _controller.runJavaScript(js);
@@ -1340,8 +1354,14 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('Verificación Oficial PRT', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
-            Text('Patente: ${widget.targetPlate}', style: const TextStyle(color: Color(0xFF10B981), fontSize: 12, fontWeight: FontWeight.bold)),
+            const Text(
+              'Verificación Oficial PRT',
+              style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+            ),
+            Text(
+              'Patente: ${widget.targetPlate}',
+              style: const TextStyle(color: Color(0xFF10B981), fontSize: 12, fontWeight: FontWeight.bold),
+            ),
           ],
         ),
         bottom: PreferredSize(
