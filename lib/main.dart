@@ -1228,15 +1228,22 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
   void _injectOptimization() {
     final js = """
       (function() {
+        // 1. Viewport adaptable
         var meta = document.querySelector('meta[name="viewport"]');
         if (!meta) {
           meta = document.createElement('meta');
           meta.name = 'viewport';
           document.head.appendChild(meta);
         }
-        meta.content = 'width=device-width, initial-scale=1.0, user-scalable=yes';
+        meta.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes';
 
-        var style = document.createElement('style');
+        // 2. CSS Maestro Responsive
+        var style = document.getElementById('pf-responsive-style');
+        if (!style) {
+          style = document.createElement('style');
+          style.id = 'pf-responsive-style';
+          document.head.appendChild(style);
+        }
         style.innerHTML = `
           header, nav, footer, #suiteBar, #s4-titlerow, #titleAreaBox, .banner,
           [id*="Logo"], [id*="siteIcon"], [class*="logo"],
@@ -1250,7 +1257,8 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             overflow-y: auto !important;
             -webkit-overflow-scrolling: touch !important;
             margin: 0 !important;
-            padding: 6px !important;
+            padding: 4px !important;
+            box-sizing: border-box !important;
           }
           input[type="text"] {
             font-size: 24px !important;
@@ -1268,21 +1276,73 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             justify-content: center !important;
             margin: 10px auto !important;
           }
-        `;
-        document.head.appendChild(style);
-
-        // Autocompletar la patente objetivo
-        var inputs = document.querySelectorAll('input[type="text"]');
-        inputs.forEach(function(inp) {
-          if (inp.id.toLowerCase().includes('patente') || inp.name.toLowerCase().includes('patente')) {
-            inp.value = '${widget.targetPlate}';
-            inp.dispatchEvent(new Event('input', { bubbles: true }));
-            inp.dispatchEvent(new Event('change', { bubbles: true }));
+          .g-recaptcha-bubble-arrow {
+            display: none !important;
           }
-        });
 
-        // Detector automático de resultados: cuando aparezca la tabla, extraer inmediatamente
-        function checkAndExtract() {
+          /* CENTRADO HORIZONTAL Y ESCALA RESPONSIVE INALTERABLE */
+          div:has(iframe[src*="bframe"]),
+          div:has(iframe[title*="challenge"]),
+          div:has(iframe[title*="desafío"]),
+          .pf-centered-challenge {
+            left: 50% !important;
+            right: auto !important;
+            transform: translateX(-50%) scale(var(--pf-scale, 0.90)) !important;
+            -webkit-transform: translateX(-50%) scale(var(--pf-scale, 0.90)) !important;
+            transform-origin: top center !important;
+            -webkit-transform-origin: top center !important;
+            z-index: 2147483647 !important;
+          }
+        `;
+
+        // 3. Limpieza periódica inicial de elementos de SharePoint
+        function cleanAndFill() {
+          document.querySelectorAll('img').forEach(function(img) {
+            var src = (img.src || '').toLowerCase();
+            if (src.includes('logo') || src.includes('prt') || src.includes('afiche') || img.width > 80) {
+              var p = img.closest('table') || img.closest('tr') || img.closest('div') || img;
+              if (p && p !== document.body) p.style.setProperty('display', 'none', 'important');
+            }
+          });
+
+          var inputs = document.querySelectorAll('input[type="text"]');
+          inputs.forEach(function(inp) {
+            if (inp.id.toLowerCase().includes('patente') || inp.name.toLowerCase().includes('patente')) {
+              if (inp.value !== '${widget.targetPlate}') {
+                inp.value = '${widget.targetPlate}';
+                inp.dispatchEvent(new Event('input', { bubbles: true }));
+                inp.dispatchEvent(new Event('change', { bubbles: true }));
+              }
+            }
+          });
+        }
+
+        cleanAndFill();
+        var cleanInterval = setInterval(cleanAndFill, 400);
+        setTimeout(function() { clearInterval(cleanInterval); }, 3500);
+
+        // 4. Observador reactivo de escala horizontal y auto-extracción
+        var observer = new MutationObserver(function() {
+          // Detectar bframe y aplicar clase de centrado horizontal
+          var bframe = document.querySelector('iframe[src*="bframe"]');
+          if (bframe) {
+            var container = bframe;
+            while (container.parentElement && container.parentElement !== document.body && container.parentElement.tagName !== 'HTML') {
+              container = container.parentElement;
+            }
+            if (container && container !== document.body) {
+              var winW = window.innerWidth || document.documentElement.clientWidth;
+              var targetScale = Math.min(1.0, (winW - 14) / 400);
+              if (targetScale < 0.72) targetScale = 0.72;
+              document.documentElement.style.setProperty('--pf-scale', targetScale.toFixed(3));
+
+              if (!container.classList.contains('pf-centered-challenge')) {
+                container.classList.add('pf-centered-challenge');
+              }
+            }
+          }
+
+          // Auto-extracción cuando carguen los resultados
           var res = {};
           var rows = document.querySelectorAll('tr');
           rows.forEach(function(r) {
@@ -1307,10 +1367,9 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
               window.PrtBridge.postMessage(JSON.stringify(res));
             }
           }
-        }
+        });
 
-        var obs = new MutationObserver(checkAndExtract);
-        obs.observe(document.body, { childList: true, subtree: true });
+        observer.observe(document.body, { childList: true, subtree: true });
       })();
     """;
     _controller.runJavaScript(js);
