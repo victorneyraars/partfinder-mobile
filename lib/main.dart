@@ -1234,37 +1234,12 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
       ..addJavaScriptChannel(
         'PrtBridge',
         onMessageReceived: (JavaScriptMessage message) {
-          final msg = message.message;
-          if (msg == 'CAPTCHA_READY') {
+          if (message.message == 'CAPTCHA_READY') {
             if (mounted && !_isReady) {
               setState(() {
                 _isReady = true;
                 _statusMessage = 'Toca la casilla para verificar';
               });
-            }
-          } else if (msg.startsWith('DEBUG:')) {
-            debugPrint('[PRT_LOG] ' + msg);
-            if (mounted) {
-              setState(() {
-                _statusMessage = msg.replaceAll('DEBUG:', '');
-              });
-            }
-          } else if (msg == 'SEARCHING') {
-            if (mounted) {
-              setState(() {
-                _statusMessage = 'Verificación aprobada. Obteniendo datos...';
-              });
-            }
-          } else if (msg.startsWith('DATA:')) {
-            try {
-              final rawJson = msg.substring(5);
-              final Map<String, dynamic> data = json.decode(rawJson);
-              widget.onVehicleSaved(data);
-              if (mounted) {
-                Navigator.pop(context);
-              }
-            } catch (e) {
-              debugPrint('Error al decodificar datos PRT: $e');
             }
           }
         },
@@ -1286,113 +1261,127 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
   void _injectZeroFlickerEngine() {
     final js = """
       (function() {
-        // 1. Rellenar patente
-        var inputs = document.querySelectorAll('input[type="text"]');
-        for (var i = 0; i < inputs.length; i++) {
-          var inp = inputs[i];
-          if ((inp.id && inp.id.toLowerCase().includes('patente')) || 
-              (inp.name && inp.name.toLowerCase().includes('patente')) || 
-              (inp.placeholder && inp.placeholder.toLowerCase().includes('patente'))) {
-            inp.value = '${widget.targetPlate}';
-            inp.dispatchEvent(new Event('input', { bubbles: true }));
-            inp.dispatchEvent(new Event('change', { bubbles: true }));
-          }
+        var m = document.querySelector('meta[name="viewport"]');
+        if (!m) {
+          m = document.createElement('meta');
+          m.name = 'viewport';
+          document.head.appendChild(m);
         }
+        m.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no';
 
-        // 2. Extraer datos si ya cargó el resultado técnico
-        var cells = Array.from(document.querySelectorAll('td, th, span, div, p, label'));
-        var data = {
-          patente: '${widget.targetPlate}',
-          marca: '',
-          modelo: '',
-          anio: '',
-          tipo: '',
-          nro_motor: '',
-          chasis: '',
-          vin: '',
-          sello: '',
-          fuente: 'PRT Local'
-        };
-        var foundAny = false;
-        function getNextVal(node) {
-          var next = node.nextElementSibling;
-          if (next && next.innerText.trim()) return next.innerText.trim();
-          if (node.parentElement && node.parentElement.nextElementSibling) {
-            return node.parentElement.nextElementSibling.innerText.trim();
+        // 1. Rellenar patente en el input subyacente
+        document.querySelectorAll('input[type="text"]').forEach(function(inp) {
+          if (inp.id.toLowerCase().includes('patente') || inp.name.toLowerCase().includes('patente')) {
+            if (inp.value !== '${widget.targetPlate}') {
+              inp.value = '${widget.targetPlate}';
+              inp.dispatchEvent(new Event('input', { bubbles: true }));
+              inp.dispatchEvent(new Event('change', { bubbles: true }));
+            }
           }
-          return '';
-        }
-        cells.forEach(function(el) {
-          var t = (el.innerText || '').toLowerCase().replace(':', '').trim();
-          if (t === 'marca') { data.marca = getNextVal(el); foundAny = true; }
-          else if (t === 'modelo') { data.modelo = getNextVal(el); foundAny = true; }
-          else if (t === 'año' || t === 'ano') { data.anio = getNextVal(el); foundAny = true; }
-          else if (t === 'tipo' || t.includes('vehículo') || t.includes('vehiculo')) { data.tipo = getNextVal(el); foundAny = true; }
-          else if (t.includes('motor')) { data.nro_motor = getNextVal(el); foundAny = true; }
-          else if (t.includes('chasis')) { data.chasis = getNextVal(el); foundAny = true; }
-          else if (t === 'vin') { data.vin = getNextVal(el); foundAny = true; }
-          else if (t.includes('sello')) { data.sello = getNextVal(el); foundAny = true; }
         });
 
-        if (foundAny && (data.marca || data.modelo || data.nro_motor || data.chasis)) {
-          if (window.PrtBridge) {
-            window.PrtBridge.postMessage('DATA:' + JSON.stringify(data));
-            return;
-          }
-        }
-
-        // 3. Ocultar menús molestos de SharePoint pero SIN tocar el formulario ni los iframes
-        var s = document.getElementById('pf-cleanup-style') || document.createElement('style');
-        s.id = 'pf-cleanup-style';
+        // 2. CSS que oculta absolutamente todo SharePoint
+        var s = document.getElementById('pf-clean-captcha-style') || document.createElement('style');
+        s.id = 'pf-clean-captcha-style';
         s.innerHTML = `
-          header, footer, nav, #suiteBarLeft, #suiteBarRight, #s4-ribbonrow {
+          html, body {
+            background-color: #0F172A !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            width: 100vw !important;
+            height: 100vh !important;
+            overflow: hidden !important;
+          }
+
+          /* Ocultar SharePoint por completo */
+          #s4-workspace, #s4-bodyContainer, header, nav, footer,
+          .ms-main, form > *:not(#pf-captcha-host), img, table {
             display: none !important;
           }
-          body {
-            background: #0F172A !important;
-            color: #FFFFFF !important;
+
+          /* Contenedor exacto del Checkbox "No soy un robot" */
+          #pf-captcha-host {
+            position: fixed !important;
+            left: 50% !important;
+            top: 45% !important;
+            width: 304px !important;
+            height: 78px !important;
+            transform: translate(-50%, -50%) !important;
+            -webkit-transform: translate(-50%, -50%) !important;
+            z-index: 1000 !important;
+            background: transparent !important;
+            border-radius: 4px !important;
+            box-shadow: 0 4px 18px rgba(0,0,0,0.5) !important;
+            overflow: hidden !important;
+          }
+
+          #pf-captcha-host iframe {
+            width: 304px !important;
+            height: 78px !important;
+            border: none !important;
+          }
+
+          /* Desafío fotográfico centrado cuando se active */
+          div:has(iframe[src*="bframe"]),
+          div:has(iframe[title*="challenge"]),
+          div:has(iframe[title*="desafío"]),
+          .pf-bframe-centered {
+            position: fixed !important;
+            left: 50% !important;
+            top: 50% !important;
+            transform: translate(-50%, -50%) scale(var(--pf-scale, 0.90)) !important;
+            -webkit-transform: translate(-50%, -50%) scale(var(--pf-scale, 0.90)) !important;
+            transform-origin: center center !important;
+            z-index: 2147483647 !important;
+            pointer-events: auto !important;
           }
         `;
         document.head.appendChild(s);
 
-        // 4. Centrar suavemente la vista en el captcha sin sacarlo de su jerarquía
-        var captchaBox = document.querySelector('.g-recaptcha') || document.querySelector('iframe[src*="anchor"]');
-        if (captchaBox) {
-          captchaBox.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          if (window.PrtBridge && !window.__pfNotifiedReady) {
-            window.__pfNotifiedReady = true;
-            window.PrtBridge.postMessage('CAPTCHA_READY');
+        function mountCaptcha() {
+          var anchor = document.querySelector('iframe[src*="anchor"]');
+          if (anchor) {
+            var host = document.getElementById('pf-captcha-host');
+            if (!host) {
+              host = document.createElement('div');
+              host.id = 'pf-captcha-host';
+              document.body.appendChild(host);
+            }
+            if (anchor.parentElement !== host) {
+              host.appendChild(anchor);
+            }
+            // Notificar a Flutter que el captcha ya está aislado y listo para verse
+            if (window.PrtBridge && !window.__pfNotifiedReady) {
+              window.__pfNotifiedReady = true;
+              window.PrtBridge.postMessage('CAPTCHA_READY');
+            }
           }
         }
 
-        // 5. Vigilante de token completado: presionar el botón de búsqueda original
-        var autoSubmitted = false;
-        setInterval(function() {
-          var tokenArea = document.querySelector('textarea[name="g-recaptcha-response"], textarea#g-recaptcha-response');
-          if (!autoSubmitted && tokenArea && tokenArea.value && tokenArea.value.trim().length > 30) {
-            autoSubmitted = true;
-            if (window.PrtBridge) window.PrtBridge.postMessage('SEARCHING');
+        mountCaptcha();
 
-            // Localizar el botón real de búsqueda del formulario PRT
-            var buttons = Array.from(document.querySelectorAll('input[type="submit"], input[type="button"], a[id*="btn"], button'));
-            var targetBtn = null;
-            for (var b = 0; b < buttons.length; b++) {
-              var btnTxt = ((buttons[b].value || '') + ' ' + (buttons[b].innerText || '') + ' ' + (buttons[b].id || '')).toLowerCase();
-              if (btnTxt.includes('buscar') || btnTxt.includes('consultar')) {
-                targetBtn = buttons[b];
-                break;
+        setInterval(function() {
+          mountCaptcha();
+
+          var bframe = document.querySelector('iframe[src*="bframe"]');
+          if (bframe) {
+            var c = bframe;
+            while (c.parentElement && c.parentElement !== document.body && c.parentElement.tagName !== 'HTML') {
+              c = c.parentElement;
+            }
+            if (c && c !== document.body && c.tagName !== 'FORM') {
+              var winW = window.innerWidth || document.documentElement.clientWidth;
+              var winH = window.innerHeight || document.documentElement.clientHeight;
+              var scale = Math.min((winW - 16) / 400, (winH - 80) / 580);
+              if (scale > 1.0) scale = 1.0;
+              if (scale < 0.70) scale = 0.70;
+              document.documentElement.style.setProperty('--pf-scale', scale.toFixed(3));
+              if (!c.classList.contains('pf-bframe-centered')) {
+                c.classList.add('pf-bframe-centered');
               }
             }
-
-            if (targetBtn) {
-              targetBtn.click();
-            } else if (typeof __doPostBack === 'function') {
-              __doPostBack('', '');
-            } else if (document.forms.length > 0) {
-              document.forms[0].submit();
-            }
           }
-        }, 300);
+        }, 100);
       })();
     """;
     _controller.runJavaScript(js);
