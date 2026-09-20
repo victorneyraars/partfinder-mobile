@@ -1139,15 +1139,49 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
                   ],
                 ),
               ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF10B981).withOpacity(0.2),
-                  borderRadius: BorderRadius.circular(6),
-                  border: Border.all(color: const Color(0xFF10B981)),
-                ),
-                child: const Text('VERIFICADO', style: TextStyle(color: Color(0xFF10B981), fontSize: 10, fontWeight: FontWeight.w800)),
-              ),
+              Builder(
+                          builder: (context) {
+                            final src = _vehicleData?['data_source']?.toString().toUpperCase() ?? '';
+                            Color bColor = const Color(0xFF10B981);
+                            IconData bIcon = Icons.verified_user;
+                            String bText = 'PRT CHILE';
+
+                            if (src.contains('CACHE')) {
+                              bColor = const Color(0xFFA855F7);
+                              bIcon = Icons.save;
+                              bText = 'CACHÉ LOCAL';
+                            } else if (src.contains('BOOSTR')) {
+                              bColor = const Color(0xFF38BDF8);
+                              bIcon = Icons.bolt;
+                              bText = 'BOOSTR API';
+                            }
+
+                            return Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: bColor.withOpacity(0.18),
+                                borderRadius: BorderRadius.circular(6),
+                                border: Border.all(color: bColor, width: 0.9),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(bIcon, color: bColor, size: 12),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    bText,
+                                    style: TextStyle(
+                                      color: bColor,
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.w900,
+                                      letterSpacing: 0.6,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            );
+                          },
+                        ),
             ],
           ),
           if (_vehicleData!['modelo'] != null) ...[
