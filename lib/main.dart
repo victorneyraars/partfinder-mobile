@@ -1,3 +1,4 @@
+import 'package:webview_flutter/webview_flutter.dart';
 import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
 import 'dart:async';
@@ -183,6 +184,13 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
           });
           _fetchBoostrTelemetry();
         } else {
+          try {
+            final errBody = json.decode(response.body);
+            if (errBody['detail'] is Map && errBody['detail']['require_prt_solve'] == true) {
+              _showPrtCaptchaModal(cleanPlate);
+              return;
+            }
+          } catch (_) {}
           _showSnack('No se encontraron especificaciones para $rawPlate');
         }
       } else {

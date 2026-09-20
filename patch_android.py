@@ -20,6 +20,11 @@ if os.path.exists(gradle_path):
     if 'partfinder-key' not in content:
         content = re.sub(r'android\s*\{', 'android {\n' + signing_block, content, count=1)
         content = re.sub(r'signingConfig\s*=?\s*signingConfigs\.debug', 'signingConfig signingConfigs.release', content)
+        
+    # Forzar minSdkVersion 21 para soporte de WebView moderno
+    if 'minSdkVersion' in content:
+        content = re.sub(r'minSdkVersion\s+.*', 'minSdkVersion 21', content)
+
         with open(gradle_path, 'w') as f:
             f.write(content)
     print(">>> build.gradle configurado con keystore permanente.")
