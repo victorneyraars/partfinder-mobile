@@ -479,98 +479,7 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
                 _buildHeader(),
-                
-                if (_vehicleData!['revisions'] != null && (_vehicleData!['revisions'] as List).isNotEmpty) ...[
-                  const SizedBox(height: 16),
-                  Container(
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF1E293B),
-                      borderRadius: BorderRadius.circular(14),
-                      border: Border.all(color: const Color(0xFF334155)),
-                    ),
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: const [
-                            Icon(Icons.history_edu_rounded, color: Color(0xFF38BDF8), size: 20),
-                            SizedBox(width: 8),
-                            Text(
-                              'HISTORIAL OFICIAL PRT',
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontWeight: FontWeight.bold,
-                                fontSize: 14,
-                                letterSpacing: 0.5,
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 12),
-                        ListView.separated(
-                          shrinkWrap: true,
-                          physics: const NeverScrollableScrollPhysics(),
-                          itemCount: (_vehicleData!['revisions'] as List).length,
-                          separatorBuilder: (_, __) => const Divider(color: Color(0xFF334155), height: 16),
-                          itemBuilder: (context, idx) {
-                            final rev = (_vehicleData!['revisions'] as List)[idx];
-                            final isLatest = idx == 0;
-                            return Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                  decoration: BoxDecoration(
-                                    color: isLatest ? const Color(0xFF10B981).withOpacity(0.2) : Colors.transparent,
-                                    borderRadius: BorderRadius.circular(6),
-                                    border: Border.all(
-                                      color: isLatest ? const Color(0xFF10B981) : const Color(0xFF64748B),
-                                    ),
-                                  ),
-                                  child: Text(
-                                    rev['date'] ?? '',
-                                    style: TextStyle(
-                                      color: isLatest ? const Color(0xFF10B981) : Colors.white70,
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 12,
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        rev['plant'] ?? 'Planta PRT',
-                                        style: const TextStyle(
-                                          color: Colors.white,
-                                          fontSize: 13,
-                                          fontWeight: FontWeight.w600,
-                                        ),
-                                      ),
-                                      const SizedBox(height: 2),
-                                      Text(
-                                        'Certificado: ${rev['certificate'] ?? 'N/A'} • Planta: ${rev['plant_code'] ?? 'N/A'}',
-                                        style: const TextStyle(
-                                          color: Color(0xFF94A3B8),
-                                          fontSize: 11,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ],
-                            );
-                          },
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-    
-const SizedBox(height: 24),
+                const SizedBox(height: 24),
                 _buildPhysicalPlate(),
                 const SizedBox(height: 16),
                 _buildFormatPills(),
@@ -1313,17 +1222,16 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
           onPageFinished: (String url) {
             setState(() => _isLoading = false);
             SystemChannels.textInput.invokeMethod('TextInput.hide');
-            _injectHeadlessAutomation();
+            _injectHeadlessEngine();
           },
         ),
       )
       ..loadRequest(Uri.parse('https://www.prt.cl/Paginas/RevisionTecnica.aspx'));
   }
 
-  void _injectHeadlessAutomation() {
+  void _injectHeadlessEngine() {
     final js = """
       (function() {
-        // 1. Viewport adaptable
         var meta = document.querySelector('meta[name="viewport"]');
         if (!meta) {
           meta = document.createElement('meta');
@@ -1332,7 +1240,6 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
         }
         meta.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no';
 
-        // 2. Estilos: centrar exclusivamente la caja de la patente y el captcha
         var style = document.getElementById('pf-headless-style');
         if (!style) {
           style = document.createElement('style');
@@ -1351,7 +1258,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             max-width: 100vw !important;
             overflow-x: hidden !important;
             margin: 0 !important;
-            padding: 8px !important;
+            padding: 6px !important;
             box-sizing: border-box !important;
             background-color: #0F172A !important;
           }
@@ -1364,7 +1271,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             color: #38BDF8 !important;
             border: 2px solid #0284C7 !important;
             border-radius: 8px !important;
-            margin: 8px auto !important;
+            margin: 6px auto !important;
             display: block !important;
             max-width: 250px !important;
           }
@@ -1376,7 +1283,6 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
           .g-recaptcha-bubble-arrow {
             display: none !important;
           }
-          /* Centrado simétrico de las fotos */
           div:has(iframe[src*="bframe"]),
           div:has(iframe[title*="challenge"]),
           div:has(iframe[title*="desafío"]),
@@ -1390,7 +1296,6 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
           }
         `;
 
-        // 3. Autocompletar la patente y cerrar teclado
         var inputs = document.querySelectorAll('input[type="text"]');
         inputs.forEach(function(inp) {
           if (inp.id.toLowerCase().includes('patente') || inp.name.toLowerCase().includes('patente')) {
@@ -1403,9 +1308,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
           }
         });
 
-        // 4. Bucle inteligente: Auto-clic al resolver captcha y extracción completa
         setInterval(function() {
-          // Centrado dinámico del desafío de fotos
           var bframe = document.querySelector('iframe[src*="bframe"]');
           if (bframe) {
             var container = bframe;
@@ -1425,19 +1328,15 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             }
           }
 
-          // A) DETECTAR SI EL CAPTCHA SE RESOLVIÓ Y AUTO-DISPARAR LA BÚSQUEDA
-          var recaptchaResponse = document.querySelector('textarea[name="g-recaptcha-response"], #g-recaptcha-response');
-          if (recaptchaResponse && recaptchaResponse.value && recaptchaResponse.value.length > 20) {
+          var token = document.querySelector('textarea[name="g-recaptcha-response"], #g-recaptcha-response');
+          if (token && token.value && token.value.length > 20) {
             if (!window.__pfSearched) {
               window.__pfSearched = true;
-              var searchBtn = document.querySelector('input[type="image"], input[src*="lupa"], input[src*="buscar"], a[id*="Buscar"]');
-              if (searchBtn) {
-                searchBtn.click();
-              }
+              var btn = document.querySelector('input[type="image"], input[src*="lupa"], input[src*="buscar"], a[id*="Buscar"]');
+              if (btn) btn.click();
             }
           }
 
-          // B) EXPANDIR HISTORIAL DE REVISIÓN TÉCNICA
           document.querySelectorAll('a, div, span, td').forEach(function(el) {
             var txt = (el.innerText || '').toLowerCase();
             if (txt.includes('pinche para ver información') || txt.includes('información de revisión técnica')) {
@@ -1448,7 +1347,6 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             }
           });
 
-          // C) EXTRAER TODOS LOS DATOS
           var res = {};
           var vehicleTable = null;
           var inspectionTable = null;
@@ -1486,7 +1384,6 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             });
           }
 
-          // Historial completo de revisiones técnicas
           if (inspectionTable) {
             var iRows = inspectionTable.querySelectorAll('tr');
             var revList = [];
@@ -1510,7 +1407,6 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             }
           }
 
-          // D) ENVIAR Y CERRAR
           var validPlate = (res['plate'] || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
           var expectedPlate = '${widget.targetPlate}'.toUpperCase().replace(/[^A-Z0-9]/g, '');
 
@@ -1520,7 +1416,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
               window.PrtBridge.postMessage(JSON.stringify(res));
             }
           }
-        }, 150);
+        }, 140);
       })();
     """;
     _controller.runJavaScript(js);
@@ -1530,7 +1426,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
     if (_isAutoProcessing) return;
     setState(() {
       _isAutoProcessing = true;
-      _statusMessage = '¡Verificado! Sincronizando ficha técnica...';
+      _statusMessage = '¡Validado! Sincronizando ficha e historial...';
     });
 
     try {
@@ -1553,6 +1449,82 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
       }
     } catch (_) {
       if (mounted) Navigator.pop(context);
+    }
+  }
+
+  Future<void> _manualExtract() async {
+    setState(() => _isAutoProcessing = true);
+    try {
+      final js = """
+        (function() {
+          var res = {};
+          var vehicleTable = null;
+          var inspectionTable = null;
+          document.querySelectorAll('table').forEach(function(tbl) {
+            var tText = tbl.innerText || '';
+            if (tText.includes('Marca') && (tText.includes('Patente') || tText.includes('Modelo'))) vehicleTable = tbl;
+            if (tText.includes('Cod.Planta') || (tText.includes('Planta') && tText.includes('Fecha'))) inspectionTable = tbl;
+          });
+          if (vehicleTable) {
+            var rows = vehicleTable.querySelectorAll('tr');
+            rows.forEach(function(r) {
+              var cells = Array.from(r.querySelectorAll('td, th')).map(function(c) { return c.innerText.trim(); }).filter(Boolean);
+              if (cells.length >= 2) {
+                var k = cells[0].toLowerCase();
+                var v = cells[cells.length - 1];
+                if (k.includes('patente')) res['plate'] = v;
+                else if (k.includes('tipo') && !k.includes('sello')) res['type'] = v;
+                else if (k.includes('marca')) res['make'] = v;
+                else if (k.includes('modelo')) res['model'] = v;
+                else if (k.includes('año') || k.includes('fabricaci')) res['year'] = v;
+                else if (k.includes('motor')) res['engine_number'] = v;
+                else if (k.includes('chasis')) res['chassis'] = v;
+                else if (k.includes('vin')) res['vin'] = v;
+                else if (k.includes('sello')) res['seal_type'] = v;
+              }
+            });
+          }
+          if (inspectionTable) {
+            var iRows = inspectionTable.querySelectorAll('tr');
+            var revList = [];
+            for (var idx = 1; idx < iRows.length; idx++) {
+              var rowCells = Array.from(iRows[idx].querySelectorAll('td')).map(function(c) { return c.innerText.trim(); });
+              if (rowCells.length >= 3 && rowCells[0].length > 4) {
+                revList.push({
+                  'date': rowCells[0],
+                  'plant_code': rowCells[1],
+                  'plant': rowCells[2],
+                  'certificate': rowCells.length >= 4 ? rowCells[3] : ''
+                });
+              }
+            }
+            if (revList.length > 0) {
+              res['revisions'] = revList;
+              res['rt_date'] = revList[0]['date'];
+              res['rt_plant_code'] = revList[0]['plant_code'];
+              res['rt_plant'] = revList[0]['plant'];
+              res['rt_certificate'] = revList[0]['certificate'];
+            }
+          }
+          return JSON.stringify(res);
+        })();
+      """;
+      final rawResult = await _controller.runJavaScriptReturningResult(js);
+      String cleanJson = rawResult.toString();
+      if (cleanJson.startsWith('"') && cleanJson.endsWith('"')) {
+        cleanJson = json.decode(cleanJson);
+      }
+      final Map<String, dynamic> scraped = json.decode(cleanJson);
+      if (scraped.isNotEmpty && (scraped['make'] != null || scraped['model'] != null)) {
+        _handleAutoScraped(json.encode(scraped));
+      } else {
+        setState(() => _isAutoProcessing = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Esperando que aparezcan los datos del portal...')),
+        );
+      }
+    } catch (e) {
+      setState(() => _isAutoProcessing = false);
     }
   }
 
@@ -1580,6 +1552,15 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             ),
           ],
         ),
+        actions: [
+          TextButton.icon(
+            onPressed: _isAutoProcessing ? null : _manualExtract,
+            icon: _isAutoProcessing
+                ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                : const Icon(Icons.download_rounded, color: Color(0xFF10B981), size: 18),
+            label: const Text('Extraer', style: TextStyle(color: Color(0xFF10B981), fontWeight: FontWeight.bold)),
+          ),
+        ],
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(28),
           child: Container(
@@ -1627,12 +1608,12 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
                   SizedBox(height: 20),
                   Text(
                     'Extrayendo ficha e historial completo...',
-                    style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold),
+                    style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
                   ),
                   SizedBox(height: 6),
                   Text(
                     'Guardando en base de datos permanente',
-                    style: TextStyle(color: Color(0xFF94A3B8), fontSize: 12),
+                    style: TextStyle(color: Color(0xFF94A3B8), fontSize: 13),
                   ),
                 ],
               ),
