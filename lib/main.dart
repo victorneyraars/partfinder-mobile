@@ -1362,7 +1362,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
 
           allRows.forEach(function(r) {
             var cells = Array.from(r.querySelectorAll('td, th')).map(function(c) {
-              return (c.textContent || '').trim().replace(/\s+/g, ' ');
+              return (c.textContent || '').trim().split(' ').filter(Boolean).join(' ');
             }).filter(Boolean);
 
             if (cells.length >= 2) {
@@ -1380,9 +1380,9 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             }
 
             var tdCells = Array.from(r.querySelectorAll('td')).map(function(c) {
-              return (c.textContent || '').trim().replace(/\s+/g, ' ');
+              return (c.textContent || '').trim().split(' ').filter(Boolean).join(' ');
             });
-            if (tdCells.length >= 3 && /^\d{2}\/\d{2}\/\d{4}$/.test(tdCells[0])) {
+            if (tdCells.length >= 3 && tdCells[0].length === 10 && tdCells[0].indexOf('/') === 2 && tdCells[0].lastIndexOf('/') === 5) {
               var exists = data.revisions.some(function(item) {
                 return item.date === tdCells[0] && item.plant_code === tdCells[1];
               });
