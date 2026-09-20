@@ -1368,14 +1368,15 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
               return '';
             }
 
-            if (/^marca[:]?$/i.test(txt)) { data.marca = getNextVal(el); foundAny = true; }
-            if (/^modelo[:]?$/i.test(txt)) { data.modelo = getNextVal(el); foundAny = true; }
-            if (/^a(ñ|n)o[:]?$/i.test(txt)) { data.anio = getNextVal(el); foundAny = true; }
-            if (/^tipo[:]?$/i.test(txt) ert{}ert{} /^tipo veh[ií]culo[:]?$/i.test(txt)) { data.tipo = getNextVal(el); foundAny = true; }
-            if (/^(n[°o\.]*\s*)?motor[:]?$/i.test(txt)) { data.nro_motor = getNextVal(el); foundAny = true; }
-            if (/^(n[°o\.]*\s*)?chasis[:]?$/i.test(txt)) { data.chasis = getNextVal(el); foundAny = true; }
-            if (/^vin[:]?$/i.test(txt)) { data.vin = getNextVal(el); foundAny = true; }
-            if (/^sello[:]?$/i.test(txt)) { data.sello = getNextVal(el); foundAny = true; }
+            var t = txt.toLowerCase().replace(':', '').trim();
+            if (t === 'marca') { data.marca = getNextVal(el); foundAny = true; }
+            else if (t === 'modelo') { data.modelo = getNextVal(el); foundAny = true; }
+            else if (t === 'año' || t === 'ano') { data.anio = getNextVal(el); foundAny = true; }
+            else if (t === 'tipo' || t === 'tipo vehículo' || t === 'tipo vehiculo') { data.tipo = getNextVal(el); foundAny = true; }
+            else if (t.includes('motor')) { data.nro_motor = getNextVal(el); foundAny = true; }
+            else if (t.includes('chasis')) { data.chasis = getNextVal(el); foundAny = true; }
+            else if (t === 'vin') { data.vin = getNextVal(el); foundAny = true; }
+            else if (t.includes('sello')) { data.sello = getNextVal(el); foundAny = true; }
           });
 
           if (foundAny || /revisi[oó]n t[eé]cnica/i.test(bodyText)) {
