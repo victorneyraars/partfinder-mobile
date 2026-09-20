@@ -1215,126 +1215,113 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
           onPageFinished: (_) {
             setState(() => _isLoading = false);
             SystemChannels.textInput.invokeMethod('TextInput.hide');
-            _injectPureCaptchaUI();
+            _injectPureCaptchaIsolator();
           },
         ),
       )
       ..loadRequest(Uri.parse('https://www.prt.cl/Paginas/RevisionTecnica.aspx'));
   }
 
-  void _injectPureCaptchaUI() {
+  void _injectPureCaptchaIsolator() {
     final js = """
       (function() {
-        function isolateCaptcha() {
-          // Viewport adaptado y bloqueado contra zoom desfasado
-          var m = document.querySelector('meta[name="viewport"]');
-          if (!m) {
-            m = document.createElement('meta');
-            m.name = 'viewport';
-            document.head.appendChild(m);
-          }
-          m.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no';
-
-          // Autocompletar patente en el input oculto
-          document.querySelectorAll('input[type="text"]').forEach(function(inp) {
-            if (inp.id.toLowerCase().includes('patente') || inp.name.toLowerCase().includes('patente')) {
-              if (inp.value !== '${widget.targetPlate}') {
-                inp.value = '${widget.targetPlate}';
-                inp.dispatchEvent(new Event('input', { bubbles: true }));
-                inp.dispatchEvent(new Event('change', { bubbles: true }));
-              }
-              inp.blur();
-            }
-          });
-
-          // Inyectar CSS de Aislamiento Total
-          var s = document.getElementById('pf-pure-captcha-style');
-          if (!s) {
-            s = document.createElement('style');
-            s.id = 'pf-pure-captcha-style';
-            document.head.appendChild(s);
-          }
-          s.innerHTML = `
-            /* Ocultar absolutamente todo el contenido institucional */
-            html, body {
-              background-color: #0F172A !important;
-              margin: 0 !important;
-              padding: 0 !important;
-              overflow: hidden !important;
-              width: 100vw !important;
-              height: 100vh !important;
-            }
-            body > * {
-              visibility: hidden !important;
-            }
-
-            /* Hacer visible únicamente el contenedor reCAPTCHA y centrarlo */
-            .g-recaptcha, div:has(iframe[src*="anchor"]) {
-              visibility: visible !important;
-              position: fixed !important;
-              left: 50% !important;
-              top: 35% !important;
-              transform: translate(-50%, -50%) !important;
-              -webkit-transform: translate(-50%, -50%) !important;
-              z-index: 1000 !important;
-              margin: 0 !important;
-              padding: 0 !important;
-            }
-            .g-recaptcha * {
-              visibility: visible !important;
-            }
-            .g-recaptcha-bubble-arrow {
-              display: none !important;
-            }
-
-            /* Centrado simétrico de las fotos del desafío */
-            div:has(iframe[src*="bframe"]),
-            div:has(iframe[title*="challenge"]),
-            div:has(iframe[title*="desafío"]),
-            .pf-bframe-centered {
-              visibility: visible !important;
-              position: fixed !important;
-              left: 50% !important;
-              top: 50% !important;
-              right: auto !important;
-              bottom: auto !important;
-              transform: translate(-50%, -50%) scale(var(--pf-scale, 0.90)) !important;
-              -webkit-transform: translate(-50%, -50%) scale(var(--pf-scale, 0.90)) !important;
-              transform-origin: center center !important;
-              z-index: 2147483647 !important;
-              pointer-events: auto !important;
-            }
-            div:has(iframe[src*="bframe"]) * {
-              visibility: visible !important;
-            }
-          `;
+        var m = document.querySelector('meta[name="viewport"]');
+        if (!m) {
+          m = document.createElement('meta');
+          m.name = 'viewport';
+          document.head.appendChild(m);
         }
+        m.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no';
 
-        isolateCaptcha();
+        // Estilos para eliminar TODO el SharePoint de raíz
+        var s = document.getElementById('pf-pure-style') || document.createElement('style');
+        s.id = 'pf-pure-style';
+        s.innerHTML = `
+          html, body {
+            background-color: #0F172A !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            width: 100vw !important;
+            height: 100vh !important;
+            overflow: hidden !important;
+          }
+          #s4-workspace, #s4-bodyContainer, .ms-main, form > table, header, nav, footer {
+            display: none !important;
+          }
+          #pf-captcha-wrapper {
+            position: fixed !important;
+            left: 50% !important;
+            top: 40% !important;
+            transform: translate(-50%, -50%) !important;
+            -webkit-transform: translate(-50%, -50%) !important;
+            z-index: 9999999 !important;
+            display: flex !important;
+            justify-content: center !important;
+            align-items: center !important;
+            background: transparent !important;
+          }
+          div:has(iframe[src*="bframe"]),
+          div:has(iframe[title*="challenge"]),
+          div:has(iframe[title*="desafío"]),
+          .pf-bframe-centered {
+            position: fixed !important;
+            left: 50% !important;
+            top: 50% !important;
+            transform: translate(-50%, -50%) scale(var(--pf-scale, 0.90)) !important;
+            -webkit-transform: translate(-50%, -50%) scale(var(--pf-scale, 0.90)) !important;
+            transform-origin: center center !important;
+            z-index: 2147483647 !important;
+          }
+        `;
+        document.head.appendChild(s);
 
-        // Ciclo para mantener centrado y escala reactiva en móviles
+        // 1. Rellenar patente en el input antes de esconderlo
+        document.querySelectorAll('input[type="text"]').forEach(function(inp) {
+          if (inp.id.toLowerCase().includes('patente') || inp.name.toLowerCase().includes('patente')) {
+            if (inp.value !== '${widget.targetPlate}') {
+              inp.value = '${widget.targetPlate}';
+              inp.dispatchEvent(new Event('input', { bubbles: true }));
+              inp.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+          }
+        });
+
+        // 2. Extraer el recaptcha y anclarlo solo en pantalla
         setInterval(function() {
-          isolateCaptcha();
+          var captcha = document.querySelector('.g-recaptcha') || document.querySelector('iframe[src*="anchor"]');
+          if (captcha) {
+            var wrapper = document.getElementById('pf-captcha-wrapper');
+            if (!wrapper) {
+              wrapper = document.createElement('div');
+              wrapper.id = 'pf-captcha-wrapper';
+              document.body.appendChild(wrapper);
+            }
+            var targetEl = captcha.classList && captcha.classList.contains('g-recaptcha') ? captcha : (captcha.closest('div') || captcha);
+            if (targetEl.parentElement !== wrapper) {
+              wrapper.appendChild(targetEl);
+            }
+          }
 
+          // Escalar el cuadro de imágenes si aparece
           var bframe = document.querySelector('iframe[src*="bframe"]');
           if (bframe) {
-            var container = bframe;
-            while (container.parentElement && container.parentElement !== document.body && container.parentElement.tagName !== 'HTML') {
-              container = container.parentElement;
+            var c = bframe;
+            while (c.parentElement && c.parentElement !== document.body && c.parentElement.tagName !== 'HTML') {
+              c = c.parentElement;
             }
-            if (container && container !== document.body && container.tagName !== 'FORM') {
+            if (c && c !== document.body) {
               var winW = window.innerWidth || document.documentElement.clientWidth;
               var winH = window.innerHeight || document.documentElement.clientHeight;
-              var targetScale = Math.min((winW - 16) / 400, (winH - 80) / 580);
-              if (targetScale > 1.0) targetScale = 1.0;
-              if (targetScale < 0.72) targetScale = 0.72;
-              document.documentElement.style.setProperty('--pf-scale', targetScale.toFixed(3));
-              if (!container.classList.contains('pf-bframe-centered')) {
-                container.classList.add('pf-bframe-centered');
+              var scale = Math.min((winW - 16) / 400, (winH - 80) / 580);
+              if (scale > 1.0) scale = 1.0;
+              if (scale < 0.70) scale = 0.70;
+              document.documentElement.style.setProperty('--pf-scale', scale.toFixed(3));
+              if (!c.classList.contains('pf-bframe-centered')) {
+                c.classList.add('pf-bframe-centered');
               }
             }
           }
-        }, 120);
+        }, 150);
       })();
     """;
     _controller.runJavaScript(js);
