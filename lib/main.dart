@@ -1244,6 +1244,11 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             }
           } else if (msg.startsWith('DEBUG:')) {
             debugPrint('[PRT_LOG] ' + msg);
+            if (mounted) {
+              setState(() {
+                _statusMessage = msg.replaceAll('DEBUG:', '');
+              });
+            }
           } else if (msg == 'SEARCHING') {
             if (mounted) {
               setState(() {
@@ -1404,6 +1409,25 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
         });
 
         // 4. Centrado de captcha
+        function dumpFormInfo() {
+          try {
+            var form = document.forms[0];
+            var btns = Array.from(document.querySelectorAll('input[type="submit"], input[type="button"], a[id*="btn"], button')).map(function(b) {
+              return (b.id || b.name || b.value || b.innerText).trim();
+            }).filter(Boolean);
+            
+            var recaptchaDiv = document.querySelector('.g-recaptcha');
+            var cb = recaptchaDiv ? recaptchaDiv.getAttribute('data-callback') : 'none';
+            
+            if (window.PrtBridge) {
+              window.PrtBridge.postMessage('DEBUG: Botones: ' + btns.slice(0, 4).join(' | ') + ' | CB: ' + cb);
+            }
+          } catch(e) {
+            if (window.PrtBridge) window.PrtBridge.postMessage('DEBUG: Error dump: ' + e.message);
+          }
+        }
+        dumpFormInfo();
+
         function mountCaptcha() {
           var anchor = document.querySelector('iframe[src*="anchor"]');
           if (anchor) {
