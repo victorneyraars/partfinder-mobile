@@ -1204,7 +1204,6 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
   @override
   void initState() {
     super.initState();
-    // Ocultar teclado inmediatamente al entrar
     SystemChannels.textInput.invokeMethod('TextInput.hide');
 
     _controller = WebViewController()
@@ -1226,17 +1225,16 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             setState(() => _isLoading = false);
             SystemChannels.textInput.invokeMethod('TextInput.hide');
             FocusScope.of(context).unfocus();
-            _injectOptimization();
+            _injectFocusOptimization();
           },
         ),
       )
       ..loadRequest(Uri.parse('https://www.prt.cl/Paginas/RevisionTecnica.aspx'));
   }
 
-  void _injectOptimization() {
+  void _injectFocusOptimization() {
     final js = """
       (function() {
-        // 1. Viewport adaptable y desactivación de teclado en inputs
         var meta = document.querySelector('meta[name="viewport"]');
         if (!meta) {
           meta = document.createElement('meta');
@@ -1245,20 +1243,22 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
         }
         meta.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes';
 
-        // 2. Estilos globales
-        var style = document.getElementById('pf-responsive-style');
+        var style = document.getElementById('pf-focus-style');
         if (!style) {
           style = document.createElement('style');
-          style.id = 'pf-responsive-style';
+          style.id = 'pf-focus-style';
           document.head.appendChild(style);
         }
         style.innerHTML = `
           header, nav, footer, #suiteBar, #s4-titlerow, #titleAreaBox, .banner,
           [id*="Logo"], [id*="siteIcon"], [class*="logo"],
           img[src*="logo"], img[src*="Logo"], img[src*="prt"], img[src*="PRT"],
-          img[src*="afiche"], img[src*="banner"], table[id*="calendario"] {
+          img[src*="afiche"], img[src*="banner"], img[src*="auto"], img[src*="Auto"],
+          table[id*="calendario"], .ms-core-navigation, #sideNavBox,
+          div[class*="footer"], .footer, font[color="red"], span[style*="red"] {
             display: none !important;
           }
+
           html, body, #s4-workspace, #s4-bodyContainer {
             width: 100% !important;
             overflow-x: hidden !important;
@@ -1266,29 +1266,31 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             -webkit-overflow-scrolling: touch !important;
             margin: 0 !important;
             padding: 4px !important;
+            background-color: #0F172A !important;
+            color: #F8FAFC !important;
             box-sizing: border-box !important;
           }
+
           input[type="text"] {
             font-size: 24px !important;
             height: 48px !important;
             font-weight: 900 !important;
             text-align: center !important;
+            background-color: #1E293B !important;
+            color: #38BDF8 !important;
             border: 2px solid #0284C7 !important;
             border-radius: 8px !important;
-            margin: 6px auto !important;
+            margin: 8px auto !important;
             display: block !important;
             max-width: 250px !important;
           }
+
           .g-recaptcha {
             display: flex !important;
             justify-content: center !important;
             margin: 10px auto !important;
           }
-          .g-recaptcha-bubble-arrow {
-            display: none !important;
-          }
 
-          /* Desafío reCAPTCHA centrado simétricamente */
           div:has(iframe[src*="bframe"]),
           div:has(iframe[title*="challenge"]),
           div:has(iframe[title*="desafío"]),
@@ -1298,25 +1300,45 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             transform: translateX(-50%) scale(var(--pf-scale, 0.90)) !important;
             -webkit-transform: translateX(-50%) scale(var(--pf-scale, 0.90)) !important;
             transform-origin: top center !important;
-            -webkit-transform-origin: top center !important;
             z-index: 2147483647 !important;
           }
 
-          /* Estilo realzado para la tabla de información del vehículo */
-          .pf-result-highlight {
+          .pf-clean-table {
             width: 100% !important;
-            margin: 10px 0 !important;
+            margin: 8px 0 16px 0 !important;
             border-collapse: collapse !important;
-            font-size: 15px !important;
+            background-color: #1E293B !important;
+            border-radius: 12px !important;
+            overflow: hidden !important;
+            border: 1px solid #334155 !important;
           }
-          .pf-result-highlight td, .pf-result-highlight th {
-            padding: 10px 8px !important;
-            border-bottom: 1px solid #E2E8F0 !important;
+          .pf-clean-table td, .pf-clean-table th {
+            padding: 10px 12px !important;
+            border-bottom: 1px solid #334155 !important;
+            color: #E2E8F0 !important;
+            font-size: 14px !important;
+          }
+          .pf-clean-table th {
+            background-color: #0284C7 !important;
+            color: #FFFFFF !important;
+            font-weight: bold !important;
           }
         `;
 
-        // 3. Rellenar patente y desenfocar inmediatamente para ocultar teclado
-        function setupInputs() {
+        function cleanJunk() {
+          document.querySelectorAll('a, span, td, h1, h2, h3, p').forEach(function(el) {
+            var t = (el.innerText || '').trim().toLowerCase();
+            if (t.includes('mi revisión técnica') || t.includes('consulte el estado') ||
+                t.includes('ingrese la patente') || t === 'home' || t === 'calendario' ||
+                t === 'consideraciones' || t === 'plantas' || t.includes('volver a consultar') ||
+                t.includes('ministerio de transportes') || t.includes('la información señalada')) {
+              var p = el.closest('tr') || el.closest('ul') || el.closest('table') || el;
+              if (p && p !== document.body && !p.classList.contains('pf-clean-table')) {
+                p.style.setProperty('display', 'none', 'important');
+              }
+            }
+          });
+
           var inputs = document.querySelectorAll('input[type="text"]');
           inputs.forEach(function(inp) {
             if (inp.id.toLowerCase().includes('patente') || inp.name.toLowerCase().includes('patente')) {
@@ -1325,21 +1347,15 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
                 inp.dispatchEvent(new Event('input', { bubbles: true }));
                 inp.dispatchEvent(new Event('change', { bubbles: true }));
               }
-              // Quitar foco táctil para que el teclado no se levante
               inp.blur();
             }
           });
-          if (document.activeElement && document.activeElement.tagName === 'INPUT') {
-            document.activeElement.blur();
-          }
         }
 
-        setupInputs();
-        setTimeout(setupInputs, 500);
+        cleanJunk();
+        setTimeout(cleanJunk, 500);
 
-        // 4. Observador continuo para centrado del captcha y presentación de resultados
         var obs = new MutationObserver(function() {
-          // A) Centrado del desafío fotográfico
           var bframe = document.querySelector('iframe[src*="bframe"]');
           if (bframe) {
             var container = bframe;
@@ -1351,52 +1367,88 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
               var targetScale = Math.min(1.0, (winW - 14) / 400);
               if (targetScale < 0.72) targetScale = 0.72;
               document.documentElement.style.setProperty('--pf-scale', targetScale.toFixed(3));
-
               if (!container.classList.contains('pf-centered-challenge')) {
                 container.classList.add('pf-centered-challenge');
               }
             }
           }
 
-          // B) Detección y centrado de la tabla de resultados
-          var rows = document.querySelectorAll('tr');
-          var targetTable = null;
-          var res = {};
-
-          rows.forEach(function(r) {
-            var cells = Array.from(r.querySelectorAll('td, th')).map(function(c) {
-              return c.innerText.trim();
-            }).filter(Boolean);
-
-            if (cells.length >= 2) {
-              var k = cells[0].toLowerCase();
-              var v = cells[cells.length - 1];
-              if (k.includes('marca')) { res['make'] = v; targetTable = r.closest('table'); }
-              else if (k.includes('modelo')) res['model'] = v;
-              else if (k.includes('año') || k.includes('fabricaci')) res['year'] = v;
-              else if (k.includes('tipo')) res['type'] = v;
-              else if (k.includes('motor')) res['engine_number'] = v;
-              else if (k.includes('chasis') || k.includes('vin')) res['vin'] = v;
-              else if (k.includes('color')) res['color'] = v;
-              else if (k.includes('combustible')) res['fuel'] = v;
+          document.querySelectorAll('a, div, span, td').forEach(function(el) {
+            var txt = (el.innerText || '').toLowerCase();
+            if (txt.includes('pinche para ver información') || txt.includes('información de revisión técnica')) {
+              if (!el.getAttribute('data-pf-opened')) {
+                el.setAttribute('data-pf-opened', 'true');
+                try { el.click(); } catch (_) {}
+              }
             }
           });
 
-          // Si la tabla de resultados ya está presente en pantalla:
-          if (targetTable && (res.make || res.model)) {
-            // Ocultar formulario de búsqueda, logo y captcha para dejar la pantalla limpia
-            document.querySelectorAll('input[type="text"], .g-recaptcha, img[src*="logo"], img[src*="prt"]').forEach(function(el) {
+          var res = {};
+          var vehicleTable = null;
+          var inspectionTable = null;
+
+          document.querySelectorAll('table').forEach(function(tbl) {
+            var tText = tbl.innerText || '';
+            if (tText.includes('Marca') && tText.includes('Patente')) {
+              vehicleTable = tbl;
+            }
+            if (tText.includes('Cod.Planta') || tText.includes('Planta') || tText.includes('Nro.Certificado')) {
+              inspectionTable = tbl;
+            }
+          });
+
+          if (vehicleTable) {
+            var rows = vehicleTable.querySelectorAll('tr');
+            rows.forEach(function(r) {
+              var cells = Array.from(r.querySelectorAll('td, th')).map(function(c) {
+                return c.innerText.trim();
+              }).filter(Boolean);
+
+              if (cells.length >= 2) {
+                var k = cells[0].toLowerCase();
+                var v = cells[cells.length - 1];
+                if (k.includes('patente')) res['plate'] = v;
+                else if (k.includes('tipo') && !k.includes('sello')) res['type'] = v;
+                else if (k.includes('marca')) res['make'] = v;
+                else if (k.includes('modelo')) res['model'] = v;
+                else if (k.includes('año') || k.includes('fabricaci')) res['year'] = v;
+                else if (k.includes('motor')) res['engine_number'] = v;
+                else if (k.includes('chasis')) res['chassis'] = v;
+                else if (k.includes('vin')) res['vin'] = v;
+                else if (k.includes('sello')) res['seal_type'] = v;
+              }
+            });
+          }
+
+          if (inspectionTable) {
+            var iRows = inspectionTable.querySelectorAll('tr');
+            if (iRows.length > 1) {
+              var firstDataRow = Array.from(iRows[1].querySelectorAll('td')).map(function(c) {
+                return c.innerText.trim();
+              });
+              if (firstDataRow.length >= 3) {
+                res['rt_date'] = firstDataRow[0];
+                res['rt_plant_code'] = firstDataRow[1];
+                res['rt_plant'] = firstDataRow[2];
+                if (firstDataRow.length >= 4) res['rt_certificate'] = firstDataRow[3];
+              }
+            }
+          }
+
+          var validPlate = (res['plate'] || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+          var expectedPlate = '${widget.targetPlate}'.toUpperCase().replace(/[^A-Z0-9]/g, '');
+
+          if (validPlate === expectedPlate && (res.make || res.model)) {
+            document.querySelectorAll('input, .g-recaptcha, img').forEach(function(el) {
               var p = el.closest('table') || el.closest('div') || el;
-              if (p && p !== targetTable && !targetTable.contains(p) && p !== document.body) {
+              if (p && p !== vehicleTable && p !== inspectionTable && !vehicleTable.contains(p) && p !== document.body) {
                 p.style.setProperty('display', 'none', 'important');
               }
             });
 
-            // Dar formato destacado y centrar la tabla al inicio
-            targetTable.classList.add('pf-result-highlight');
-            targetTable.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            vehicleTable.classList.add('pf-clean-table');
+            if (inspectionTable) inspectionTable.classList.add('pf-clean-table');
 
-            // Enviar los datos extraídos al puente Flutter
             if (window.PrtBridge && !window.__pfScrapedSent) {
               window.__pfScrapedSent = true;
               window.PrtBridge.postMessage(JSON.stringify(res));
@@ -1443,26 +1495,49 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
     try {
       final jsScraper = """
         (function() {
-          var result = {};
-          var rows = document.querySelectorAll('tr');
-          rows.forEach(function(r) {
-            var cells = Array.from(r.querySelectorAll('td, th')).map(function(c) {
-              return c.innerText.trim();
-            }).filter(Boolean);
-            if (cells.length >= 2) {
-              var k = cells[0].toLowerCase();
-              var v = cells[cells.length - 1];
-              if (k.includes('marca')) result['make'] = v;
-              else if (k.includes('modelo')) result['model'] = v;
-              else if (k.includes('año') || k.includes('fabricaci')) result['year'] = v;
-              else if (k.includes('tipo')) result['type'] = v;
-              else if (k.includes('motor')) result['engine_number'] = v;
-              else if (k.includes('chasis') || k.includes('vin')) result['vin'] = v;
-              else if (k.includes('color')) result['color'] = v;
-              else if (k.includes('combustible')) result['fuel'] = v;
-            }
+          var res = {};
+          var vehicleTable = null;
+          var inspectionTable = null;
+
+          document.querySelectorAll('table').forEach(function(tbl) {
+            var tText = tbl.innerText || '';
+            if (tText.includes('Marca') && tText.includes('Patente')) vehicleTable = tbl;
+            if (tText.includes('Cod.Planta') || tText.includes('Planta') || tText.includes('Nro.Certificado')) inspectionTable = tbl;
           });
-          return JSON.stringify(result);
+
+          if (vehicleTable) {
+            var rows = vehicleTable.querySelectorAll('tr');
+            rows.forEach(function(r) {
+              var cells = Array.from(r.querySelectorAll('td, th')).map(function(c) { return c.innerText.trim(); }).filter(Boolean);
+              if (cells.length >= 2) {
+                var k = cells[0].toLowerCase();
+                var v = cells[cells.length - 1];
+                if (k.includes('patente')) res['plate'] = v;
+                else if (k.includes('tipo') && !k.includes('sello')) res['type'] = v;
+                else if (k.includes('marca')) res['make'] = v;
+                else if (k.includes('modelo')) res['model'] = v;
+                else if (k.includes('año') || k.includes('fabricaci')) res['year'] = v;
+                else if (k.includes('motor')) res['engine_number'] = v;
+                else if (k.includes('chasis')) res['chassis'] = v;
+                else if (k.includes('vin')) res['vin'] = v;
+                else if (k.includes('sello')) res['seal_type'] = v;
+              }
+            });
+          }
+
+          if (inspectionTable) {
+            var iRows = inspectionTable.querySelectorAll('tr');
+            if (iRows.length > 1) {
+              var firstDataRow = Array.from(iRows[1].querySelectorAll('td')).map(function(c) { return c.innerText.trim(); });
+              if (firstDataRow.length >= 3) {
+                res['rt_date'] = firstDataRow[0];
+                res['rt_plant_code'] = firstDataRow[1];
+                res['rt_plant'] = firstDataRow[2];
+                if (firstDataRow.length >= 4) res['rt_certificate'] = firstDataRow[3];
+              }
+            }
+          }
+          return JSON.stringify(res);
         })();
       """;
 
@@ -1475,7 +1550,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
 
       if (scraped.isEmpty || (scraped['make'] == null && scraped['model'] == null)) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('No se detectaron datos. Pulsa la lupa en el portal antes de extraer.')),
+          const SnackBar(content: Text('No se detectó la tabla de información. Pulsa la lupa en el portal antes de extraer.')),
         );
         return;
       }
