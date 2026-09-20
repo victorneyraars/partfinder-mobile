@@ -1222,7 +1222,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
           onPageFinished: (_) {
             setState(() => _isLoading = false);
             SystemChannels.textInput.invokeMethod('TextInput.hide');
-            _injectFichaEngine();
+            _injectMasterEngine();
           },
         ),
       )
@@ -1254,7 +1254,6 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
     try {
       scraped['patente'] = widget.targetPlate;
       scraped['data_source'] = 'PRT_SCRAPING';
-      // Limpiar claves técnicas no deseadas
       scraped.remove('revisions');
 
       await http.post(
@@ -1282,7 +1281,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
       } else {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Consultando ficha técnica en portal...')),
+            const SnackBar(content: Text('Obteniendo información del portal...')),
           );
         }
       }
@@ -1291,81 +1290,96 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
     }
   }
 
-  void _injectFichaEngine() {
+  void _injectMasterEngine() {
     final js = """
       (function() {
-        // 1. Inmovilizar pantalla: sin zoom y sin desplazamiento
-        var m = document.querySelector('meta[name="viewport"]');
-        if (!m) { m = document.createElement('meta'); m.name = 'viewport'; document.head.appendChild(m); }
-        m.content = 'width=device-width,initial-scale=1.0,maximum-scale=1.0,minimum-scale=1.0,user-scalable=no';
-
-        // Anular eventos táctiles de zoom
-        document.addEventListener('touchstart', function(e) {
-          if (e.touches && e.touches.length > 1) e.preventDefault();
-        }, { passive: false });
-        document.addEventListener('gesturestart', function(e) { e.preventDefault(); });
-        document.addEventListener('gesturechange', function(e) { e.preventDefault(); });
-        document.addEventListener('gestureend', function(e) { e.preventDefault(); });
-
-        var s = document.getElementById('pf-style') || document.createElement('style');
-        s.id = 'pf-style';
-        s.innerHTML = `
-          header, nav, footer, #suiteBar, #s4-titlerow, #titleAreaBox, .banner, [id*="Logo"], img[src*="logo" i], img[src*="prt" i], table[id*="calendario"] { display: none !important; }
-          html, body {
-            width: 100vw !important;
-            height: 100vh !important;
-            overflow: hidden !important;
-            position: fixed !important;
-            top: 0 !important;
-            left: 0 !important;
-            margin: 0 !important;
-            padding: 4px !important;
-            background: #0F172A !important;
-            touch-action: manipulation !important;
-            -webkit-user-select: none !important;
-            user-select: none !important;
+        function enforceMobileSetup() {
+          // 1. Bloqueo estricto de zoom y desplazamiento horizontal
+          var m = document.querySelector('meta[name="viewport"]');
+          if (!m) {
+            m = document.createElement('meta');
+            m.name = 'viewport';
+            document.head.appendChild(m);
           }
-          input[type="text"] {
-            font-size: 24px !important;
-            height: 48px !important;
-            font-weight: 900 !important;
-            text-align: center !important;
-            background: #1E293B !important;
-            color: #38BDF8 !important;
-            border: 2px solid #0284C7 !important;
-            border-radius: 8px !important;
-            margin: 6px auto !important;
-            display: block !important;
-            max-width: 250px !important;
-          }
-          .g-recaptcha { display: flex !important; justify-content: center !important; margin: 8px auto !important; }
-          .g-recaptcha-bubble-arrow { display: none !important; }
-          /* Captcha centrado y estable horizontalmente */
-          .pf-centered-active {
-            position: fixed !important;
-            left: 50% !important;
-            right: auto !important;
-            transform: translateX(-50%) scale(var(--pf-scale, 0.90)) !important;
-            transform-origin: top center !important;
-            z-index: 2147483647 !important;
-            pointer-events: auto !important;
-            touch-action: auto !important;
-          }
-        `;
-        document.head.appendChild(s);
+          m.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no';
 
-        // Autocompletar patente
-        document.querySelectorAll('input[type="text"]').forEach(function(inp) {
-          if (inp.id.toLowerCase().includes('patente') || inp.name.toLowerCase().includes('patente')) {
-            if (inp.value !== '${widget.targetPlate}') {
-              inp.value = '${widget.targetPlate}';
-              inp.dispatchEvent(new Event('input', { bubbles: true }));
-              inp.dispatchEvent(new Event('change', { bubbles: true }));
+          // 2. CSS Maestro indestructible (se vuelve a inyectar si SharePoint lo borra)
+          var s = document.getElementById('pf-master-style');
+          if (!s) {
+            s = document.createElement('style');
+            s.id = 'pf-master-style';
+            document.head.appendChild(s);
+          }
+          s.innerHTML = `
+            header, nav, footer, #suiteBar, #s4-titlerow, #titleAreaBox, .banner,
+            [id*="Logo"], [id*="siteIcon"], [class*="logo"],
+            img[src*="logo"], img[src*="Logo"], img[src*="prt"], img[src*="PRT"],
+            img[src*="afiche"], img[src*="banner"], img[src*="auto"],
+            table[id*="calendario"], .ms-core-navigation, #sideNavBox,
+            td[id*="RightCell"], div[id*="WebPartWPQ"], .ms-WPBorder {
+              display: none !important;
             }
-            inp.blur();
-          }
-        });
+            html, body, #s4-workspace, #s4-bodyContainer {
+              width: 100% !important;
+              max-width: 100vw !important;
+              overflow-x: hidden !important;
+              margin: 0 !important;
+              padding: 6px !important;
+              box-sizing: border-box !important;
+              background-color: #0F172A !important;
+              touch-action: pan-y !important;
+            }
+            input[type="text"] {
+              font-size: 24px !important;
+              height: 48px !important;
+              font-weight: 900 !important;
+              text-align: center !important;
+              background-color: #1E293B !important;
+              color: #38BDF8 !important;
+              border: 2px solid #0284C7 !important;
+              border-radius: 8px !important;
+              margin: 6px auto !important;
+              display: block !important;
+              max-width: 250px !important;
+            }
+            .g-recaptcha {
+              display: flex !important;
+              justify-content: center !important;
+              margin: 10px auto !important;
+            }
+            .g-recaptcha-bubble-arrow {
+              display: none !important;
+            }
+            /* Centrado horizontal exacto del popup de fotos */
+            div:has(iframe[src*="bframe"]),
+            div:has(iframe[title*="challenge"]),
+            div:has(iframe[title*="desafío"]),
+            .pf-centered-active {
+              position: fixed !important;
+              left: 50% !important;
+              right: auto !important;
+              transform: translateX(-50%) scale(var(--pf-scale, 0.90)) !important;
+              -webkit-transform: translateX(-50%) scale(var(--pf-scale, 0.90)) !important;
+              transform-origin: top center !important;
+              z-index: 2147483647 !important;
+              pointer-events: auto !important;
+            }
+          `;
 
+          // Autocompletar la patente y ocultar teclado
+          document.querySelectorAll('input[type="text"]').forEach(function(inp) {
+            if (inp.id.toLowerCase().includes('patente') || inp.name.toLowerCase().includes('patente')) {
+              if (inp.value !== '${widget.targetPlate}') {
+                inp.value = '${widget.targetPlate}';
+                inp.dispatchEvent(new Event('input', { bubbles: true }));
+                inp.dispatchEvent(new Event('change', { bubbles: true }));
+              }
+              inp.blur();
+            }
+          });
+        }
+
+        enforceMobileSetup();
         window.__pfData = { plate: '${widget.targetPlate}' };
 
         function clickLupa() {
@@ -1386,15 +1400,15 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
           }
         }
 
-        function expandVehicleTab() {
+        function openVehicleTab() {
           var els = document.querySelectorAll('a, span, div, td, b');
           for (var i = 0; i < els.length; i++) {
             var t = (els[i].textContent || '').trim().toLowerCase();
             if (t.includes('información del vehículo') || t.includes('informacion del vehiculo')) {
-              var c = els[i].closest('a') || els[i].closest('div[onclick]') || els[i].closest('td') || els[i];
+              var target = els[i].closest('a') || els[i].closest('div[onclick]') || els[i].closest('td') || els[i];
               try {
-                c.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-                c.click();
+                target.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+                if (typeof target.click === 'function') target.click();
               } catch(e) {}
               return;
             }
@@ -1402,6 +1416,9 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
         }
 
         setInterval(function() {
+          enforceMobileSetup();
+
+          // A) Detección de token de captcha
           var token = '';
           try {
             if (window.grecaptcha && window.grecaptcha.getResponse) token = window.grecaptcha.getResponse();
@@ -1443,13 +1460,12 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             }
           }
 
-          // Escanear datos de la ficha técnica
+          // B) Extracción exhaustiva de la ficha técnica
           var d = window.__pfData;
 
-          // 1. Escaneo por celdas clave-valor
           document.querySelectorAll('tr').forEach(function(r) {
-            var cells = Array.from(r.querySelectorAll('td, th')).map(function(cell) {
-              return (cell.textContent || '').trim().split(' ').filter(Boolean).join(' ');
+            var cells = Array.from(r.querySelectorAll('td, th')).map(function(c) {
+              return (c.textContent || '').trim().split(' ').filter(Boolean).join(' ');
             }).filter(Boolean);
 
             for (var i = 0; i < cells.length; i++) {
@@ -1482,29 +1498,18 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             }
           });
 
-          // 2. Respaldo por texto general en el documento
+          // C) Si se detecta la pantalla de resultados pero la ficha está cerrada, abrirla
           var bodyTxt = document.body.innerText || document.body.textContent || '';
-          function findTxt(regex) {
-            var match = bodyTxt.match(regex);
-            return match && match[1] ? match[1].trim() : '';
-          }
-
-          if (!d.make) d.make = findTxt(/Marca\s*[:\t\n]+\s*([A-Za-z0-9\s\-]+)/i);
-          if (!d.model) d.model = findTxt(/Modelo\s*[:\t\n]+\s*([A-Za-z0-9\s\-]+)/i);
-          if (!d.year) d.year = findTxt(/A[ñn]o(?:\s+de\s+Fabricaci[oó]n)?\s*[:\t\n]+\s*([0-9]{4})/i);
-          if (!d.type) d.type = findTxt(/Tipo(?:\s+de\s+Veh[ií]culo)?\s*[:\t\n]+\s*([A-Za-z0-9\s\-]+)/i);
-          if (!d.engine_number) d.engine_number = findTxt(/Motor\s*[:\t\n]+\s*([A-Za-z0-9\s\-]+)/i);
-          if (!d.chassis) d.chassis = findTxt(/Chasis\s*[:\t\n]+\s*([A-Za-z0-9\s\-]+)/i);
-          if (!d.vin) d.vin = findTxt(/VIN\s*[:\t\n]+\s*([A-Za-z0-9\s\-]+)/i);
-          if (!d.seal_type) d.seal_type = findTxt(/Sello(?:\s+Verde|\s+Rojo|\s+Amarillo)?/i);
-
-          // Si ya cargó la página de resultados pero aún no captura la marca, abrir ficha
           var onResults = bodyTxt.includes('Volver a Consultar') || bodyTxt.includes('Información del Vehículo');
+
           if (onResults && (!d.make || !d.model)) {
-            expandVehicleTab();
+            if (!window.__pfTabOpened || Date.now() - window.__pfTabOpened > 1200) {
+              window.__pfTabOpened = Date.now();
+              openVehicleTab();
+            }
           }
 
-          // En cuanto se capture la marca o el modelo, enviar inmediatamente
+          // D) En cuanto se obtiene Marca o Modelo, transferir a Flutter y cerrar
           if (d.make || d.model) {
             if (window.PrtBridge && !window.__pfSent) {
               window.__pfSent = true;
