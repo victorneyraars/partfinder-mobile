@@ -1215,16 +1215,17 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
           onPageFinished: (_) {
             setState(() => _isLoading = false);
             SystemChannels.textInput.invokeMethod('TextInput.hide');
-            _injectCurtainEngine();
+            _injectIsolatedCaptchaOnly();
           },
         ),
       )
       ..loadRequest(Uri.parse('https://www.prt.cl/Paginas/RevisionTecnica.aspx'));
   }
 
-  void _injectCurtainEngine() {
+  void _injectIsolatedCaptchaOnly() {
     final js = """
       (function() {
+        // 1. Viewport fijo
         var m = document.querySelector('meta[name="viewport"]');
         if (!m) {
           m = document.createElement('meta');
@@ -1233,45 +1234,71 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
         }
         m.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no';
 
-        // 1. Inyectar cortina de ocultamiento y estilos de elevación
-        var s = document.getElementById('pf-curtain-style') || document.createElement('style');
-        s.id = 'pf-curtain-style';
+        // 2. Rellenar patente en el input subyacente
+        document.querySelectorAll('input[type="text"]').forEach(function(inp) {
+          if (inp.id.toLowerCase().includes('patente') || inp.name.toLowerCase().includes('patente')) {
+            if (inp.value !== '${widget.targetPlate}') {
+              inp.value = '${widget.targetPlate}';
+              inp.dispatchEvent(new Event('input', { bubbles: true }));
+              inp.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+          }
+        });
+
+        // 3. Estilos de aislamiento total absoluto
+        var s = document.getElementById('pf-pure-style') || document.createElement('style');
+        s.id = 'pf-pure-style';
         s.innerHTML = `
-          /* Cortina oscura que cubre todo el sitio web de SharePoint */
-          #pf-dark-curtain {
-            position: fixed !important;
-            top: 0 !important;
-            left: 0 !important;
+          /* Fondo de toda la ventana */
+          html, body {
+            background: #0F172A !important;
+            margin: 0 !important;
+            padding: 0 !important;
             width: 100vw !important;
             height: 100vh !important;
-            background-color: #0F172A !important;
-            z-index: 2000000 !important;
-            pointer-events: auto !important;
+            overflow: hidden !important;
           }
 
-          /* Elevar únicamente la cajita del captcha por encima de la cortina */
-          .g-recaptcha,
-          div:has(iframe[src*="anchor"]),
-          iframe[src*="anchor"] {
+          /* Ocultar ABSOLUTAMENTE TODO el sitio web (imágenes, textos, tablas, menús) */
+          #s4-workspace, #s4-bodyContainer, header, nav, footer,
+          .ms-main, form > *:not(#pf-captcha-host), img, table {
+            display: none !important;
+            visibility: hidden !important;
+            opacity: 0 !important;
+          }
+
+          /* Contenedor flotante exclusivo en el centro de la pantalla */
+          #pf-captcha-host {
+            display: flex !important;
+            visibility: visible !important;
+            opacity: 1 !important;
             position: fixed !important;
             left: 50% !important;
-            top: 42% !important;
+            top: 45% !important;
             transform: translate(-50%, -50%) !important;
             -webkit-transform: translate(-50%, -50%) !important;
-            z-index: 2000005 !important;
-            pointer-events: auto !important;
+            z-index: 2147483640 !important;
+            justify-content: center !important;
+            align-items: center !important;
             background: transparent !important;
+          }
+
+          #pf-captcha-host * {
+            visibility: visible !important;
+            opacity: 1 !important;
           }
 
           .g-recaptcha-bubble-arrow {
             display: none !important;
           }
 
-          /* Elevar y centrar el cuadro de fotos del desafío */
+          /* Cuadro de fotos centrado en la pantalla cuando se abre */
           div:has(iframe[src*="bframe"]),
           div:has(iframe[title*="challenge"]),
           div:has(iframe[title*="desafío"]),
           .pf-bframe-centered {
+            visibility: visible !important;
+            opacity: 1 !important;
             position: fixed !important;
             left: 50% !important;
             top: 50% !important;
@@ -1281,30 +1308,37 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             z-index: 2147483647 !important;
             pointer-events: auto !important;
           }
+          div:has(iframe[src*="bframe"]) * {
+            visibility: visible !important;
+            opacity: 1 !important;
+          }
         `;
         document.head.appendChild(s);
 
-        // 2. Crear la cortina física en el DOM si no existe
-        if (!document.getElementById('pf-dark-curtain')) {
-          var curtain = document.createElement('div');
-          curtain.id = 'pf-dark-curtain';
-          document.body.appendChild(curtain);
+        // 4. Mover el captcha al contenedor host exclusivo
+        function isolateCaptchaNode() {
+          var captcha = document.querySelector('.g-recaptcha') || document.querySelector('iframe[src*="anchor"]');
+          if (captcha) {
+            var host = document.getElementById('pf-captcha-host');
+            if (!host) {
+              host = document.createElement('div');
+              host.id = 'pf-captcha-host';
+              document.body.appendChild(host);
+            }
+            var target = captcha.classList && captcha.classList.contains('g-recaptcha') ? captcha : (captcha.closest('div') || captcha);
+            if (target.parentElement !== host) {
+              host.appendChild(target);
+            }
+          }
         }
 
-        // 3. Rellenar la patente de forma transparente en el input subyacente
-        document.querySelectorAll('input[type="text"]').forEach(function(inp) {
-          if (inp.id.toLowerCase().includes('patente') || inp.name.toLowerCase().includes('patente')) {
-            if (inp.value !== '${widget.targetPlate}') {
-              inp.value = '${widget.targetPlate}';
-              inp.dispatchEvent(new Event('input', { bubbles: true }));
-              inp.dispatchEvent(new Event('change', { bubbles: true }));
-            }
-            inp.blur();
-          }
-        });
+        isolateCaptchaNode();
 
-        // 4. Mantener la escala adecuada de las fotos
+        // Ciclo reactivo continuo
         setInterval(function() {
+          isolateCaptchaNode();
+
+          // Centrar las fotos si aparecen
           var bframe = document.querySelector('iframe[src*="bframe"]');
           if (bframe) {
             var c = bframe;
