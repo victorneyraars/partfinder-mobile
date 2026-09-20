@@ -202,9 +202,9 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
           ..setNavigationDelegate(
             NavigationDelegate(
               onPageFinished: (String url) {
-                final jsFluidCentering = """
+                final jsDeclarativeCentering = """
                   (function() {
-                    // 1. Viewport estándar de alta fidelidad sin restricciones
+                    // 1. Viewport estándar de alta fidelidad
                     var meta = document.querySelector('meta[name="viewport"]');
                     if (!meta) {
                       meta = document.createElement('meta');
@@ -213,7 +213,7 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
                     }
                     meta.content = 'width=device-width, initial-scale=1.0';
 
-                    // 2. Estilos fluidos: reset de tablas y centrado nativo de .g-recaptcha
+                    // 2. Estilos declarativos limpios (Sin loops JS)
                     var style = document.createElement('style');
                     style.innerHTML = `
                       header, nav, footer, #suiteBar, #s4-titlerow, .banner,
@@ -243,13 +243,31 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
                         display: block !important;
                         max-width: 240px !important;
                       }
-                      /* Centrado nativo del contenedor de reCAPTCHA */
+                      /* Centrado nativo de la casilla del checkbox */
                       .g-recaptcha, div[class*="recaptcha"] {
                         display: flex !important;
                         justify-content: center !important;
                         align-items: center !important;
-                        margin: 12px auto !important;
+                        margin: 10px auto !important;
                         width: 100% !important;
+                      }
+                      /* Ocultar la flecha triangular de anclaje */
+                      .g-recaptcha-bubble-arrow {
+                        display: none !important;
+                      }
+                      /* CENTRADO DECLARATIVO DEL DESAFÍO FOTOGRÁFICO EN EL VIEWPORT */
+                      body > div:has(iframe[src*="bframe"]),
+                      body > div:has(iframe[title*="recaptcha"]),
+                      body > div:has(iframe[title*="reCAPTCHA"]) {
+                        position: fixed !important;
+                        top: 50% !important;
+                        left: 50% !important;
+                        transform: translate(-50%, -50%) scale(0.85) !important;
+                        -webkit-transform: translate(-50%, -50%) scale(0.85) !important;
+                        transform-origin: center center !important;
+                        -webkit-transform-origin: center center !important;
+                        z-index: 2147483647 !important;
+                        margin: 0 !important;
                       }
                     `;
                     document.head.appendChild(style);
@@ -264,7 +282,7 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
                       }
                     });
 
-                    // 4. Centrado suave y único al cargar la página (sin temporizadores ni bucles invasivos)
+                    // 4. Centrado inicial del formulario
                     setTimeout(function() {
                       var anchor = document.querySelector('.g-recaptcha') || document.querySelector('input[type="text"]');
                       if (anchor) {
@@ -272,7 +290,7 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
                       }
                     }, 400);
 
-                    // 5. Desplazar la vista suavemente al aparecer los resultados
+                    // 5. Centrar los datos cuando aparezcan tras pulsar la lupa
                     var observer = new MutationObserver(function() {
                       var sections = Array.from(document.querySelectorAll('div, td, th, span, b, a')).filter(function(el) {
                         return el.innerText && el.innerText.includes('Información del Vehículo');
@@ -284,7 +302,7 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
                     observer.observe(document.body, { childList: true, subtree: true });
                   })();
                 """;
-                controller.runJavaScript(jsFluidCentering);
+                controller.runJavaScript(jsDeclarativeCentering);
               },
             ),
           )
