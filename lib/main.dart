@@ -202,9 +202,9 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
           ..setNavigationDelegate(
             NavigationDelegate(
               onPageFinished: (String url) {
-                final jsUniversalResponsive = """
+                final jsBulletproof = """
                   (function() {
-                    // 1. Viewport estándar adaptable
+                    // 1. Viewport estándar de alta compatibilidad
                     var meta = document.querySelector('meta[name="viewport"]');
                     if (!meta) {
                       meta = document.createElement('meta');
@@ -213,12 +213,18 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
                     }
                     meta.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no';
 
-                    // 2. Estilos para suprimir cabeceras, menús y barras innecesarias
-                    var style = document.createElement('style');
+                    // 2. Inyección de reglas CSS maestras
+                    var style = document.getElementById('pf-master-style');
+                    if (!style) {
+                      style = document.createElement('style');
+                      style.id = 'pf-master-style';
+                      document.head.appendChild(style);
+                    }
                     style.innerHTML = `
+                      /* Ocultar banners y menús que consumen espacio vertical */
                       header, nav, footer, #suiteBar, #s4-titlerow, .banner,
-                      img[src*="afiche"], img[src*="banner"], img[src*="logo"], img[src*="Logo"],
-                      table[id*="calendario"] {
+                      div[id*="Logo"], div[class*="logo"],
+                      img[src*="afiche"], img[src*="banner"], table[id*="calendario"] {
                         display: none !important;
                       }
                       html, body, #s4-workspace, #s4-bodyContainer, form {
@@ -226,7 +232,7 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
                         max-width: 100vw !important;
                         overflow-x: hidden !important;
                         margin: 0 !important;
-                        padding: 2px !important;
+                        padding: 4px !important;
                         box-sizing: border-box !important;
                       }
                       input[type="text"] {
@@ -247,10 +253,27 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
                         margin: 8px auto !important;
                         width: 100% !important;
                       }
-                    `;
-                    document.head.appendChild(style);
+                      .g-recaptcha-bubble-arrow {
+                        display: none !important;
+                      }
 
-                    // 3. Ocultar enlaces de navegación ("Home", "Calendario", etc.)
+                      /* CENTRADO Y ESCALADO ABSOLUTO E INALTERABLE */
+                      [data-pf-captcha="active"] {
+                        position: fixed !important;
+                        top: 50% !important;
+                        left: 50% !important;
+                        right: auto !important;
+                        bottom: auto !important;
+                        margin: 0 !important;
+                        transform: translate(-50%, -50%) scale(var(--pf-scale, 0.82)) !important;
+                        -webkit-transform: translate(-50%, -50%) scale(var(--pf-scale, 0.82)) !important;
+                        transform-origin: center center !important;
+                        -webkit-transform-origin: center center !important;
+                        z-index: 2147483647 !important;
+                      }
+                    `;
+
+                    // 3. Ocultar menús de texto residuales ("Home", "Calendario", etc.)
                     document.querySelectorAll('a, span, td').forEach(function(el) {
                       var txt = (el.innerText || '').trim().toLowerCase();
                       if (txt === 'home' || txt === 'calendario' || txt === 'consideraciones' || txt === 'plantas') {
@@ -261,7 +284,7 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
                       }
                     });
 
-                    // 4. Autocompletar la patente
+                    // 4. Autocompletar la patente objetivo
                     var inputs = document.querySelectorAll('input[type="text"]');
                     inputs.forEach(function(inp) {
                       if (inp.id.toLowerCase().includes('patente') || inp.name.toLowerCase().includes('patente')) {
@@ -271,7 +294,7 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
                       }
                     });
 
-                    // 5. Centrado inicial suave del formulario
+                    // 5. Centrado inicial en el checkbox "No soy un robot"
                     setTimeout(function() {
                       var anchor = document.querySelector('.g-recaptcha') || document.querySelector('input[type="text"]');
                       if (anchor) {
@@ -279,41 +302,50 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
                       }
                     }, 350);
 
-                    // 6. MOTOR DE ESCALADO Y CENTRADO RESPONSIVE BIDIMENSIONAL
-                    var challengeObserver = new MutationObserver(function() {
+                    // 6. MOTOR DE MANTENIMIENTO CONTINUO Y DINÁMICO
+                    setInterval(function() {
                       var bframe = document.querySelector('iframe[src*="bframe"]') ||
-                                   document.querySelector('iframe[title*="recaptcha"]') ||
-                                   document.querySelector('iframe[title*="desafío"]');
+                                   document.querySelector('iframe[title*="desaf"]') ||
+                                   document.querySelector('iframe[title*="recaptcha"]');
+
                       if (bframe) {
                         var container = bframe;
-                        while (container.parentElement && container.parentElement !== document.body) {
+                        while (container.parentElement && container.parentElement !== document.body && container.parentElement !== document.documentElement) {
                           container = container.parentElement;
                         }
-                        if (container && container !== document.body) {
-                          var topVal = parseInt(container.style.top || '0');
-                          if (topVal > -1000 && container.style.visibility !== 'hidden' && container.style.display !== 'none') {
-                            var winW = window.innerWidth;
-                            var winH = window.innerHeight;
 
-                            // Cálculo bidimensional considerando los 590px de desafíos 4x4
-                            var scaleW = (winW * 0.95) / 400;
-                            var scaleH = (winH * 0.94) / 590;
+                        if (container && container.style) {
+                          var topVal = parseInt(container.style.top || '0', 10);
+                          var styleObj = window.getComputedStyle(container);
+                          var isVisible = topVal > -1000 &&
+                                          styleObj.display !== 'none' &&
+                                          styleObj.visibility !== 'hidden' &&
+                                          styleObj.opacity !== '0';
+
+                          if (isVisible) {
+                            var winW = window.innerWidth || document.documentElement.clientWidth;
+                            var winH = window.innerHeight || document.documentElement.clientHeight;
+
+                            // Cálculo de escala para que entren hasta desafíos 4x4 completos
+                            var scaleW = (winW * 0.94) / 400;
+                            var scaleH = (winH * 0.88) / 580;
                             var scale = Math.min(scaleW, scaleH);
+                            if (scale > 0.95) scale = 0.95;
+                            if (scale < 0.58) scale = 0.58;
 
-                            if (scale > 1.0) scale = 1.0;
-                            if (scale < 0.50) scale = 0.50;
-
-                            container.style.setProperty('position', 'fixed', 'important');
-                            container.style.setProperty('top', '50%', 'important');
-                            container.style.setProperty('left', '50%', 'important');
-                            container.style.setProperty('transform', 'translate(-50%, -50%) scale(' + scale.toFixed(3) + ')', 'important');
-                            container.style.setProperty('transform-origin', 'center center', 'important');
-                            container.style.setProperty('z-index', '2147483647', 'important');
+                            document.documentElement.style.setProperty('--pf-scale', scale.toFixed(3));
+                            if (container.getAttribute('data-pf-captcha') !== 'active') {
+                              container.setAttribute('data-pf-captcha', 'active');
+                            }
+                          } else {
+                            if (container.getAttribute('data-pf-captcha') === 'active') {
+                              container.removeAttribute('data-pf-captcha');
+                            }
                           }
                         }
                       }
 
-                      // 7. Auto-scroll suave a la información técnica del vehículo al aparecer
+                      // Auto-scroll a la información del vehículo cuando aparezca
                       var infoHeader = Array.from(document.querySelectorAll('div, td, th, span, b, a')).find(function(el) {
                         return el.innerText && el.innerText.includes('Información del Vehículo');
                       });
@@ -324,12 +356,10 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
                           table.scrollIntoView({ behavior: 'smooth', block: 'start' });
                         }
                       }
-                    });
-
-                    challengeObserver.observe(document.body, { childList: true, subtree: true, attributes: true });
+                    }, 140);
                   })();
                 """;
-                controller.runJavaScript(jsUniversalResponsive);
+                controller.runJavaScript(jsBulletproof);
               },
             ),
           )
