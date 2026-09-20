@@ -1198,7 +1198,7 @@ class PrtVerificationScreen extends StatefulWidget {
 
 class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
   bool _isLoading = true;
-  bool _isAutoProcessing = false;
+  bool _isSaving = false;
   String _statusMessage = 'Resuelve el captcha para verificar';
   late final WebViewController _controller;
 
@@ -1222,7 +1222,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
           onPageFinished: (String url) {
             setState(() => _isLoading = false);
             SystemChannels.textInput.invokeMethod('TextInput.hide');
-            _injectPrecisionAutomation();
+            _injectUniversalScraper();
           },
         ),
       )
@@ -1233,18 +1233,83 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
     try {
       final Map<String, dynamic> data = json.decode(rawMsg);
       if (data['status'] == 'CAPTCHA_SOLVED') {
-        setState(() {
-          _statusMessage = '¡Captcha resuelto! Consultando vehículo...';
-        });
+        if (mounted) {
+          setState(() {
+            _statusMessage = '¡Captcha resuelto! Consultando vehículo...';
+          });
+        }
         return;
       }
-      _handleAutoScraped(rawMsg);
+      _saveAndClose(data);
     } catch (_) {
-      _handleAutoScraped(rawMsg);
+      try {
+        final Map<String, dynamic> data = json.decode(rawMsg);
+        _saveAndClose(data);
+      } catch (_) {}
     }
   }
 
-  void _injectPrecisionAutomation() {
+  Future<void> _saveAndClose(Map<String, dynamic> scraped) async {
+    if (_isSaving) return;
+    setState(() {
+      _isSaving = true;
+      _statusMessage = '¡Ficha obtenida! Guardando vehículo...';
+    });
+
+    try {
+      scraped['patente'] = widget.targetPlate;
+      scraped['data_source'] = 'PRT_SCRAPING';
+
+      await http.post(
+        Uri.parse('http://91.99.145.70:8000/api/vehicle/cache'),
+        headers: {'Content-Type': 'application/json'},
+        body: json.encode({
+          'plate': widget.targetPlate,
+          'data': scraped,
+        }),
+      ).timeout(const Duration(seconds: 5));
+    } catch (_) {}
+
+    if (mounted) {
+      widget.onVehicleSaved(scraped);
+      Navigator.pop(context);
+    }
+  }
+
+  Future<void> _manualExtract() async {
+    if (_isSaving) return;
+    try {
+      final js = """
+        (function() {
+          return JSON.stringify(window.__pfData || {});
+        })();
+      """;
+      final rawResult = await _controller.runJavaScriptReturningResult(js);
+      String cleanJson = rawResult.toString();
+      if (cleanJson.startsWith('"') && cleanJson.endsWith('"')) {
+        cleanJson = json.decode(cleanJson);
+      }
+      final Map<String, dynamic> scraped = json.decode(cleanJson);
+
+      if (scraped.isNotEmpty && (scraped['make'] != null || (scraped['revisions'] != null && (scraped['revisions'] as List).isNotEmpty))) {
+        await _saveAndClose(scraped);
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Esperando respuesta del portal... Pulsa la lupa si aún no ha consultado.')),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Aún no hay datos disponibles: $e')),
+        );
+      }
+    }
+  }
+
+  void _injectUniversalScraper() {
     final js = """
       (function() {
         var meta = document.querySelector('meta[name="viewport"]');
@@ -1255,10 +1320,10 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
         }
         meta.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no';
 
-        var style = document.getElementById('pf-precision-style');
+        var style = document.getElementById('pf-universal-style');
         if (!style) {
           style = document.createElement('style');
-          style.id = 'pf-precision-style';
+          style.id = 'pf-universal-style';
           document.head.appendChild(style);
         }
         style.innerHTML = `
@@ -1331,47 +1396,37 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
           revisions: []
         };
 
-        // Función robusta de búsqueda del botón lupa sin fallos de mayúsculas
-        function findAndClickSearch() {
-          var candidates = document.querySelectorAll('input, button, a, img');
-          var searchBtn = null;
-          for (var i = 0; i < candidates.length; i++) {
-            var el = candidates[i];
-            var str = (
-              (el.id || '') + ' ' +
-              (el.name || '') + ' ' +
-              (el.src || '') + ' ' +
-              (el.value || '') + ' ' +
-              (el.className || '') + ' ' +
-              (el.getAttribute('onclick') || '') + ' ' +
-              (el.getAttribute('alt') || '') + ' ' +
-              (el.getAttribute('title') || '')
-            ).toLowerCase();
-
-            if (str.includes('lupa') || str.includes('buscar') || str.includes('consult') || str.includes('search')) {
-              searchBtn = el.closest('a') || el.closest('button') || el;
-              break;
+        function findSearchButton() {
+          var inp = document.querySelector('input[type="text"]');
+          if (inp) {
+            var p = inp.parentElement;
+            if (p) {
+              var btn = p.querySelector('input[type="image"], input[type="submit"], button, a, img');
+              if (btn) return btn.closest('a') || btn.closest('button') || btn;
+            }
+            var row = inp.closest('tr') || inp.closest('div');
+            if (row) {
+              var btnRow = row.querySelector('input[type="image"], input[type="submit"], a[id*="Buscar" i], img[src*="lupa" i], img[src*="buscar" i]');
+              if (btnRow) return btnRow.closest('a') || btnRow.closest('button') || btnRow;
             }
           }
+          return document.querySelector('input[src*="lupa" i], input[src*="buscar" i], [id*="btnBuscar" i], [id*="btnbuscar" i], a[title*="Buscar" i]');
+        }
 
-          if (!searchBtn) {
-            var inp = document.querySelector('input[type="text"]');
-            if (inp && inp.parentElement) {
-              searchBtn = inp.parentElement.querySelector('input[type="image"], input[type="submit"], button, a, img');
-            }
-          }
-
-          if (searchBtn) {
+        function triggerSearch() {
+          var btn = findSearchButton();
+          if (btn) {
             try {
-              searchBtn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-              searchBtn.click();
+              btn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+              btn.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
+              btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+              if (typeof btn.click === 'function') btn.click();
               return true;
             } catch (e) {}
           }
           return false;
         }
 
-        // Detector de resolución del captcha
         function checkCaptchaToken() {
           var token = '';
           try {
@@ -1401,7 +1456,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
         }
 
         setInterval(function() {
-          // A) Control estricto de visibilidad del popup fotográfico
+          // Centrado dinámico del popup de fotos
           var bframe = document.querySelector('iframe[src*="bframe"]');
           if (bframe) {
             var container = bframe;
@@ -1432,17 +1487,18 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             }
           }
 
-          // B) Auto-disparo al resolver el captcha
+          // Auto-disparo al resolver el captcha
           var token = checkCaptchaToken();
           if (token && token.length > 20 && !window.__pfSearched) {
             window.__pfSearched = true;
             if (window.PrtBridge) {
               window.PrtBridge.postMessage(JSON.stringify({status: 'CAPTCHA_SOLVED'}));
             }
-            setTimeout(findAndClickSearch, 250);
+            triggerSearch();
+            setTimeout(triggerSearch, 500);
           }
 
-          // C) Extracción secuencial garantizada
+          // Extracción acumulativa de datos
           var data = window.__pfData;
           var allRows = document.querySelectorAll('tr');
 
@@ -1483,7 +1539,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             }
           });
 
-          // Si ya leímos la ficha pero falta el historial, abrimos el acordeón
+          // Si leímos ficha pero falta el historial, abrimos acordeón de revisiones
           if ((data.make || data.model) && data.revisions.length === 0 && !window.__pfClickedRev) {
             window.__pfClickedRev = true;
             document.querySelectorAll('a, div, span, td').forEach(function(el) {
@@ -1505,87 +1561,31 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             });
           }
 
-          // D) Notificación final a Flutter
-          var hasVehicle = !!(data.make || data.model);
-          var hasRevisions = data.revisions.length > 0;
-
-          if (hasVehicle && hasRevisions) {
+          // Notificación automática a Flutter
+          function sendCompleteData() {
             if (window.PrtBridge && !window.__pfScrapedSent) {
-              window.__pfScrapedSent = true;
-              window.PrtBridge.postMessage(JSON.stringify(data));
+              var d = window.__pfData;
+              if (d.make || d.model || (d.revisions && d.revisions.length > 0)) {
+                window.__pfScrapedSent = true;
+                window.PrtBridge.postMessage(JSON.stringify(d));
+              }
             }
-          } else if (hasVehicle) {
-            if (!window.__pfTimeoutSend) {
-              window.__pfTimeoutSend = setTimeout(function() {
-                if (window.PrtBridge && !window.__pfScrapedSent) {
-                  window.__pfScrapedSent = true;
-                  window.PrtBridge.postMessage(JSON.stringify(data));
-                }
-              }, 2200);
+          }
+
+          var hasVeh = !!(data.make || data.model);
+          var hasRev = data.revisions && data.revisions.length > 0;
+
+          if (hasVeh && hasRev) {
+            sendCompleteData();
+          } else if (hasVeh || hasRev) {
+            if (!window.__pfGraceTimer) {
+              window.__pfGraceTimer = setTimeout(sendCompleteData, 2200);
             }
           }
         }, 140);
       })();
     """;
     _controller.runJavaScript(js);
-  }
-
-  void _handleAutoScraped(String rawJson) async {
-    if (_isAutoProcessing) return;
-    setState(() {
-      _isAutoProcessing = true;
-      _statusMessage = '¡Datos extraídos! Sincronizando en base de datos...';
-    });
-
-    try {
-      final Map<String, dynamic> scraped = json.decode(rawJson);
-      scraped['patente'] = widget.targetPlate;
-      scraped['data_source'] = 'PRT_SCRAPING';
-
-      final res = await http.post(
-        Uri.parse('http://91.99.145.70:8000/api/vehicle/cache'),
-        headers: {'Content-Type': 'application/json'},
-        body: json.encode({
-          'plate': widget.targetPlate,
-          'data': scraped,
-        }),
-      );
-
-      if (res.statusCode == 200 && mounted) {
-        widget.onVehicleSaved(scraped);
-        Navigator.pop(context);
-      }
-    } catch (_) {
-      if (mounted) Navigator.pop(context);
-    }
-  }
-
-  Future<void> _manualExtract() async {
-    setState(() => _isAutoProcessing = true);
-    try {
-      final js = """
-        (function() {
-          return JSON.stringify(window.__pfData || {});
-        })();
-      """;
-      final rawResult = await _controller.runJavaScriptReturningResult(js);
-      String cleanJson = rawResult.toString();
-      if (cleanJson.startsWith('"') && cleanJson.endsWith('"')) {
-        cleanJson = json.decode(cleanJson);
-      }
-      final Map<String, dynamic> scraped = json.decode(cleanJson);
-
-      if (scraped.isNotEmpty && (scraped['make'] != null || (scraped['revisions'] != null && (scraped['revisions'] as List).isNotEmpty))) {
-        _handleAutoScraped(json.encode(scraped));
-      } else {
-        setState(() => _isAutoProcessing = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Consultando el portal... intenta nuevamente en un momento.')),
-        );
-      }
-    } catch (e) {
-      setState(() => _isAutoProcessing = false);
-    }
   }
 
   @override
@@ -1614,8 +1614,8 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
         ),
         actions: [
           TextButton.icon(
-            onPressed: _isAutoProcessing ? null : _manualExtract,
-            icon: _isAutoProcessing
+            onPressed: _isSaving ? null : _manualExtract,
+            icon: _isSaving
                 ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
                 : const Icon(Icons.download_rounded, color: Color(0xFF10B981), size: 18),
             label: const Text('Extraer', style: TextStyle(color: Color(0xFF10B981), fontWeight: FontWeight.bold)),
@@ -1629,7 +1629,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             alignment: Alignment.centerLeft,
             child: Row(
               children: [
-                if (_isAutoProcessing)
+                if (_isSaving)
                   const SizedBox(
                     width: 14,
                     height: 14,
@@ -1641,7 +1641,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
                 Text(
                   _statusMessage,
                   style: TextStyle(
-                    color: _isAutoProcessing ? const Color(0xFF10B981) : const Color(0xFF94A3B8),
+                    color: _isSaving ? const Color(0xFF10B981) : const Color(0xFF94A3B8),
                     fontSize: 12,
                     fontWeight: FontWeight.bold,
                   ),
@@ -1656,7 +1656,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
           SafeArea(
             child: WebViewWidget(controller: _controller),
           ),
-          if (_isAutoProcessing)
+          if (_isSaving)
             Container(
               color: const Color(0xFF0F172A),
               width: double.infinity,
