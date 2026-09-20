@@ -196,17 +196,88 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
       ..setNavigationDelegate(
         NavigationDelegate(
           onPageFinished: (String url) {
-            final jsAutofill = """
+            final jsCleanAndFocus = """
               (function() {
+                // 1. Inyectar Viewport Responsive
+                var meta = document.querySelector('meta[name="viewport"]');
+                if (!meta) {
+                  meta = document.createElement('meta');
+                  meta.name = 'viewport';
+                  document.head.appendChild(meta);
+                }
+                meta.content = 'width=device-width, initial-scale=1.0, maximum-scale=2.5, user-scalable=yes';
+
+                // 2. Inyectar estilos CSS limpios para móvil
+                var style = document.createElement('style');
+                style.innerHTML = `
+                  body {
+                    zoom: 1.15 !important;
+                    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
+                    padding: 8px !important;
+                  }
+                  /* Ocultar afiches gigantes, calendarios y decoraciones irrelevantes */
+                  img[src*="banner"], img[src*="afiche"], img[src*="digital"],
+                  table[id*="calendario"], .banner, header, footer {
+                    display: none !important;
+                  }
+                  /* Agrandar campo de patente */
+                  input[type="text"] {
+                    font-size: 20px !important;
+                    height: 44px !important;
+                    font-weight: bold !important;
+                    text-transform: uppercase !important;
+                    text-align: center !important;
+                    border: 2px solid #0284C7 !important;
+                    border-radius: 8px !important;
+                    margin: 8px 0 !important;
+                  }
+                  /* Botón consultar del portal */
+                  input[type="submit"], input[type="button"] {
+                    font-size: 16px !important;
+                    padding: 8px 16px !important;
+                    background-color: #0284C7 !important;
+                    color: white !important;
+                    border-radius: 8px !important;
+                    font-weight: bold !important;
+                  }
+                  /* Tabla de resultados */
+                  table {
+                    font-size: 14px !important;
+                    width: 100% !important;
+                  }
+                `;
+                document.head.appendChild(style);
+
+                // 3. Remover imágenes grandes que tapan la pantalla
+                document.querySelectorAll('img').forEach(function(img) {
+                  if (img.width > 220 || img.height > 120) {
+                    img.style.display = 'none';
+                  }
+                });
+
+                // 4. Ocultar tabla de meses si existe
+                document.querySelectorAll('table').forEach(function(tbl) {
+                  if (tbl.innerText.includes('Enero') && tbl.innerText.includes('Febrero')) {
+                    tbl.style.display = 'none';
+                  }
+                });
+
+                // 5. Rellenar la patente y centrar la vista en el formulario
                 var inputs = document.querySelectorAll('input[type="text"]');
+                var targetInput = null;
                 inputs.forEach(function(i) {
                   if (i.id.toLowerCase().includes('patente') || i.name.toLowerCase().includes('patente')) {
                     i.value = '$targetPlate';
+                    targetInput = i;
                   }
                 });
+
+                if (targetInput) {
+                  targetInput.scrollIntoView({behavior: 'smooth', block: 'center'});
+                }
               })();
             """;
-            controller.runJavaScript(jsAutofill);
+            controller.runJavaScript(jsCleanAndFocus);
           },
         ),
       )
