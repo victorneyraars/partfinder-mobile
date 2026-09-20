@@ -1204,6 +1204,9 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
   @override
   void initState() {
     super.initState();
+    // Ocultar teclado inmediatamente al entrar
+    SystemChannels.textInput.invokeMethod('TextInput.hide');
+
     _controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..setUserAgent("Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36")
@@ -1215,9 +1218,14 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
       )
       ..setNavigationDelegate(
         NavigationDelegate(
-          onPageStarted: (_) => setState(() => _isLoading = true),
+          onPageStarted: (_) {
+            setState(() => _isLoading = true);
+            SystemChannels.textInput.invokeMethod('TextInput.hide');
+          },
           onPageFinished: (String url) {
             setState(() => _isLoading = false);
+            SystemChannels.textInput.invokeMethod('TextInput.hide');
+            FocusScope.of(context).unfocus();
             _injectOptimization();
           },
         ),
@@ -1228,7 +1236,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
   void _injectOptimization() {
     final js = """
       (function() {
-        // 1. Viewport adaptable
+        // 1. Viewport adaptable y desactivación de teclado en inputs
         var meta = document.querySelector('meta[name="viewport"]');
         if (!meta) {
           meta = document.createElement('meta');
@@ -1237,7 +1245,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
         }
         meta.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes';
 
-        // 2. CSS Maestro Responsive
+        // 2. Estilos globales
         var style = document.getElementById('pf-responsive-style');
         if (!style) {
           style = document.createElement('style');
@@ -1280,7 +1288,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             display: none !important;
           }
 
-          /* CENTRADO HORIZONTAL Y ESCALA RESPONSIVE INALTERABLE */
+          /* Desafío reCAPTCHA centrado simétricamente */
           div:has(iframe[src*="bframe"]),
           div:has(iframe[title*="challenge"]),
           div:has(iframe[title*="desafío"]),
@@ -1293,18 +1301,22 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             -webkit-transform-origin: top center !important;
             z-index: 2147483647 !important;
           }
+
+          /* Estilo realzado para la tabla de información del vehículo */
+          .pf-result-highlight {
+            width: 100% !important;
+            margin: 10px 0 !important;
+            border-collapse: collapse !important;
+            font-size: 15px !important;
+          }
+          .pf-result-highlight td, .pf-result-highlight th {
+            padding: 10px 8px !important;
+            border-bottom: 1px solid #E2E8F0 !important;
+          }
         `;
 
-        // 3. Limpieza periódica inicial de elementos de SharePoint
-        function cleanAndFill() {
-          document.querySelectorAll('img').forEach(function(img) {
-            var src = (img.src || '').toLowerCase();
-            if (src.includes('logo') || src.includes('prt') || src.includes('afiche') || img.width > 80) {
-              var p = img.closest('table') || img.closest('tr') || img.closest('div') || img;
-              if (p && p !== document.body) p.style.setProperty('display', 'none', 'important');
-            }
-          });
-
+        // 3. Rellenar patente y desenfocar inmediatamente para ocultar teclado
+        function setupInputs() {
           var inputs = document.querySelectorAll('input[type="text"]');
           inputs.forEach(function(inp) {
             if (inp.id.toLowerCase().includes('patente') || inp.name.toLowerCase().includes('patente')) {
@@ -1313,17 +1325,21 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
                 inp.dispatchEvent(new Event('input', { bubbles: true }));
                 inp.dispatchEvent(new Event('change', { bubbles: true }));
               }
+              // Quitar foco táctil para que el teclado no se levante
+              inp.blur();
             }
           });
+          if (document.activeElement && document.activeElement.tagName === 'INPUT') {
+            document.activeElement.blur();
+          }
         }
 
-        cleanAndFill();
-        var cleanInterval = setInterval(cleanAndFill, 400);
-        setTimeout(function() { clearInterval(cleanInterval); }, 3500);
+        setupInputs();
+        setTimeout(setupInputs, 500);
 
-        // 4. Observador reactivo de escala horizontal y auto-extracción
-        var observer = new MutationObserver(function() {
-          // Detectar bframe y aplicar clase de centrado horizontal
+        // 4. Observador continuo para centrado del captcha y presentación de resultados
+        var obs = new MutationObserver(function() {
+          // A) Centrado del desafío fotográfico
           var bframe = document.querySelector('iframe[src*="bframe"]');
           if (bframe) {
             var container = bframe;
@@ -1342,16 +1358,20 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             }
           }
 
-          // Auto-extracción cuando carguen los resultados
-          var res = {};
+          // B) Detección y centrado de la tabla de resultados
           var rows = document.querySelectorAll('tr');
+          var targetTable = null;
+          var res = {};
+
           rows.forEach(function(r) {
-            var cells = r.querySelectorAll('td, th');
-            for (var i = 0; i < cells.length - 1; i++) {
-              var k = cells[i].innerText.trim().toLowerCase();
-              var v = cells[i+1].innerText.trim();
-              if (!v) continue;
-              if (k.includes('marca')) res['make'] = v;
+            var cells = Array.from(r.querySelectorAll('td, th')).map(function(c) {
+              return c.innerText.trim();
+            }).filter(Boolean);
+
+            if (cells.length >= 2) {
+              var k = cells[0].toLowerCase();
+              var v = cells[cells.length - 1];
+              if (k.includes('marca')) { res['make'] = v; targetTable = r.closest('table'); }
               else if (k.includes('modelo')) res['model'] = v;
               else if (k.includes('año') || k.includes('fabricaci')) res['year'] = v;
               else if (k.includes('tipo')) res['type'] = v;
@@ -1362,14 +1382,29 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             }
           });
 
-          if (res.make || res.model) {
-            if (window.PrtBridge) {
+          // Si la tabla de resultados ya está presente en pantalla:
+          if (targetTable && (res.make || res.model)) {
+            // Ocultar formulario de búsqueda, logo y captcha para dejar la pantalla limpia
+            document.querySelectorAll('input[type="text"], .g-recaptcha, img[src*="logo"], img[src*="prt"]').forEach(function(el) {
+              var p = el.closest('table') || el.closest('div') || el;
+              if (p && p !== targetTable && !targetTable.contains(p) && p !== document.body) {
+                p.style.setProperty('display', 'none', 'important');
+              }
+            });
+
+            // Dar formato destacado y centrar la tabla al inicio
+            targetTable.classList.add('pf-result-highlight');
+            targetTable.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+            // Enviar los datos extraídos al puente Flutter
+            if (window.PrtBridge && !window.__pfScrapedSent) {
+              window.__pfScrapedSent = true;
               window.PrtBridge.postMessage(JSON.stringify(res));
             }
           }
         });
 
-        observer.observe(document.body, { childList: true, subtree: true });
+        obs.observe(document.body, { childList: true, subtree: true });
       })();
     """;
     _controller.runJavaScript(js);
@@ -1411,11 +1446,12 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
           var result = {};
           var rows = document.querySelectorAll('tr');
           rows.forEach(function(r) {
-            var cells = r.querySelectorAll('td, th');
-            for (var i = 0; i < cells.length - 1; i++) {
-              var k = cells[i].innerText.trim().toLowerCase();
-              var v = cells[i+1].innerText.trim();
-              if (!v) continue;
+            var cells = Array.from(r.querySelectorAll('td, th')).map(function(c) {
+              return c.innerText.trim();
+            }).filter(Boolean);
+            if (cells.length >= 2) {
+              var k = cells[0].toLowerCase();
+              var v = cells[cells.length - 1];
               if (k.includes('marca')) result['make'] = v;
               else if (k.includes('modelo')) result['model'] = v;
               else if (k.includes('año') || k.includes('fabricaci')) result['year'] = v;
@@ -1458,6 +1494,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFF0F172A),
+      resizeToAvoidBottomInset: false,
       appBar: AppBar(
         backgroundColor: const Color(0xFF0F172A),
         elevation: 0,
@@ -1495,7 +1532,10 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             : null,
       ),
       body: SafeArea(
-        child: WebViewWidget(controller: _controller),
+        child: GestureDetector(
+          onTap: () => FocusScope.of(context).unfocus(),
+          child: WebViewWidget(controller: _controller),
+        ),
       ),
     );
   }
