@@ -1213,7 +1213,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
       ..addJavaScriptChannel(
         'PrtBridge',
         onMessageReceived: (JavaScriptMessage message) {
-          _handleAutoScraped(message.message);
+          _handleBridgeMessage(message.message);
         },
       )
       ..setNavigationDelegate(
@@ -1222,14 +1222,29 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
           onPageFinished: (String url) {
             setState(() => _isLoading = false);
             SystemChannels.textInput.invokeMethod('TextInput.hide');
-            _injectSequentialEngine();
+            _injectPrecisionAutomation();
           },
         ),
       )
       ..loadRequest(Uri.parse('https://www.prt.cl/Paginas/RevisionTecnica.aspx'));
   }
 
-  void _injectSequentialEngine() {
+  void _handleBridgeMessage(String rawMsg) {
+    try {
+      final Map<String, dynamic> data = json.decode(rawMsg);
+      if (data['status'] == 'CAPTCHA_SOLVED') {
+        setState(() {
+          _statusMessage = '¡Captcha resuelto! Consultando vehículo...';
+        });
+        return;
+      }
+      _handleAutoScraped(rawMsg);
+    } catch (_) {
+      _handleAutoScraped(rawMsg);
+    }
+  }
+
+  void _injectPrecisionAutomation() {
     final js = """
       (function() {
         var meta = document.querySelector('meta[name="viewport"]');
@@ -1240,10 +1255,10 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
         }
         meta.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no';
 
-        var style = document.getElementById('pf-sequential-style');
+        var style = document.getElementById('pf-precision-style');
         if (!style) {
           style = document.createElement('style');
-          style.id = 'pf-sequential-style';
+          style.id = 'pf-precision-style';
           document.head.appendChild(style);
         }
         style.innerHTML = `
@@ -1283,16 +1298,19 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
           .g-recaptcha-bubble-arrow {
             display: none !important;
           }
-          div:has(iframe[src*="bframe"]),
-          div:has(iframe[title*="challenge"]),
-          div:has(iframe[title*="desafío"]),
-          .pf-centered-challenge {
+          .pf-centered-active {
+            position: fixed !important;
             left: 50% !important;
             right: auto !important;
             transform: translateX(-50%) scale(var(--pf-scale, 0.90)) !important;
             -webkit-transform: translateX(-50%) scale(var(--pf-scale, 0.90)) !important;
             transform-origin: top center !important;
             z-index: 2147483647 !important;
+            pointer-events: auto !important;
+          }
+          .pf-layer-inactive {
+            pointer-events: none !important;
+            z-index: -1 !important;
           }
         `;
 
@@ -1313,8 +1331,77 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
           revisions: []
         };
 
+        // Función robusta de búsqueda del botón lupa sin fallos de mayúsculas
+        function findAndClickSearch() {
+          var candidates = document.querySelectorAll('input, button, a, img');
+          var searchBtn = null;
+          for (var i = 0; i < candidates.length; i++) {
+            var el = candidates[i];
+            var str = (
+              (el.id || '') + ' ' +
+              (el.name || '') + ' ' +
+              (el.src || '') + ' ' +
+              (el.value || '') + ' ' +
+              (el.className || '') + ' ' +
+              (el.getAttribute('onclick') || '') + ' ' +
+              (el.getAttribute('alt') || '') + ' ' +
+              (el.getAttribute('title') || '')
+            ).toLowerCase();
+
+            if (str.includes('lupa') || str.includes('buscar') || str.includes('consult') || str.includes('search')) {
+              searchBtn = el.closest('a') || el.closest('button') || el;
+              break;
+            }
+          }
+
+          if (!searchBtn) {
+            var inp = document.querySelector('input[type="text"]');
+            if (inp && inp.parentElement) {
+              searchBtn = inp.parentElement.querySelector('input[type="image"], input[type="submit"], button, a, img');
+            }
+          }
+
+          if (searchBtn) {
+            try {
+              searchBtn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+              searchBtn.click();
+              return true;
+            } catch (e) {}
+          }
+          return false;
+        }
+
+        // Detector de resolución del captcha
+        function checkCaptchaToken() {
+          var token = '';
+          try {
+            if (window.grecaptcha) {
+              if (window.grecaptcha.enterprise && typeof window.grecaptcha.enterprise.getResponse === 'function') {
+                token = window.grecaptcha.enterprise.getResponse();
+              }
+              if (!token && typeof window.grecaptcha.getResponse === 'function') {
+                token = window.grecaptcha.getResponse();
+              }
+            }
+          } catch(e) {}
+
+          if (!token) {
+            var textareas = document.querySelectorAll('textarea');
+            for (var i = 0; i < textareas.length; i++) {
+              var ta = textareas[i];
+              if ((ta.name || '').toLowerCase().includes('recaptcha') || (ta.id || '').toLowerCase().includes('recaptcha')) {
+                if (ta.value && ta.value.length > 20) {
+                  token = ta.value;
+                  break;
+                }
+              }
+            }
+          }
+          return token;
+        }
+
         setInterval(function() {
-          // Centrado del desafío fotográfico
+          // A) Control estricto de visibilidad del popup fotográfico
           var bframe = document.querySelector('iframe[src*="bframe"]');
           if (bframe) {
             var container = bframe;
@@ -1322,39 +1409,43 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
               container = container.parentElement;
             }
             if (container && container !== document.body && container.tagName !== 'FORM') {
-              var winW = window.innerWidth || document.documentElement.clientWidth;
-              var winH = window.innerHeight || document.documentElement.clientHeight;
-              var targetScale = Math.min((winW - 14) / 400, (winH - 100) / 580);
-              if (targetScale > 1.0) targetScale = 1.0;
-              if (targetScale < 0.72) targetScale = 0.72;
-              document.documentElement.style.setProperty('--pf-scale', targetScale.toFixed(3));
-              if (!container.classList.contains('pf-centered-challenge')) {
-                container.classList.add('pf-centered-challenge');
+              var topVal = parseInt(container.style.top || '0', 10);
+              var isVisible = topVal > -1000 &&
+                              container.style.display !== 'none' &&
+                              container.style.visibility !== 'hidden' &&
+                              container.style.opacity !== '0';
+
+              if (isVisible) {
+                var winW = window.innerWidth || document.documentElement.clientWidth;
+                var winH = window.innerHeight || document.documentElement.clientHeight;
+                var targetScale = Math.min((winW - 14) / 400, (winH - 100) / 580);
+                if (targetScale > 1.0) targetScale = 1.0;
+                if (targetScale < 0.72) targetScale = 0.72;
+                document.documentElement.style.setProperty('--pf-scale', targetScale.toFixed(3));
+
+                container.classList.remove('pf-layer-inactive');
+                container.classList.add('pf-centered-active');
+              } else {
+                container.classList.remove('pf-centered-active');
+                container.classList.add('pf-layer-inactive');
               }
             }
           }
 
-          // Auto-disparo de búsqueda al resolver captcha
-          var token = '';
-          if (window.grecaptcha && typeof window.grecaptcha.getResponse === 'function') {
-            try { token = window.grecaptcha.getResponse(); } catch(e) {}
-          }
-          if (!token) {
-            var ta = document.querySelector('textarea[name="g-recaptcha-response"], #g-recaptcha-response');
-            if (ta && ta.value) token = ta.value;
-          }
+          // B) Auto-disparo al resolver el captcha
+          var token = checkCaptchaToken();
           if (token && token.length > 20 && !window.__pfSearched) {
             window.__pfSearched = true;
-            setTimeout(function() {
-              var btn = document.querySelector('input[type="image"], input[src*="lupa"], input[src*="buscar"], a[id*="Buscar"]');
-              if (btn) btn.click();
-            }, 300);
+            if (window.PrtBridge) {
+              window.PrtBridge.postMessage(JSON.stringify({status: 'CAPTCHA_SOLVED'}));
+            }
+            setTimeout(findAndClickSearch, 250);
           }
 
+          // C) Extracción secuencial garantizada
           var data = window.__pfData;
-
-          // 1. EXTRAER FICHA TÉCNICA (Información del Vehículo)
           var allRows = document.querySelectorAll('tr');
+
           allRows.forEach(function(r) {
             var cells = Array.from(r.querySelectorAll('td, th')).map(function(c) {
               return (c.textContent || '').trim().split(' ').filter(Boolean).join(' ');
@@ -1392,7 +1483,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             }
           });
 
-          // 2. Si ya tenemos Marca/Modelo pero falta el Historial, desplegar el panel de Revisiones
+          // Si ya leímos la ficha pero falta el historial, abrimos el acordeón
           if ((data.make || data.model) && data.revisions.length === 0 && !window.__pfClickedRev) {
             window.__pfClickedRev = true;
             document.querySelectorAll('a, div, span, td').forEach(function(el) {
@@ -1403,7 +1494,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             });
           }
 
-          // 3. Si el panel abrió mostrando revisiones pero falta la Ficha, abrir panel Información del Vehículo
+          // Si cargó el historial primero, abrimos la ficha del vehículo
           if ((!data.make || !data.model) && data.revisions.length > 0 && !window.__pfClickedVeh) {
             window.__pfClickedVeh = true;
             document.querySelectorAll('a, div, span, td').forEach(function(el) {
@@ -1414,7 +1505,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             });
           }
 
-          // 4. NOTIFICAR A FLUTTER CUANDO TENGAMOS AMBOS (O TRAS TIMEOUT SEGURO)
+          // D) Notificación final a Flutter
           var hasVehicle = !!(data.make || data.model);
           var hasRevisions = data.revisions.length > 0;
 
@@ -1424,7 +1515,6 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
               window.PrtBridge.postMessage(JSON.stringify(data));
             }
           } else if (hasVehicle) {
-            // Si ya hay vehículo, dar hasta 2 segundos para que el historial responda
             if (!window.__pfTimeoutSend) {
               window.__pfTimeoutSend = setTimeout(function() {
                 if (window.PrtBridge && !window.__pfScrapedSent) {
@@ -1434,7 +1524,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
               }, 2200);
             }
           }
-        }, 150);
+        }, 140);
       })();
     """;
     _controller.runJavaScript(js);
