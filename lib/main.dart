@@ -770,11 +770,11 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
 
     Widget _buildBoostrTelemetryHud() {
     final bool isBoostr = _selectedEngine == 'boostr';
-    final bool isOnline = _boostrTelemetry?['status'] == 'ONLINE';
-    final int remaining = _boostrTelemetry?['remaining'] ?? 100;
-    final int dailyLimit = _boostrTelemetry?['daily_limit'] ?? 100;
-    final int cached = _boostrTelemetry?['cached_count'] ?? 0;
-    final String plan = _boostrTelemetry?['plan']?.toString().toUpperCase() ?? 'PRO';
+    final bool isOnline = _boostrStatus?['status'] == 'ONLINE';
+    final String plan = _boostrStatus?['plan']?.toString().toUpperCase() ?? 'PRO';
+    final String dailyLimit = _boostrStatus?['daily_limit']?.toString() ?? '100';
+    final String remaining = _boostrStatus?['remaining']?.toString() ?? dailyLimit;
+    final String cached = _boostrStatus?['cached_plates']?.toString() ?? '0';
 
     final Color accentColor = isBoostr ? const Color(0xFF38BDF8) : const Color(0xFF10B981);
     final Color dotColor = isBoostr 
@@ -782,7 +782,7 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
         : const Color(0xFF10B981);
 
     final String titleText = isBoostr 
-        ? 'BOOSTR API $plan: ' + (isOnline ? 'ONLINE' : 'CONECTANDO')
+        ? 'BOOSTR API $plan: ${isOnline ? "ONLINE" : "CONECTANDO"}'
         : 'MOTOR PRT CHILE: ACTIVO';
 
     final String metricsText = isBoostr
@@ -796,7 +796,7 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
       decoration: BoxDecoration(
         color: const Color(0xFF0F172A).withOpacity(0.85),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: accentColor.withOpacity(0.3), width: 1),
+        border: Border.all(color: accentColor.withOpacity(0.35), width: 1),
       ),
       child: Row(
         children: [
@@ -823,7 +823,7 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
               children: [
                 Text(
                   titleText,
-                  style: TextStyle(
+                  style: const TextStyle(
                     color: Colors.white,
                     fontSize: 11,
                     fontWeight: FontWeight.w800,
