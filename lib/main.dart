@@ -202,9 +202,9 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
           ..setNavigationDelegate(
             NavigationDelegate(
               onPageFinished: (String url) {
-                final jsIndustrialSolution = """
+                final jsMultistepEngine = """
                   (function() {
-                    // 1. Viewport estándar de alta fidelidad
+                    // 1. Viewport estándar de alta compatibilidad
                     var meta = document.querySelector('meta[name="viewport"]');
                     if (!meta) {
                       meta = document.createElement('meta');
@@ -213,10 +213,12 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
                     }
                     meta.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no';
 
-                    // 2. CSS para limpiar la cabecera y dar espacio completo al captcha
+                    // 2. Limpieza de elementos superiores para ganar espacio vertical
                     var style = document.createElement('style');
                     style.innerHTML = `
-                      header, nav, footer, #suiteBar, #s4-titlerow, .banner,
+                      header, nav, footer, #suiteBar, #s4-titlerow, #titleAreaBox, .banner,
+                      [id*="Logo"], [id*="siteIcon"], [class*="logo"],
+                      img[src*="logo"], img[src*="Logo"], img[src*="prt"], img[src*="PRT"],
                       img[src*="afiche"], img[src*="banner"], table[id*="calendario"] {
                         display: none !important;
                       }
@@ -249,17 +251,7 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
                     `;
                     document.head.appendChild(style);
 
-                    // 3. Suprimir elementos visuales de la cabecera de la PRT
-                    document.querySelectorAll('img').forEach(function(img) {
-                      var src = (img.getAttribute('src') || '').toLowerCase();
-                      if (src.includes('logo') || src.includes('prt') || img.width > 100 || img.height > 60) {
-                        var p = img.closest('table') || img.closest('tr') || img.closest('div') || img;
-                        if (p && p !== document.body) {
-                          p.style.setProperty('display', 'none', 'important');
-                        }
-                      }
-                    });
-
+                    // 3. Ocultar menús de texto residuales ("Home", "Calendario", etc.)
                     document.querySelectorAll('a, span, td').forEach(function(el) {
                       var txt = (el.innerText || '').trim().toLowerCase();
                       if (txt === 'home' || txt === 'calendario' || txt === 'consideraciones' || txt === 'plantas') {
@@ -288,28 +280,16 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
                       }
                     }, 350);
 
-                    // 6. MOTOR DE DETECCIÓN Y CENTRADO DE ALTA PRECISIÓN PARA EL CHALLENGE
-                    setInterval(function() {
+                    // 6. MOTOR REACTIVO CONTINUO MULTI-PASO PARA RECAPTCHA
+                    function enforceChallengeCentering() {
                       var iframes = document.querySelectorAll('iframe');
-                      iframes.forEach(function(frame) {
-                        var src = (frame.getAttribute('src') || '').toLowerCase();
-                        var title = (frame.getAttribute('title') || '').toLowerCase();
-                        var h = frame.offsetHeight || parseInt(frame.style.height || '0', 10);
-
-                        // Es el desafío fotográfico si es bframe, tiene textos de desafío o mide más de 140px de alto
-                        var isChallenge = src.includes('bframe') ||
-                                          title.includes('desaf') ||
-                                          title.includes('challenge') ||
-                                          title.includes('caduca') ||
-                                          h > 140;
-
-                        // Descartar explícitamente la casilla pequeña "No soy un robot"
-                        if (src.includes('anchor') || title.includes('casilla') || (h > 0 && h < 110 && !src.includes('bframe'))) {
-                          isChallenge = false;
-                        }
-
-                        if (isChallenge) {
-                          var container = frame;
+                      for (var i = 0; i < iframes.length; i++) {
+                        var f = iframes[i];
+                        var src = (f.src || f.getAttribute('src') || '').toLowerCase();
+                        
+                        // Localizar exclusivamente el iframe de las fotos (bframe)
+                        if (src.indexOf('bframe') !== -1) {
+                          var container = f;
                           while (container.parentElement && container.parentElement !== document.body && container.parentElement !== document.documentElement) {
                             container = container.parentElement;
                           }
@@ -326,7 +306,6 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
                               var winW = window.innerWidth || document.documentElement.clientWidth;
                               var winH = window.innerHeight || document.documentElement.clientHeight;
 
-                              // Escala adaptativa calculada contra los 585px de altura de los desafíos 4x4
                               var scaleW = (winW * 0.94) / 400;
                               var scaleH = (winH * 0.82) / 585;
                               var scale = Math.min(scaleW, scaleH);
@@ -334,23 +313,27 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
                               if (scale > 0.85) scale = 0.85;
                               if (scale < 0.58) scale = 0.58;
 
-                              container.style.setProperty('position', 'fixed', 'important');
-                              container.style.setProperty('top', '46%', 'important');
-                              container.style.setProperty('left', '50%', 'important');
-                              container.style.setProperty('bottom', 'auto', 'important');
-                              container.style.setProperty('right', 'auto', 'important');
-                              container.style.setProperty('margin', '0', 'important');
-                              container.style.setProperty('transform', 'translate(-50%, -50%) scale(' + scale.toFixed(3) + ')', 'important');
-                              container.style.setProperty('-webkit-transform', 'translate(-50%, -50%) scale(' + scale.toFixed(3) + ')', 'important');
-                              container.style.setProperty('transform-origin', 'center center', 'important');
-                              container.style.setProperty('-webkit-transform-origin', 'center center', 'important');
-                              container.style.setProperty('z-index', '2147483647', 'important');
+                              // Re-aplicar posición fija y centrado en cada ciclo
+                              if (container.style.position !== 'fixed' || container.style.top !== '46%') {
+                                container.style.setProperty('position', 'fixed', 'important');
+                                container.style.setProperty('top', '46%', 'important');
+                                container.style.setProperty('left', '50%', 'important');
+                                container.style.setProperty('bottom', 'auto', 'important');
+                                container.style.setProperty('right', 'auto', 'important');
+                                container.style.setProperty('margin', '0', 'important');
+                                container.style.setProperty('transform', 'translate(-50%, -50%) scale(' + scale.toFixed(3) + ')', 'important');
+                                container.style.setProperty('-webkit-transform', 'translate(-50%, -50%) scale(' + scale.toFixed(3) + ')', 'important');
+                                container.style.setProperty('transform-origin', 'center center', 'important');
+                                container.style.setProperty('-webkit-transform-origin', 'center center', 'important');
+                                container.style.setProperty('z-index', '2147483647', 'important');
+                              }
                             }
                           }
+                          break;
                         }
-                      });
+                      }
 
-                      // Auto-scroll a la tabla de resultados cuando cargue
+                      // Auto-scroll hacia la tabla de resultados cuando se emitan
                       var infoHeader = Array.from(document.querySelectorAll('div, td, th, span, b, a')).find(function(el) {
                         return el.innerText && el.innerText.includes('Información del Vehículo');
                       });
@@ -361,10 +344,17 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
                           table.scrollIntoView({ behavior: 'smooth', block: 'start' });
                         }
                       }
-                    }, 120);
+                    }
+
+                    // Ejecución continua a 50ms para neutralizar reescrituras de Google
+                    setInterval(enforceChallengeCentering, 50);
+
+                    // Observador de mutaciones del DOM como respaldo instantáneo
+                    var obs = new MutationObserver(enforceChallengeCentering);
+                    obs.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['style', 'class'] });
                   })();
                 """;
-                controller.runJavaScript(jsIndustrialSolution);
+                controller.runJavaScript(jsMultistepEngine);
               },
             ),
           )
