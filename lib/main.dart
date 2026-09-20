@@ -1338,23 +1338,17 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
           }
         }
 
-        var lastAcc = 0;
-        function clickAccordion(kw) {
-          var now = Date.now();
-          if (now - lastAcc < 1400) return;
-          var els = document.querySelectorAll('a, span, div, td, b');
-          for (var i = 0; i < els.length; i++) {
-            var t = (els[i].textContent || '').trim().toLowerCase();
-            if (t.includes(kw)) {
-              lastAcc = now;
-              var c = els[i].closest('a') || els[i].closest('div[onclick]') || els[i].closest('td[onclick]') || els[i];
+        function clickTab(keyword) {
+          document.querySelectorAll('a, td, span, div, input').forEach(function(el) {
+            var t = (el.textContent || el.value || '').trim().toLowerCase();
+            if (t.includes(keyword)) {
+              var target = el.closest('a') || el.closest('td') || el;
               try {
-                c.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-                c.click();
+                target.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+                if (typeof target.click === 'function') target.click();
               } catch(e) {}
-              return;
             }
-          }
+          });
         }
 
         setInterval(function() {
@@ -1433,9 +1427,15 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
 
           if (onResults) {
             if (!hasVeh) {
-              clickAccordion('información del vehículo');
+              if (!window.__pfLastVeh || Date.now() - window.__pfLastVeh > 1400) {
+                window.__pfLastVeh = Date.now();
+                clickTab('información del vehículo');
+              }
             } else if (!hasRev) {
-              clickAccordion('revisión técnica');
+              if (!window.__pfLastRev || Date.now() - window.__pfLastRev > 1400) {
+                window.__pfLastRev = Date.now();
+                clickTab('revisión técnica');
+              }
             }
           }
 
@@ -1450,10 +1450,12 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
 
           if (hasVeh && hasRev) {
             finish();
-          } else if (hasVeh || hasRev) {
-            if (!window.__pfTimer) window.__pfTimer = setTimeout(finish, 2000);
+          } else if (hasVeh && !hasRev) {
+            if (!window.__pfRevTimer) window.__pfRevTimer = setTimeout(finish, 3500);
+          } else if (!hasVeh && hasRev) {
+            if (!window.__pfVehTimer) window.__pfVehTimer = setTimeout(finish, 7500);
           }
-        }, 150);
+        }, 140);
       })();
     """;
     _controller.runJavaScript(js);
