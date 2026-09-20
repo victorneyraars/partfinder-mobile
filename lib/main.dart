@@ -1213,43 +1213,38 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
       ..addJavaScriptChannel(
         'PrtBridge',
         onMessageReceived: (JavaScriptMessage message) {
-          _handleBridgeMessage(message.message);
+          _handleBridge(message.message);
         },
       )
       ..setNavigationDelegate(
         NavigationDelegate(
           onPageStarted: (_) => setState(() => _isLoading = true),
-          onPageFinished: (String url) {
+          onPageFinished: (_) {
             setState(() => _isLoading = false);
             SystemChannels.textInput.invokeMethod('TextInput.hide');
-            _injectUniversalScraper();
+            _injectEngine();
           },
         ),
       )
       ..loadRequest(Uri.parse('https://www.prt.cl/Paginas/RevisionTecnica.aspx'));
   }
 
-  void _handleBridgeMessage(String rawMsg) {
+  void _handleBridge(String raw) {
     try {
-      final Map<String, dynamic> data = json.decode(rawMsg);
+      final Map<String, dynamic> data = json.decode(raw);
       if (data['status'] == 'CAPTCHA_SOLVED') {
-        if (mounted) {
-          setState(() {
-            _statusMessage = '¡Captcha resuelto! Consultando vehículo...';
-          });
-        }
+        if (mounted) setState(() => _statusMessage = '¡Validado! Consultando vehículo...');
         return;
       }
-      _saveAndClose(data);
+      _saveAndExit(data);
     } catch (_) {
       try {
-        final Map<String, dynamic> data = json.decode(rawMsg);
-        _saveAndClose(data);
+        _saveAndExit(json.decode(raw));
       } catch (_) {}
     }
   }
 
-  Future<void> _saveAndClose(Map<String, dynamic> scraped) async {
+  Future<void> _saveAndExit(Map<String, dynamic> scraped) async {
     if (_isSaving) return;
     setState(() {
       _isSaving = true;
@@ -1259,14 +1254,10 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
     try {
       scraped['patente'] = widget.targetPlate;
       scraped['data_source'] = 'PRT_SCRAPING';
-
       await http.post(
         Uri.parse('http://91.99.145.70:8000/api/vehicle/cache'),
         headers: {'Content-Type': 'application/json'},
-        body: json.encode({
-          'plate': widget.targetPlate,
-          'data': scraped,
-        }),
+        body: json.encode({'plate': widget.targetPlate, 'data': scraped}),
       ).timeout(const Duration(seconds: 5));
     } catch (_) {}
 
@@ -1279,108 +1270,44 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
   Future<void> _manualExtract() async {
     if (_isSaving) return;
     try {
-      final js = """
-        (function() {
-          return JSON.stringify(window.__pfData || {});
-        })();
-      """;
-      final rawResult = await _controller.runJavaScriptReturningResult(js);
-      String cleanJson = rawResult.toString();
-      if (cleanJson.startsWith('"') && cleanJson.endsWith('"')) {
-        cleanJson = json.decode(cleanJson);
-      }
-      final Map<String, dynamic> scraped = json.decode(cleanJson);
-
-      if (scraped.isNotEmpty && (scraped['make'] != null || (scraped['revisions'] != null && (scraped['revisions'] as List).isNotEmpty))) {
-        await _saveAndClose(scraped);
+      final raw = await _controller.runJavaScriptReturningResult('JSON.stringify(window.__pfData || {})');
+      String clean = raw.toString();
+      if (clean.startsWith('"') && clean.endsWith('"')) clean = json.decode(clean);
+      final Map<String, dynamic> d = json.decode(clean);
+      if (d.isNotEmpty && (d['make'] != null || (d['revisions'] != null && (d['revisions'] as List).isNotEmpty))) {
+        await _saveAndExit(d);
       } else {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Esperando respuesta del portal... Pulsa la lupa si aún no ha consultado.')),
+            const SnackBar(content: Text('Esperando datos del portal...')),
           );
         }
       }
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Aún no hay datos disponibles: $e')),
-        );
-      }
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
     }
   }
 
-  void _injectUniversalScraper() {
+  void _injectEngine() {
     final js = """
       (function() {
-        var meta = document.querySelector('meta[name="viewport"]');
-        if (!meta) {
-          meta = document.createElement('meta');
-          meta.name = 'viewport';
-          document.head.appendChild(meta);
-        }
-        meta.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no';
+        var m = document.querySelector('meta[name="viewport"]');
+        if (!m) { m = document.createElement('meta'); m.name = 'viewport'; document.head.appendChild(m); }
+        m.content = 'width=device-width,initial-scale=1.0,user-scalable=no';
 
-        var style = document.getElementById('pf-universal-style');
-        if (!style) {
-          style = document.createElement('style');
-          style.id = 'pf-universal-style';
-          document.head.appendChild(style);
-        }
-        style.innerHTML = `
-          header, nav, footer, #suiteBar, #s4-titlerow, #titleAreaBox, .banner,
-          [id*="Logo"], [id*="siteIcon"], [class*="logo"],
-          img[src*="logo"], img[src*="Logo"], img[src*="prt"], img[src*="PRT"],
-          img[src*="afiche"], img[src*="banner"], table[id*="calendario"] {
-            display: none !important;
-          }
-          html, body, #s4-workspace, #s4-bodyContainer {
-            width: 100% !important;
-            max-width: 100vw !important;
-            overflow-x: hidden !important;
-            margin: 0 !important;
-            padding: 4px !important;
-            box-sizing: border-box !important;
-            background-color: #0F172A !important;
-          }
-          input[type="text"] {
-            font-size: 24px !important;
-            height: 48px !important;
-            font-weight: 900 !important;
-            text-align: center !important;
-            background-color: #1E293B !important;
-            color: #38BDF8 !important;
-            border: 2px solid #0284C7 !important;
-            border-radius: 8px !important;
-            margin: 6px auto !important;
-            display: block !important;
-            max-width: 250px !important;
-          }
-          .g-recaptcha {
-            display: flex !important;
-            justify-content: center !important;
-            margin: 8px auto !important;
-          }
-          .g-recaptcha-bubble-arrow {
-            display: none !important;
-          }
-          .pf-centered-active {
-            position: fixed !important;
-            left: 50% !important;
-            right: auto !important;
-            transform: translateX(-50%) scale(var(--pf-scale, 0.90)) !important;
-            -webkit-transform: translateX(-50%) scale(var(--pf-scale, 0.90)) !important;
-            transform-origin: top center !important;
-            z-index: 2147483647 !important;
-            pointer-events: auto !important;
-          }
-          .pf-layer-inactive {
-            pointer-events: none !important;
-            z-index: -1 !important;
-          }
+        var s = document.getElementById('pf-style') || document.createElement('style');
+        s.id = 'pf-style';
+        s.innerHTML = `
+          header, nav, footer, #suiteBar, #s4-titlerow, #titleAreaBox, .banner, [id*="Logo"], img[src*="logo" i], img[src*="prt" i], table[id*="calendario"] { display: none !important; }
+          html, body, #s4-workspace, #s4-bodyContainer { width: 100% !important; max-width: 100vw !important; overflow-x: hidden !important; margin: 0 !important; padding: 4px !important; background: #0F172A !important; color: #F8FAFC !important; }
+          input[type="text"] { font-size: 24px !important; height: 48px !important; font-weight: 900 !important; text-align: center !important; background: #1E293B !important; color: #38BDF8 !important; border: 2px solid #0284C7 !important; border-radius: 8px !important; margin: 6px auto !important; display: block !important; max-width: 250px !important; }
+          .g-recaptcha { display: flex !important; justify-content: center !important; margin: 8px auto !important; }
+          .g-recaptcha-bubble-arrow { display: none !important; }
+          .pf-centered-active { position: fixed !important; left: 50% !important; right: auto !important; transform: translateX(-50%) scale(var(--pf-scale, 0.90)) !important; transform-origin: top center !important; z-index: 2147483647 !important; pointer-events: auto !important; }
         `;
+        document.head.appendChild(s);
 
-        var inputs = document.querySelectorAll('input[type="text"]');
-        inputs.forEach(function(inp) {
+        document.querySelectorAll('input[type="text"]').forEach(function(inp) {
           if (inp.id.toLowerCase().includes('patente') || inp.name.toLowerCase().includes('patente')) {
             if (inp.value !== '${widget.targetPlate}') {
               inp.value = '${widget.targetPlate}';
@@ -1391,198 +1318,142 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
           }
         });
 
-        window.__pfData = {
-          plate: '${widget.targetPlate}',
-          revisions: []
-        };
+        window.__pfData = { plate: '${widget.targetPlate}', revisions: [] };
 
-        function findSearchButton() {
+        function clickLupa() {
           var inp = document.querySelector('input[type="text"]');
-          if (inp) {
-            var p = inp.parentElement;
-            if (p) {
-              var btn = p.querySelector('input[type="image"], input[type="submit"], button, a, img');
-              if (btn) return btn.closest('a') || btn.closest('button') || btn;
-            }
-            var row = inp.closest('tr') || inp.closest('div');
-            if (row) {
-              var btnRow = row.querySelector('input[type="image"], input[type="submit"], a[id*="Buscar" i], img[src*="lupa" i], img[src*="buscar" i]');
-              if (btnRow) return btnRow.closest('a') || btnRow.closest('button') || btnRow;
-            }
+          var btn = null;
+          if (inp && inp.parentElement) {
+            btn = inp.parentElement.querySelector('input[type="image"], input[type="submit"], button, a, img');
           }
-          return document.querySelector('input[src*="lupa" i], input[src*="buscar" i], [id*="btnBuscar" i], [id*="btnbuscar" i], a[title*="Buscar" i]');
-        }
-
-        function triggerSearch() {
-          var btn = findSearchButton();
+          if (!btn) {
+            btn = document.querySelector('input[src*="lupa" i], input[src*="buscar" i], [id*="Buscar" i], a[title*="Buscar" i]');
+          }
           if (btn) {
+            btn = btn.closest('a') || btn.closest('button') || btn;
             try {
-              btn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
-              btn.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
               btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
               if (typeof btn.click === 'function') btn.click();
-              return true;
-            } catch (e) {}
+            } catch(e) {}
           }
-          return false;
         }
 
-        function checkCaptchaToken() {
-          var token = '';
-          try {
-            if (window.grecaptcha) {
-              if (window.grecaptcha.enterprise && typeof window.grecaptcha.enterprise.getResponse === 'function') {
-                token = window.grecaptcha.enterprise.getResponse();
-              }
-              if (!token && typeof window.grecaptcha.getResponse === 'function') {
-                token = window.grecaptcha.getResponse();
-              }
-            }
-          } catch(e) {}
-
-          if (!token) {
-            var textareas = document.querySelectorAll('textarea');
-            for (var i = 0; i < textareas.length; i++) {
-              var ta = textareas[i];
-              if ((ta.name || '').toLowerCase().includes('recaptcha') || (ta.id || '').toLowerCase().includes('recaptcha')) {
-                if (ta.value && ta.value.length > 20) {
-                  token = ta.value;
-                  break;
-                }
-              }
+        var lastAcc = 0;
+        function clickAccordion(kw) {
+          var now = Date.now();
+          if (now - lastAcc < 1400) return;
+          var els = document.querySelectorAll('a, span, div, td, b');
+          for (var i = 0; i < els.length; i++) {
+            var t = (els[i].textContent || '').trim().toLowerCase();
+            if (t.includes(kw)) {
+              lastAcc = now;
+              var c = els[i].closest('a') || els[i].closest('div[onclick]') || els[i].closest('td[onclick]') || els[i];
+              try {
+                c.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+                c.click();
+              } catch(e) {}
+              return;
             }
           }
-          return token;
         }
 
         setInterval(function() {
-          // Centrado dinámico del popup de fotos
-          var bframe = document.querySelector('iframe[src*="bframe"]');
-          if (bframe) {
-            var container = bframe;
-            while (container.parentElement && container.parentElement !== document.body && container.parentElement.tagName !== 'HTML') {
-              container = container.parentElement;
-            }
-            if (container && container !== document.body && container.tagName !== 'FORM') {
-              var topVal = parseInt(container.style.top || '0', 10);
-              var isVisible = topVal > -1000 &&
-                              container.style.display !== 'none' &&
-                              container.style.visibility !== 'hidden' &&
-                              container.style.opacity !== '0';
+          var token = '';
+          try {
+            if (window.grecaptcha && window.grecaptcha.getResponse) token = window.grecaptcha.getResponse();
+          } catch(e) {}
+          if (!token) {
+            var ta = document.querySelector('textarea[name="g-recaptcha-response"], #g-recaptcha-response');
+            if (ta && ta.value) token = ta.value;
+          }
 
-              if (isVisible) {
+          if (token && token.length > 20) {
+            document.querySelectorAll('iframe[src*="bframe"]').forEach(function(f) {
+              var p = f.parentElement;
+              while (p && p !== document.body && p.tagName !== 'HTML') {
+                p.style.setProperty('display', 'none', 'important');
+                p.style.setProperty('pointer-events', 'none', 'important');
+                p = p.parentElement;
+              }
+            });
+            if (!window.__pfSearched) {
+              window.__pfSearched = true;
+              if (window.PrtBridge) window.PrtBridge.postMessage(JSON.stringify({status: 'CAPTCHA_SOLVED'}));
+              clickLupa();
+              setTimeout(clickLupa, 500);
+            }
+          } else {
+            var bframe = document.querySelector('iframe[src*="bframe"]');
+            if (bframe) {
+              var c = bframe;
+              while (c.parentElement && c.parentElement !== document.body && c.parentElement.tagName !== 'HTML') c = c.parentElement;
+              if (c && c !== document.body && c.tagName !== 'FORM') {
                 var winW = window.innerWidth || document.documentElement.clientWidth;
                 var winH = window.innerHeight || document.documentElement.clientHeight;
-                var targetScale = Math.min((winW - 14) / 400, (winH - 100) / 580);
-                if (targetScale > 1.0) targetScale = 1.0;
-                if (targetScale < 0.72) targetScale = 0.72;
-                document.documentElement.style.setProperty('--pf-scale', targetScale.toFixed(3));
-
-                container.classList.remove('pf-layer-inactive');
-                container.classList.add('pf-centered-active');
-              } else {
-                container.classList.remove('pf-centered-active');
-                container.classList.add('pf-layer-inactive');
+                var scale = Math.min((winW - 14) / 400, (winH - 100) / 580);
+                if (scale > 1.0) scale = 1.0;
+                if (scale < 0.72) scale = 0.72;
+                document.documentElement.style.setProperty('--pf-scale', scale.toFixed(3));
+                if (!c.classList.contains('pf-centered-active')) c.classList.add('pf-centered-active');
               }
             }
           }
 
-          // Auto-disparo al resolver el captcha
-          var token = checkCaptchaToken();
-          if (token && token.length > 20 && !window.__pfSearched) {
-            window.__pfSearched = true;
-            if (window.PrtBridge) {
-              window.PrtBridge.postMessage(JSON.stringify({status: 'CAPTCHA_SOLVED'}));
-            }
-            triggerSearch();
-            setTimeout(triggerSearch, 500);
-          }
-
-          // Extracción acumulativa de datos
-          var data = window.__pfData;
-          var allRows = document.querySelectorAll('tr');
-
-          allRows.forEach(function(r) {
+          var d = window.__pfData;
+          document.querySelectorAll('tr').forEach(function(r) {
             var cells = Array.from(r.querySelectorAll('td, th')).map(function(c) {
               return (c.textContent || '').trim().split(' ').filter(Boolean).join(' ');
             }).filter(Boolean);
-
             if (cells.length >= 2) {
               var k = cells[0].toLowerCase();
               var v = cells[cells.length - 1];
-              if (k.includes('patente')) data['plate'] = v;
-              else if (k.includes('tipo') && !k.includes('sello')) data['type'] = v;
-              else if (k.includes('marca')) data['make'] = v;
-              else if (k.includes('modelo')) data['model'] = v;
-              else if (k.includes('año') || k.includes('fabricaci')) data['year'] = v;
-              else if (k.includes('motor')) data['engine_number'] = v;
-              else if (k.includes('chasis')) data['chassis'] = v;
-              else if (k.includes('vin')) data['vin'] = v;
-              else if (k.includes('sello')) data['seal_type'] = v;
+              if (k.includes('patente')) d['plate'] = v;
+              else if (k.includes('tipo') && !k.includes('sello')) d['type'] = v;
+              else if (k.includes('marca')) d['make'] = v;
+              else if (k.includes('modelo')) d['model'] = v;
+              else if (k.includes('año') || k.includes('fabricaci')) d['year'] = v;
+              else if (k.includes('motor')) d['engine_number'] = v;
+              else if (k.includes('chasis')) d['chassis'] = v;
+              else if (k.includes('vin')) d['vin'] = v;
+              else if (k.includes('sello')) d['seal_type'] = v;
             }
-
-            var tdCells = Array.from(r.querySelectorAll('td')).map(function(c) {
+            var td = Array.from(r.querySelectorAll('td')).map(function(c) {
               return (c.textContent || '').trim().split(' ').filter(Boolean).join(' ');
             });
-            if (tdCells.length >= 3 && tdCells[0].length === 10 && tdCells[0].indexOf('/') === 2 && tdCells[0].lastIndexOf('/') === 5) {
-              var exists = data.revisions.some(function(item) {
-                return item.date === tdCells[0] && item.plant_code === tdCells[1];
-              });
-              if (!exists) {
-                data.revisions.push({
-                  'date': tdCells[0],
-                  'plant_code': tdCells[1] || '',
-                  'plant': tdCells[2] || '',
-                  'certificate': tdCells.length >= 4 ? tdCells[3] : ''
-                });
+            if (td.length >= 3 && td[0].length === 10 && td[0].indexOf('/') === 2 && td[0].lastIndexOf('/') === 5) {
+              if (!d.revisions.some(function(item) { return item.date === td[0] && item.plant_code === td[1]; })) {
+                d.revisions.push({ date: td[0], plant_code: td[1] || '', plant: td[2] || '', certificate: td.length >= 4 ? td[3] : '' });
               }
             }
           });
 
-          // Si leímos ficha pero falta el historial, abrimos acordeón de revisiones
-          if ((data.make || data.model) && data.revisions.length === 0 && !window.__pfClickedRev) {
-            window.__pfClickedRev = true;
-            document.querySelectorAll('a, div, span, td').forEach(function(el) {
-              var txt = (el.textContent || '').toLowerCase();
-              if (txt.includes('pinche para ver información') || txt.includes('información de revisión técnica')) {
-                try { el.click(); } catch(e) {}
-              }
-            });
+          var hasVeh = !!(d.make || d.model);
+          var hasRev = d.revisions.length > 0;
+          var onResults = document.body.textContent.includes('Volver a Consultar') || document.body.textContent.includes('Información del Vehículo');
+
+          if (onResults) {
+            if (!hasVeh) {
+              clickAccordion('información del vehículo');
+            } else if (!hasRev) {
+              clickAccordion('revisión técnica');
+            }
           }
 
-          // Si cargó el historial primero, abrimos la ficha del vehículo
-          if ((!data.make || !data.model) && data.revisions.length > 0 && !window.__pfClickedVeh) {
-            window.__pfClickedVeh = true;
-            document.querySelectorAll('a, div, span, td').forEach(function(el) {
-              var txt = (el.textContent || '').toLowerCase();
-              if (txt.includes('información del vehículo')) {
-                try { el.click(); } catch(e) {}
-              }
-            });
-          }
-
-          // Notificación automática a Flutter
-          function sendCompleteData() {
-            if (window.PrtBridge && !window.__pfScrapedSent) {
-              var d = window.__pfData;
-              if (d.make || d.model || (d.revisions && d.revisions.length > 0)) {
-                window.__pfScrapedSent = true;
+          function finish() {
+            if (window.PrtBridge && !window.__pfSent) {
+              if (d.make || d.model || d.revisions.length > 0) {
+                window.__pfSent = true;
                 window.PrtBridge.postMessage(JSON.stringify(d));
               }
             }
           }
 
-          var hasVeh = !!(data.make || data.model);
-          var hasRev = data.revisions && data.revisions.length > 0;
-
           if (hasVeh && hasRev) {
-            sendCompleteData();
+            finish();
           } else if (hasVeh || hasRev) {
-            if (!window.__pfGraceTimer) {
-              window.__pfGraceTimer = setTimeout(sendCompleteData, 2200);
-            }
+            if (!window.__pfTimer) window.__pfTimer = setTimeout(finish, 2000);
           }
-        }, 140);
+        }, 150);
       })();
     """;
     _controller.runJavaScript(js);
@@ -1602,14 +1473,8 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
-              'Verificación Oficial PRT',
-              style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
-            ),
-            Text(
-              'Patente: ${widget.targetPlate}',
-              style: const TextStyle(color: Color(0xFF10B981), fontSize: 12, fontWeight: FontWeight.bold),
-            ),
+            const Text('Verificación Oficial PRT', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+            Text('Patente: ${widget.targetPlate}', style: const TextStyle(color: Color(0xFF10B981), fontSize: 12, fontWeight: FontWeight.bold)),
           ],
         ),
         actions: [
@@ -1630,11 +1495,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             child: Row(
               children: [
                 if (_isSaving)
-                  const SizedBox(
-                    width: 14,
-                    height: 14,
-                    child: CircularProgressIndicator(color: Color(0xFF10B981), strokeWidth: 2),
-                  )
+                  const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(color: Color(0xFF10B981), strokeWidth: 2))
                 else
                   const Icon(Icons.touch_app_rounded, color: Color(0xFF38BDF8), size: 16),
                 const SizedBox(width: 8),
@@ -1653,9 +1514,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
       ),
       body: Stack(
         children: [
-          SafeArea(
-            child: WebViewWidget(controller: _controller),
-          ),
+          SafeArea(child: WebViewWidget(controller: _controller)),
           if (_isSaving)
             Container(
               color: const Color(0xFF0F172A),
@@ -1666,15 +1525,9 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
                 children: const [
                   CircularProgressIndicator(color: Color(0xFF10B981), strokeWidth: 3),
                   SizedBox(height: 20),
-                  Text(
-                    'Extrayendo ficha e historial completo...',
-                    style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
-                  ),
+                  Text('Extrayendo ficha e historial...', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
                   SizedBox(height: 6),
-                  Text(
-                    'Guardando en base de datos permanente',
-                    style: TextStyle(color: Color(0xFF94A3B8), fontSize: 13),
-                  ),
+                  Text('Guardando en base de datos permanente', style: TextStyle(color: Color(0xFF94A3B8), fontSize: 13)),
                 ],
               ),
             ),
