@@ -141,61 +141,33 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
       final body = await response.transform(utf8.decoder).join();
 
       if (response.statusCode == 200) {
-        final json = jsonDecode(body);
-        Map<String, dynamic>? raw;
-        if (json is Map<String, dynamic>) {
-          if (json['data'] is Map && json['data']['data'] is Map) {
-            raw = Map<String, dynamic>.from(json['data']['data']);
-          } else if (json['data'] is Map) {
-            raw = Map<String, dynamic>.from(json['data']);
-          } else {
-            raw = json;
-          }
-        }
+        final Map<String, dynamic> raw = json.decode(body);
+        final v = raw['data'] != null && raw['data'] is Map<String, dynamic>
+            ? Map<String, dynamic>.from(raw['data'])
+            : Map<String, dynamic>.from(raw);
 
-        if (raw != null && raw.isNotEmpty) {
-          final Map<String, dynamic> v = {};
-          final make = raw['make'] ?? raw['marca'] ?? '';
-          final model = raw['model'] ?? raw['modelo'] ?? '';
-          final version = raw['version'] ?? '';
-
-          v['marca'] = make.toString().toUpperCase();
-          v['modelo'] = ('$model $version').trim().toUpperCase();
-
-                    v['data_source'] = raw['data_source'] ?? (raw['provider'] == 'prt' ? 'PRT_SCRAPING' : 'BOOSTR_API');
+        if (v.isNotEmpty && (v['make'] != null || v['marca'] != null || v['modelo'] != null)) {
+          v['data_source'] = raw['data_source'] ?? (raw['source'] == 'database' ? 'CACHE_LOCAL' : (_selectedEngine == 'prt' ? 'PRT_SCRAPING' : 'BOOSTR_API'));
           final plate = raw['plate'] ?? raw['patente'] ?? rawPlate;
-          final dv = raw['dv'] != null && raw['dv'].toString().isNotEmpty ? '-${raw['dv']}' : '';
-          v['patente'] = '$plate$dv'.toUpperCase();
-
-          if (raw['year'] != null && raw['year'] != 0) v['año'] = raw['year'].toString();
-          if (raw['type'] != null && raw['type'].toString().isNotEmpty) v['tipo_vehiculo'] = raw['type'].toString();
-          if (raw['color'] != null && raw['color'].toString().trim().isNotEmpty) v['color'] = raw['color'].toString();
-          if (raw['engine'] != null && raw['engine'].toString().trim().isNotEmpty) v['numero_motor'] = raw['engine'].toString();
-          if (raw['engine_size'] != null && raw['engine_size'].toString().trim().isNotEmpty) v['cilindrada'] = '${raw['engine_size']} L';
-          if (raw['chassis'] != null && raw['chassis'].toString().trim().isNotEmpty) v['chasis_vin'] = raw['chassis'].toString();
-          if (raw['gas_type'] != null && raw['gas_type'].toString().trim().isNotEmpty) v['combustible'] = raw['gas_type'].toString();
-          if (raw['transmission'] != null && raw['transmission'].toString().trim().isNotEmpty) v['transmision'] = raw['transmission'].toString();
-          if (raw['kilometers'] != null && raw['kilometers'] != 0) v['kilometraje'] = '${raw['kilometers']} KM';
-          if (raw['manufacturer'] != null && raw['manufacturer'].toString().trim().isNotEmpty) v['fabricante'] = raw['manufacturer'].toString();
-          if (raw['country'] != null && raw['country'].toString().trim().isNotEmpty) v['pais_origen'] = raw['country'].toString();
-
-          v['repuestos_compatibles'] = 'Repuestos compatibles con ${v['marca']} ${v['modelo']}';
-
+          v['patente'] = plate;
           setState(() {
             _vehicleData = v;
           });
-          _fetchBoostrTelemetry();        } else {
-          try {
-            final dynamic errJson = jsonDecode(body);
-            if (errJson is Map && errJson['detail'] is Map && errJson['detail']['require_prt_solve'] == true) {
-              _showPrtCaptchaModal(rawPlate);
-              return;
-            }
-          } catch (_) {}
+          _fetchBoostrTelemetry();
+        } else {
           _showSnack('No se encontraron especificaciones para $rawPlate');
         }
-      } else {
+      } else if (response.statusCode == 404) {
+        try {
+          final dynamic errJson = jsonDecode(body);
+          if (errJson is Map && (errJson['require_prt_solve'] == true || (errJson['detail'] is Map && errJson['detail']['require_prt_solve'] == true))) {
+            _showPrtCaptchaModal(rawPlate);
+            return;
+          }
+        } catch (_) {}
         _showSnack('Patente no encontrada en el registro oficial');
+      } else {
+        _showSnack('Error del servidor (${response.statusCode})');
       }
     } catch (e) {
       _showSnack('Error de conexión con el servidor ($e)');
