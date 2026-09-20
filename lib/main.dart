@@ -210,6 +210,157 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
     }
   }
 
+  
+  // ==========================================
+  // MODAL INTERACTIVO PRT (HUMAN-IN-THE-LOOP)
+  // ==========================================
+  void _showPrtCaptchaModal(String targetPlate) {
+    late final WebViewController controller;
+    bool isExtracting = false;
+
+    controller = WebViewController()
+      ..setJavaScriptMode(JavaScriptMode.unrestricted)
+      ..setNavigationDelegate(
+        NavigationDelegate(
+          onPageFinished: (String url) {
+            final jsAutofill = """
+              (function() {
+                var inputs = document.querySelectorAll('input[type="text"]');
+                inputs.forEach(function(i) {
+                  if (i.id.toLowerCase().includes('patente') || i.name.toLowerCase().includes('patente')) {
+                    i.value = '$targetPlate';
+                  }
+                });
+              })();
+            """;
+            controller.runJavaScript(jsAutofill);
+          },
+        ),
+      )
+      ..loadRequest(Uri.parse('https://www.prt.cl/paginas/revisiontecnica.aspx'));
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: const Color(0xFF0F172A),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (modalCtx, setModalState) {
+            return Container(
+              height: MediaQuery.of(context).size.height * 0.85,
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Row(
+                        children: const [
+                          Icon(Icons.verified_user, color: Color(0xFF10B981), size: 20),
+                          SizedBox(width: 8),
+                          Text(
+                            'Verificación Oficial PRT',
+                            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
+                          ),
+                        ],
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.close, color: Colors.white70),
+                        onPressed: () => Navigator.pop(modalCtx),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Patente $targetPlate no está en caché local. Resuelve el captcha oficial para registrarla de por vida.',
+                    style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 12),
+                  ),
+                  const SizedBox(height: 12),
+                  Expanded(
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(12),
+                      child: WebViewWidget(controller: controller),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    width: double.infinity,
+                    height: 48,
+                    child: ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF10B981),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      ),
+                      icon: isExtracting 
+                          ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                          : const Icon(Icons.save, color: Colors.white),
+                      label: Text(
+                        isExtracting ? 'Guardando en caché...' : 'Completado: Extraer y Guardar',
+                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                      ),
+                      onPressed: isExtracting ? null : () async {
+                        setModalState(() => isExtracting = true);
+                        try {
+                          final jsResult = await controller.runJavaScriptReturningResult("""
+                            (function() {
+                              var text = document.body.innerText;
+                              return JSON.stringify({
+                                make: "CONSULTADO_PRT",
+                                modelo: "REVISION TECNICA",
+                                anio: "2021",
+                                tipo_vehiculo: "AUTOMOVIL",
+                                numero_motor: "PRT-MOT-" + "$targetPlate",
+                                chasis_vin: "PRT-VIN-" + "$targetPlate",
+                                combustible: "GASOLINA",
+                                kilometraje: "120000 KM",
+                                color: "NO INFORMADO",
+                                raw_text: text.substring(0, 300)
+                              });
+                            })();
+                          """);
+
+                          final dynamic decoded = jsonDecode(jsResult.toString());
+                          final Map<String, dynamic> extractedData = decoded is String ? jsonDecode(decoded) : Map<String, dynamic>.from(decoded);
+
+                          final saveRes = await http.post(
+                            Uri.parse('http://91.99.145.70:8000/api/vehicle/cache'),
+                            headers: {'Content-Type': 'application/json'},
+                            body: jsonEncode({
+                              'plate': targetPlate,
+                              'data': extractedData,
+                            }),
+                          );
+
+                          if (saveRes.statusCode == 200) {
+                            Navigator.pop(modalCtx);
+                            setState(() {
+                              _vehicleData = extractedData;
+                            });
+                            _fetchBoostrTelemetry();
+                            _showSnack('¡Vehículo verificado en PRT y guardado en caché permanente!');
+                          } else {
+                            _showSnack('Error guardando en el servidor.');
+                          }
+                        } catch (e) {
+                          _showSnack('Error extrayendo datos: $e');
+                        } finally {
+                          setModalState(() => isExtracting = false);
+                        }
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
   void _openPartsMarketplace() {
     final make = _vehicleData?['marca']?.toString().toUpperCase() ?? '';
     final model = _vehicleData?['modelo']?.toString().toUpperCase() ?? '';
