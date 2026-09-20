@@ -1292,8 +1292,19 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             height: 100vh !important;
             overflow: hidden !important;
           }
-          #s4-workspace, #s4-bodyContainer, header, nav, footer, .ms-main {
-            opacity: 0.01 !important;
+          /* Ocultar banners, menus y decorados pero NO el formulario */
+          header, nav, footer, #suiteBarLeft, #suiteBarRight, #s4-ribbonrow,
+          .banner, img[src*="logo"], img[src*="Banner"], a[href*="Home"],
+          div.ms-dialogHidden, #sideNavBox {
+            display: none !important;
+          }
+          body {
+            background-color: #0F172A !important;
+            color: #FFFFFF !important;
+          }
+          /* Ocultar elementos irrelevantes de SharePoint */
+          #s4-workspace {
+            background: #0F172A !important;
           }
           /* Posicionamiento del widget sin mover su nodo en el DOM */
           .pf-captcha-container {
