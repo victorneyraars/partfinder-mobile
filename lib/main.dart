@@ -1261,132 +1261,177 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
   void _injectZeroFlickerEngine() {
     final js = """
       (function() {
-        // 1. Estilo: Ocultar SharePoint y banners, manteniendo el formulario y los resultados
-        var s = document.getElementById('pf-prt-style') || document.createElement('style');
-        s.id = 'pf-prt-style';
-        s.innerHTML = `
-          header, nav, footer, #suiteBarLeft, #suiteBarRight, #s4-ribbonrow,
-          .banner, img[src*="Banner"], a[href*="Home"], #sideNavBox,
-          div[id*="EnlacesRelacionados"], #s4-titlerow {
-            display: none !important;
-          }
-          body, #s4-workspace, #s4-bodyContainer {
-            background-color: #0F172A !important;
-            color: #FFFFFF !important;
-          }
-          /* Estilo para que la tabla de resultados oficial resalte limpia en móvil */
-          #ContentPlaceHolder1_accordionContent, #vehiculox {
-            background-color: #1E293B !important;
-            color: #FFFFFF !important;
-            border-radius: 8px !important;
-            padding: 8px !important;
-          }
-        `;
-        document.head.appendChild(s);
+        var m = document.querySelector('meta[name="viewport"]');
+        if (!m) {
+          m = document.createElement('meta');
+          m.name = 'viewport';
+          document.head.appendChild(m);
+        }
+        m.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no';
 
-        // 2. Rellenar input de patente oficial
-        var inputs = document.querySelectorAll('input[type="text"]');
-        for (var i = 0; i < inputs.length; i++) {
-          var inp = inputs[i];
-          if ((inp.id && inp.id.toLowerCase().includes('patente')) || 
-              (inp.name && inp.name.toLowerCase().includes('patente')) || 
-              (inp.parentElement && inp.parentElement.id === 'patenteContainer')) {
-            if (!inp.value || inp.value.trim() === '') {
+        // 1. Rellenar patente en el input subyacente
+        document.querySelectorAll('input[type="text"]').forEach(function(inp) {
+          if (inp.id.toLowerCase().includes('patente') || inp.name.toLowerCase().includes('patente')) {
+            if (inp.value !== '${widget.targetPlate}') {
               inp.value = '${widget.targetPlate}';
               inp.dispatchEvent(new Event('input', { bubbles: true }));
               inp.dispatchEvent(new Event('change', { bubbles: true }));
             }
           }
-        }
+        });
 
-        // Avisar a Flutter que la página cargó y está lista
-        if (window.PrtBridge && !window.__pfReadySent) {
-          window.__pfReadySent = true;
-          window.PrtBridge.postMessage('CAPTCHA_READY');
-        }
+        // 2. CSS que oculta absolutamente todo SharePoint
+        var s = document.getElementById('pf-clean-captcha-style') || document.createElement('style');
+        s.id = 'pf-clean-captcha-style';
+        s.innerHTML = `
+          html, body {
+            background-color: #0F172A !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            width: 100vw !important;
+            height: 100vh !important;
+            overflow: hidden !important;
+          }
 
-        var __submitted = false;
-        var __extracted = false;
+          /* Ocultar SharePoint por completo */
+          #s4-workspace, #s4-bodyContainer, header, nav, footer,
+          .ms-main, form > *:not(#pf-captcha-host), img, table {
+            display: none !important;
+          }
 
-        // 3. Vigilante de resolución y extracción directa por IDs oficiales
-        var watcher = setInterval(function() {
-          // A. Si se resuelve el token y no hemos pulsado buscar -> presionar el botón oficial
-          var tokenArea = document.querySelector('textarea[name="g-recaptcha-response"], textarea#g-recaptcha-response');
-          if (!__submitted && tokenArea && tokenArea.value && tokenArea.value.trim().length > 30) {
-            __submitted = true;
-            if (window.PrtBridge) window.PrtBridge.postMessage('SEARCHING');
+          /* Contenedor exacto del Checkbox "No soy un robot" */
+          #pf-captcha-host {
+            position: fixed !important;
+            left: 50% !important;
+            top: 45% !important;
+            width: 304px !important;
+            height: 78px !important;
+            transform: translate(-50%, -50%) !important;
+            -webkit-transform: translate(-50%, -50%) !important;
+            z-index: 1000 !important;
+            background: transparent !important;
+            border-radius: 4px !important;
+            box-shadow: 0 4px 18px rgba(0,0,0,0.5) !important;
+            overflow: hidden !important;
+          }
 
-            var btnBuscar = document.getElementById('ContentPlaceHolder1_buscar') || 
-                            document.querySelector('input[name*="buscar"]') ||
-                            document.querySelector('input[src*="flecha.png"]');
-            if (btnBuscar) {
-              btnBuscar.click();
-            } else if (typeof WebForm_DoPostBackWithOptions === 'function') {
-              try { WebForm_DoPostBackWithOptions(new WebForm_PostBackOptions('', '', true, '', '', false, false)); } catch(e) {}
+          #pf-captcha-host iframe {
+            width: 304px !important;
+            height: 78px !important;
+            border: none !important;
+          }
+
+          /* Desafío fotográfico centrado cuando se active */
+          div:has(iframe[src*="bframe"]),
+          div:has(iframe[title*="challenge"]),
+          div:has(iframe[title*="desafío"]),
+          .pf-bframe-centered {
+            position: fixed !important;
+            left: 50% !important;
+            top: 50% !important;
+            transform: translate(-50%, -50%) scale(var(--pf-scale, 0.90)) !important;
+            -webkit-transform: translate(-50%, -50%) scale(var(--pf-scale, 0.90)) !important;
+            transform-origin: center center !important;
+            z-index: 2147483647 !important;
+            pointer-events: auto !important;
+          }
+        `;
+        document.head.appendChild(s);
+
+        var __pfSubmitted = false;
+        var __pfExtracted = false;
+
+        function mountCaptcha() {
+          var anchor = document.querySelector('iframe[src*="anchor"]');
+          if (anchor) {
+            var box = anchor.closest('.g-recaptcha') || anchor.parentElement;
+            if (box) {
+              box.style.cssText = 'position: fixed !important; left: 50% !important; top: 45% !important; transform: translate(-50%, -50%) !important; -webkit-transform: translate(-50%, -50%) !important; z-index: 1000 !important; width: 304px !important; height: 78px !important; display: block !important; visibility: visible !important;';
+            }
+            if (window.PrtBridge && !window.__pfNotifiedReady) {
+              window.__pfNotifiedReady = true;
+              window.PrtBridge.postMessage('CAPTCHA_READY');
             }
           }
 
-          // B. Extracción de datos usando los selectores oficiales descubiertos
-          if (!__extracted) {
-            var vehiculoBox = document.getElementById('vehiculox') || 
-                              document.getElementById('ContentPlaceHolder1_accordionContent');
-            
-            if (vehiculoBox && vehiculoBox.innerText && vehiculoBox.innerText.toLowerCase().includes('marca')) {
-              var fullText = vehiculoBox.innerText;
-              
-              var data = {
-                patente: '${widget.targetPlate}',
-                marca: '',
-                modelo: '',
-                anio: '',
-                tipo: '',
-                nro_motor: '',
-                chasis: '',
-                vin: '',
-                sello: '',
-                fuente: 'PRT Oficial'
-              };
+          // A. Si se resuelve el captcha, presionar la lupa oficial de la PRT
+          if (!__pfSubmitted) {
+            var tokenArea = document.querySelector('textarea[name="g-recaptcha-response"], textarea#g-recaptcha-response');
+            if (tokenArea && tokenArea.value && tokenArea.value.trim().length > 30) {
+              __pfSubmitted = true;
+              var btn = document.getElementById('ContentPlaceHolder1_buscar') || 
+                        document.querySelector('input[name*="buscar"]') ||
+                        document.querySelector('input[type="image"]');
+              if (btn) {
+                btn.click();
+              }
+            }
+          }
 
-              function extractField(label) {
-                var lines = fullText.split('\n').map(function(l) { return l.trim(); }).filter(Boolean);
+          // B. Extracción de datos del contenedor oficial vehiculox
+          if (!__pfExtracted) {
+            var boxData = document.getElementById('vehiculox') || 
+                          document.getElementById('ContentPlaceHolder1_accordionContent');
+            if (boxData && boxData.innerText && boxData.innerText.toLowerCase().includes('marca')) {
+              var txt = boxData.innerText;
+              var lines = txt.split('\n').map(function(l) { return l.trim(); }).filter(Boolean);
+              function getVal(lbl) {
                 for (var i = 0; i < lines.length; i++) {
-                  var lineClean = lines[i].toLowerCase().replace(':', '').replace('.', '').trim();
-                  if (lineClean === label.toLowerCase().replace(':', '').replace('.', '').trim()) {
+                  var clean = lines[i].toLowerCase().replace(':', '').replace('.', '').trim();
+                  if (clean === lbl.toLowerCase().replace(':', '').replace('.', '').trim()) {
                     if (i + 1 < lines.length) return lines[i + 1].trim();
                   }
                 }
                 return '';
               }
 
-              data.tipo = extractField('Tipo');
-              data.marca = extractField('Marca');
-              data.modelo = extractField('Modelo');
-              data.anio = extractField('Año Fab') || extractField('Año');
-              data.nro_motor = extractField('N° Motor') || extractField('N Motor') || extractField('Motor');
-              data.chasis = extractField('N° Chasis') || extractField('N Chasis') || extractField('Chasis');
-              data.vin = extractField('N° Vin') || extractField('VIN');
-              data.sello = extractField('Tipo Sello') || extractField('Sello');
+              var result = {
+                patente: '${widget.targetPlate}',
+                tipo: getVal('Tipo'),
+                marca: getVal('Marca'),
+                modelo: getVal('Modelo'),
+                anio: getVal('Año Fab') || getVal('Año'),
+                nro_motor: getVal('N° Motor') || getVal('Motor'),
+                chasis: getVal('N° Chasis') || getVal('Chasis'),
+                vin: getVal('N° Vin') || getVal('VIN'),
+                sello: getVal('Tipo Sello') || getVal('Sello'),
+                fuente: 'PRT Oficial'
+              };
 
-              if (data.marca || data.modelo || data.nro_motor || data.chasis) {
-                __extracted = true;
-                clearInterval(watcher);
+              if (result.marca || result.modelo || result.nro_motor || result.chasis) {
+                __pfExtracted = true;
                 if (window.PrtBridge) {
-                  window.PrtBridge.postMessage('DATA:' + JSON.stringify(data));
+                  window.PrtBridge.postMessage('DATA:' + JSON.stringify(result));
                 }
               }
             }
+          }
+        }
 
-            // C. Detección de error de patente inexistente
-            var pageBody = document.body ? document.body.innerText : '';
-            if (pageBody.includes('La placa ingresada') || pageBody.includes('no registra')) {
-              __extracted = true;
-              clearInterval(watcher);
-              if (window.PrtBridge) {
-                window.PrtBridge.postMessage('ERROR:Patente no registra información en PRT.');
+        mountCaptcha();
+
+        setInterval(function() {
+          mountCaptcha();
+
+          var bframe = document.querySelector('iframe[src*="bframe"]');
+          if (bframe) {
+            var c = bframe;
+            while (c.parentElement && c.parentElement !== document.body && c.parentElement.tagName !== 'HTML') {
+              c = c.parentElement;
+            }
+            if (c && c !== document.body && c.tagName !== 'FORM') {
+              var winW = window.innerWidth || document.documentElement.clientWidth;
+              var winH = window.innerHeight || document.documentElement.clientHeight;
+              var scale = Math.min((winW - 16) / 400, (winH - 80) / 580);
+              if (scale > 1.0) scale = 1.0;
+              if (scale < 0.70) scale = 0.70;
+              document.documentElement.style.setProperty('--pf-scale', scale.toFixed(3));
+              if (!c.classList.contains('pf-bframe-centered')) {
+                c.classList.add('pf-bframe-centered');
               }
             }
           }
-        }, 250);
+        }, 100);
       })();
     """;
     _controller.runJavaScript(js);
