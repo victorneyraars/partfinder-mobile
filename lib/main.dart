@@ -535,10 +535,79 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
           ),
         ),
         _buildBoostrTelemetryHud(),
+              _buildEngineSelector(),
       ],
     );
   }
 
+
+  
+  Widget _buildEngineSelector() {
+    return Container(
+      constraints: const BoxConstraints(maxWidth: 360),
+      margin: const EdgeInsets.only(top: 8, bottom: 8),
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: const Color(0xFF0F172A),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFF1E293B)),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: GestureDetector(
+              onTap: () => setState(() => _selectedEngine = 'boostr'),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                decoration: BoxDecoration(
+                  color: _selectedEngine == 'boostr' ? const Color(0xFF1E293B) : Colors.transparent,
+                  borderRadius: BorderRadius.circular(8),
+                  border: _selectedEngine == 'boostr' ? Border.all(color: const Color(0xFF38BDF8), width: 1.2) : null,
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: const [
+                    Icon(Icons.bolt, size: 16, color: Color(0xFF38BDF8)),
+                    SizedBox(width: 6),
+                    Text(
+                      'Boostr API (Pro)',
+                      style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          Expanded(
+            child: GestureDetector(
+              onTap: () => setState(() => _selectedEngine = 'prt'),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                decoration: BoxDecoration(
+                  color: _selectedEngine == 'prt' ? const Color(0xFF1E293B) : Colors.transparent,
+                  borderRadius: BorderRadius.circular(8),
+                  border: _selectedEngine == 'prt' ? Border.all(color: const Color(0xFF10B981), width: 1.2) : null,
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: const [
+                    Icon(Icons.precision_manufacturing, size: 16, color: Color(0xFF10B981)),
+                    SizedBox(width: 6),
+                    Text(
+                      'Motor PRT (Local)',
+                      style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 
   Widget _buildBoostrTelemetryHud() {
     final isOnline = _boostrStatus?['status'] == 'ONLINE';
@@ -588,7 +657,9 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
           ),
           const Spacer(),
           Text(
-            'Cuota: $remaining/$dailyLimit  •  Caché: $cached',
+            _selectedEngine == 'boostr'
+                ? 'Cuota: $remaining/$dailyLimit  •  Caché: $cached'
+                : 'Modo: Directo  •  Caché: $cached',
             style: const TextStyle(
               color: Color(0xFF38BDF8),
               fontSize: 11,
