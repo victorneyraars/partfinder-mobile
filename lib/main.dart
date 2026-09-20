@@ -76,6 +76,7 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
   void initState() {
     _fetchBoostrTelemetry();
     super.initState();
+    _plateController.text = _generateRandomChileanPlate();
     _plateController.text = _generateRandomPlate();
     _scannerController = AnimationController(
       vsync: this,
