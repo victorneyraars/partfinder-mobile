@@ -1197,7 +1197,7 @@ class PrtVerificationScreen extends StatefulWidget {
 }
 
 class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
-  bool _isProcessing = false;
+  bool _isSaving = false;
   String _statusMessage = 'Toca la casilla para verificar';
   late final WebViewController _controller;
 
@@ -1218,12 +1218,9 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
       )
       ..setNavigationDelegate(
         NavigationDelegate(
-          onPageStarted: (_) {
-            SystemChannels.textInput.invokeMethod('TextInput.hide');
-          },
           onPageFinished: (_) {
             SystemChannels.textInput.invokeMethod('TextInput.hide');
-            _injectGroundTruthEngine();
+            _injectStableEngine();
           },
         ),
       )
@@ -1234,7 +1231,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
     if (raw == 'CAPTCHA_SOLVED') {
       if (mounted) {
         setState(() {
-          _isProcessing = true;
+          _isSaving = true;
           _statusMessage = '¡Captcha verificado! Extrayendo vehículo...';
         });
       }
@@ -1250,7 +1247,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
   Future<void> _saveAndExit(Map<String, dynamic> scraped) async {
     if (!mounted) return;
     setState(() {
-      _isProcessing = true;
+      _isSaving = true;
       _statusMessage = '¡Ficha obtenida! Guardando vehículo...';
     });
 
@@ -1272,10 +1269,9 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
     }
   }
 
-  void _injectGroundTruthEngine() {
+  void _injectStableEngine() {
     final js = """
       (function() {
-        // 1. Viewport estricto
         var m = document.querySelector('meta[name="viewport"]');
         if (!m) {
           m = document.createElement('meta');
@@ -1284,75 +1280,67 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
         }
         m.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no';
 
-        // 2. CSS Maestro Indestructible: Oculta absolutamente TODO excepto reCAPTCHA
-        var s = document.getElementById('pf-master-style') || document.createElement('style');
-        s.id = 'pf-master-style';
-        s.innerHTML = `
-          html, body {
-            background-color: #0F172A !important;
-            margin: 0 !important;
-            padding: 0 !important;
-            width: 100vw !important;
-            height: 100vh !important;
-            overflow: hidden !important;
+        function injectStyle() {
+          var s = document.getElementById('pf-stable-style');
+          if (!s) {
+            s = document.createElement('style');
+            s.id = 'pf-stable-style';
+            document.head.appendChild(s);
           }
+          s.innerHTML = `
+            html, body {
+              background-color: #0F172A !important;
+              margin: 0 !important;
+              padding: 0 !important;
+              width: 100vw !important;
+              height: 100vh !important;
+              overflow: hidden !important;
+            }
 
-          /* Ocultar SharePoint, menús, afiches y tablas */
-          header, nav, footer, #suiteBar, #s4-titlerow, #titleAreaBox,
-          .ms-core-navigation, #sideNavBox, td[id*="RightCell"], div[id*="WebPartWPQ"],
-          img, table, [id*="Logo"], [id*="siteIcon"], [class*="logo"],
-          img[src*="afiche" i], img[src*="banner" i], table[id*="calendario"] {
-            display: none !important;
-          }
+            #s4-workspace, #s4-bodyContainer, header, nav, footer,
+            .ms-main, form > *:not(#pf-captcha-host), img, table {
+              display: none !important;
+            }
 
-          /* Asegurar que el workspace no imponga scroll ni fondo blanco */
-          #s4-workspace, #s4-bodyContainer, .ms-main {
-            background-color: #0F172A !important;
-            overflow: hidden !important;
-            width: 100vw !important;
-            height: 100vh !important;
-            margin: 0 !important;
-            padding: 0 !important;
-          }
+            #pf-captcha-host {
+              position: fixed !important;
+              left: 50% !important;
+              top: 45% !important;
+              width: 304px !important;
+              height: 78px !important;
+              transform: translate(-50%, -50%) !important;
+              -webkit-transform: translate(-50%, -50%) !important;
+              z-index: 1000 !important;
+              background: transparent !important;
+              border-radius: 4px !important;
+              box-shadow: 0 4px 18px rgba(0,0,0,0.5) !important;
+              overflow: hidden !important;
+            }
 
-          /* Contenedor exacto del Checkbox "No soy un robot" en el centro */
-          .g-recaptcha, div:has(iframe[src*="anchor"]) {
-            position: fixed !important;
-            left: 50% !important;
-            top: 45% !important;
-            width: 304px !important;
-            height: 78px !important;
-            transform: translate(-50%, -50%) !important;
-            -webkit-transform: translate(-50%, -50%) !important;
-            z-index: 100000 !important;
-            background: transparent !important;
-            display: flex !important;
-            justify-content: center !important;
-            align-items: center !important;
-          }
+            #pf-captcha-host iframe {
+              width: 304px !important;
+              height: 78px !important;
+              border: none !important;
+            }
 
-          .g-recaptcha-bubble-arrow {
-            display: none !important;
-          }
+            div:has(iframe[src*="bframe"]),
+            div:has(iframe[title*="challenge"]),
+            div:has(iframe[title*="desafío"]),
+            .pf-bframe-centered {
+              position: fixed !important;
+              left: 50% !important;
+              top: 50% !important;
+              transform: translate(-50%, -50%) scale(var(--pf-scale, 0.90)) !important;
+              -webkit-transform: translate(-50%, -50%) scale(var(--pf-scale, 0.90)) !important;
+              transform-origin: center center !important;
+              z-index: 2147483647 !important;
+              pointer-events: auto !important;
+            }
+          `;
+        }
 
-          /* Desafío fotográfico centrado cuando se active */
-          div:has(iframe[src*="bframe"]),
-          div:has(iframe[title*="challenge"]),
-          div:has(iframe[title*="desafío"]),
-          .pf-bframe-centered {
-            position: fixed !important;
-            left: 50% !important;
-            top: 50% !important;
-            transform: translate(-50%, -50%) scale(var(--pf-scale, 0.90)) !important;
-            -webkit-transform: translate(-50%, -50%) scale(var(--pf-scale, 0.90)) !important;
-            transform-origin: center center !important;
-            z-index: 2147483647 !important;
-            pointer-events: auto !important;
-          }
-        `;
-        document.head.appendChild(s);
+        injectStyle();
 
-        // 3. Rellenar patente en el input de SharePoint
         document.querySelectorAll('input[type="text"]').forEach(function(inp) {
           if (inp.id.toLowerCase().includes('patente') || inp.name.toLowerCase().includes('patente')) {
             if (inp.value !== '${widget.targetPlate}') {
@@ -1362,6 +1350,23 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             }
           }
         });
+
+        function mountCaptcha() {
+          var anchor = document.querySelector('iframe[src*="anchor"]');
+          if (anchor) {
+            var host = document.getElementById('pf-captcha-host');
+            if (!host) {
+              host = document.createElement('div');
+              host.id = 'pf-captcha-host';
+              document.body.appendChild(host);
+            }
+            if (anchor.parentElement !== host) {
+              host.appendChild(anchor);
+            }
+          }
+        }
+
+        mountCaptcha();
 
         function clickLupa() {
           var btn = document.querySelector('input[src*="lupa" i], input[src*="buscar" i], [id*="Buscar" i], a[title*="Buscar" i]');
@@ -1398,7 +1403,9 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
         window.__pfData = { plate: '${widget.targetPlate}' };
 
         setInterval(function() {
-          // Centrado del cuadro de fotos si aparece
+          injectStyle();
+          mountCaptcha();
+
           var bframe = document.querySelector('iframe[src*="bframe"]');
           if (bframe) {
             var c = bframe;
@@ -1418,7 +1425,6 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             }
           }
 
-          // A) Detección infalible de Captcha Resuelto
           var token = '';
           try {
             if (window.grecaptcha && window.grecaptcha.getResponse) token = window.grecaptcha.getResponse();
@@ -1435,7 +1441,6 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             setTimeout(clickLupa, 400);
           }
 
-          // B) Extracción de la Ficha Técnica
           var d = window.__pfData;
           document.querySelectorAll('tr').forEach(function(r) {
             var cells = Array.from(r.querySelectorAll('td, th')).map(function(c) {
@@ -1501,7 +1506,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
               window.PrtBridge.postMessage(JSON.stringify(d));
             }
           }
-        }, 120);
+        }, 100);
       })();
     """;
     _controller.runJavaScript(js);
@@ -1539,7 +1544,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             alignment: Alignment.centerLeft,
             child: Row(
               children: [
-                if (_isProcessing)
+                if (_isSaving)
                   const SizedBox(
                     width: 14,
                     height: 14,
@@ -1551,7 +1556,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
                 Text(
                   _statusMessage,
                   style: TextStyle(
-                    color: _isProcessing ? const Color(0xFF10B981) : const Color(0xFF38BDF8),
+                    color: _isSaving ? const Color(0xFF10B981) : const Color(0xFF38BDF8),
                     fontSize: 12,
                     fontWeight: FontWeight.bold,
                   ),
@@ -1565,7 +1570,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
         child: Stack(
           children: [
             WebViewWidget(controller: _controller),
-            if (_isProcessing)
+            if (_isSaving)
               Container(
                 color: const Color(0xFF0F172A),
                 width: double.infinity,
