@@ -1286,232 +1286,113 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
   void _injectZeroFlickerEngine() {
     final js = """
       (function() {
-        var m = document.querySelector('meta[name="viewport"]');
-        if (!m) {
-          m = document.createElement('meta');
-          m.name = 'viewport';
-          document.head.appendChild(m);
-        }
-        m.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no';
-
-        // 1. Inyectar estilo base
-        var s = document.getElementById('pf-clean-captcha-style') || document.createElement('style');
-        s.id = 'pf-clean-captcha-style';
-        s.innerHTML = `
-          html, body {
-            background-color: #0F172A !important;
-            margin: 0 !important;
-            padding: 0 !important;
-            width: 100vw !important;
-            height: 100vh !important;
-            overflow: hidden !important;
+        // 1. Rellenar patente
+        var inputs = document.querySelectorAll('input[type="text"]');
+        for (var i = 0; i < inputs.length; i++) {
+          var inp = inputs[i];
+          if ((inp.id && inp.id.toLowerCase().includes('patente')) || 
+              (inp.name && inp.name.toLowerCase().includes('patente')) || 
+              (inp.placeholder && inp.placeholder.toLowerCase().includes('patente'))) {
+            inp.value = '${widget.targetPlate}';
+            inp.dispatchEvent(new Event('input', { bubbles: true }));
+            inp.dispatchEvent(new Event('change', { bubbles: true }));
           }
-          #s4-workspace, #s4-bodyContainer, header, nav, footer,
-          .ms-main, form > *:not(#pf-captcha-host), img {
+        }
+
+        // 2. Extraer datos si ya cargó el resultado técnico
+        var cells = Array.from(document.querySelectorAll('td, th, span, div, p, label'));
+        var data = {
+          patente: '${widget.targetPlate}',
+          marca: '',
+          modelo: '',
+          anio: '',
+          tipo: '',
+          nro_motor: '',
+          chasis: '',
+          vin: '',
+          sello: '',
+          fuente: 'PRT Local'
+        };
+        var foundAny = false;
+        function getNextVal(node) {
+          var next = node.nextElementSibling;
+          if (next && next.innerText.trim()) return next.innerText.trim();
+          if (node.parentElement && node.parentElement.nextElementSibling) {
+            return node.parentElement.nextElementSibling.innerText.trim();
+          }
+          return '';
+        }
+        cells.forEach(function(el) {
+          var t = (el.innerText || '').toLowerCase().replace(':', '').trim();
+          if (t === 'marca') { data.marca = getNextVal(el); foundAny = true; }
+          else if (t === 'modelo') { data.modelo = getNextVal(el); foundAny = true; }
+          else if (t === 'año' || t === 'ano') { data.anio = getNextVal(el); foundAny = true; }
+          else if (t === 'tipo' || t.includes('vehículo') || t.includes('vehiculo')) { data.tipo = getNextVal(el); foundAny = true; }
+          else if (t.includes('motor')) { data.nro_motor = getNextVal(el); foundAny = true; }
+          else if (t.includes('chasis')) { data.chasis = getNextVal(el); foundAny = true; }
+          else if (t === 'vin') { data.vin = getNextVal(el); foundAny = true; }
+          else if (t.includes('sello')) { data.sello = getNextVal(el); foundAny = true; }
+        });
+
+        if (foundAny && (data.marca || data.modelo || data.nro_motor || data.chasis)) {
+          if (window.PrtBridge) {
+            window.PrtBridge.postMessage('DATA:' + JSON.stringify(data));
+            return;
+          }
+        }
+
+        // 3. Ocultar menús molestos de SharePoint pero SIN tocar el formulario ni los iframes
+        var s = document.getElementById('pf-cleanup-style') || document.createElement('style');
+        s.id = 'pf-cleanup-style';
+        s.innerHTML = `
+          header, footer, nav, #suiteBarLeft, #suiteBarRight, #s4-ribbonrow {
             display: none !important;
           }
-          #pf-captcha-host {
-            position: fixed !important;
-            left: 50% !important;
-            top: 45% !important;
-            width: 304px !important;
-            height: 78px !important;
-            transform: translate(-50%, -50%) !important;
-            -webkit-transform: translate(-50%, -50%) !important;
-            z-index: 1000 !important;
-            background: transparent !important;
-            border-radius: 4px !important;
-            box-shadow: 0 4px 18px rgba(0,0,0,0.5) !important;
-            overflow: hidden !important;
-          }
-          #pf-captcha-host iframe {
-            width: 304px !important;
-            height: 78px !important;
-            border: none !important;
-          }
-          div:has(iframe[src*="bframe"]),
-          div:has(iframe[title*="challenge"]),
-          div:has(iframe[title*="desafío"]),
-          .pf-bframe-centered {
-            position: fixed !important;
-            left: 50% !important;
-            top: 50% !important;
-            transform: translate(-50%, -50%) scale(var(--pf-scale, 0.90)) !important;
-            -webkit-transform: translate(-50%, -50%) scale(var(--pf-scale, 0.90)) !important;
-            transform-origin: center center !important;
-            z-index: 2147483647 !important;
-            pointer-events: auto !important;
+          body {
+            background: #0F172A !important;
+            color: #FFFFFF !important;
           }
         `;
         document.head.appendChild(s);
 
-        // 2. Comprobar si ya estamos en la página de resultados (raspado de datos)
-        function scrapeResults() {
-          var bodyText = document.body.innerText || '';
-          var cells = Array.from(document.querySelectorAll('td, th, span, div, label'));
-          var data = {
-            patente: '${widget.targetPlate}',
-            marca: '',
-            modelo: '',
-            anio: '',
-            tipo: '',
-            nro_motor: '',
-            chasis: '',
-            vin: '',
-            sello: '',
-            fuente: 'PRT Local'
-          };
-
-          var foundAny = false;
-          cells.forEach(function(el) {
-            var txt = (el.innerText || '').trim();
-            function getNextVal(node) {
-              var next = node.nextElementSibling;
-              if (next && next.innerText.trim()) return next.innerText.trim();
-              if (node.parentElement) {
-                var parentNext = node.parentElement.nextElementSibling;
-                if (parentNext && parentNext.innerText.trim()) return parentNext.innerText.trim();
-              }
-              return '';
-            }
-
-            var t = txt.toLowerCase().replace(':', '').trim();
-            if (t === 'marca') { data.marca = getNextVal(el); foundAny = true; }
-            else if (t === 'modelo') { data.modelo = getNextVal(el); foundAny = true; }
-            else if (t === 'año' || t === 'ano') { data.anio = getNextVal(el); foundAny = true; }
-            else if (t === 'tipo' || t === 'tipo vehículo' || t === 'tipo vehiculo') { data.tipo = getNextVal(el); foundAny = true; }
-            else if (t.includes('motor')) { data.nro_motor = getNextVal(el); foundAny = true; }
-            else if (t.includes('chasis')) { data.chasis = getNextVal(el); foundAny = true; }
-            else if (t === 'vin') { data.vin = getNextVal(el); foundAny = true; }
-            else if (t.includes('sello')) { data.sello = getNextVal(el); foundAny = true; }
-          });
-
-          if (searchTriggered && foundAny && (data.marca || data.modelo || data.nro_motor || data.chasis)) {
-            if (window.PrtBridge) {
-              window.PrtBridge.postMessage('DATA:' + JSON.stringify(data));
-              return true;
-            }
-          }
-          return false;
-        }
-
-        if (scrapeResults()) return;
-
-        // 3. Rellenar patente si estamos en formulario
-        document.querySelectorAll('input[type="text"]').forEach(function(inp) {
-          if (inp.id.toLowerCase().includes('patente') || inp.name.toLowerCase().includes('patente')) {
-            if (inp.value !== '${widget.targetPlate}') {
-              inp.value = '${widget.targetPlate}';
-              inp.dispatchEvent(new Event('input', { bubbles: true }));
-              inp.dispatchEvent(new Event('change', { bubbles: true }));
-            }
-          }
-        });
-
-        // 4. Centrado de captcha
-        function dumpFormInfo() {
-          try {
-            var form = document.forms[0];
-            var btns = Array.from(document.querySelectorAll('input[type="submit"], input[type="button"], a[id*="btn"], button')).map(function(b) {
-              return (b.id || b.name || b.value || b.innerText).trim();
-            }).filter(Boolean);
-            
-            var recaptchaDiv = document.querySelector('.g-recaptcha');
-            var cb = recaptchaDiv ? recaptchaDiv.getAttribute('data-callback') : 'none';
-            
-            if (window.PrtBridge) {
-              window.PrtBridge.postMessage('DEBUG: Botones: ' + btns.slice(0, 4).join(' | ') + ' | CB: ' + cb);
-            }
-          } catch(e) {
-            if (window.PrtBridge) window.PrtBridge.postMessage('DEBUG: Error dump: ' + e.message);
+        // 4. Centrar suavemente la vista en el captcha sin sacarlo de su jerarquía
+        var captchaBox = document.querySelector('.g-recaptcha') || document.querySelector('iframe[src*="anchor"]');
+        if (captchaBox) {
+          captchaBox.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          if (window.PrtBridge && !window.__pfNotifiedReady) {
+            window.__pfNotifiedReady = true;
+            window.PrtBridge.postMessage('CAPTCHA_READY');
           }
         }
-        dumpFormInfo();
 
-        function mountCaptcha() {
-          var anchor = document.querySelector('iframe[src*="anchor"]');
-          if (anchor) {
-            var host = document.getElementById('pf-captcha-host');
-            if (!host) {
-              host = document.createElement('div');
-              host.id = 'pf-captcha-host';
-              document.body.appendChild(host);
-            }
-            if (anchor.parentElement !== host) {
-              host.appendChild(anchor);
-            }
-            if (window.PrtBridge && !window.__pfNotifiedReady) {
-              window.__pfNotifiedReady = true;
-              window.PrtBridge.postMessage('CAPTCHA_READY');
-            }
-          }
-        }
-        mountCaptcha();
-
-        // 5. Watcher continuo: centrado de desafíos y detección de token resuelto
-        var searchTriggered = false;
+        // 5. Vigilante de token completado: presionar el botón de búsqueda original
+        var autoSubmitted = false;
         setInterval(function() {
-          if (scrapeResults()) return;
+          var tokenArea = document.querySelector('textarea[name="g-recaptcha-response"], textarea#g-recaptcha-response');
+          if (!autoSubmitted && tokenArea && tokenArea.value && tokenArea.value.trim().length > 30) {
+            autoSubmitted = true;
+            if (window.PrtBridge) window.PrtBridge.postMessage('SEARCHING');
 
-          mountCaptcha();
-          var bframe = document.querySelector('iframe[src*="bframe"]');
-          if (bframe) {
-            var c = bframe;
-            while (c.parentElement && c.parentElement !== document.body && c.parentElement.tagName !== 'HTML') {
-              c = c.parentElement;
-            }
-            if (c && c !== document.body && c.tagName !== 'FORM') {
-              var winW = window.innerWidth || document.documentElement.clientWidth;
-              var winH = window.innerHeight || document.documentElement.clientHeight;
-              var scale = Math.min((winW - 16) / 400, (winH - 80) / 580);
-              if (scale > 1.0) scale = 1.0;
-              if (scale < 0.70) scale = 0.70;
-              document.documentElement.style.setProperty('--pf-scale', scale.toFixed(3));
-              if (!c.classList.contains('pf-bframe-centered')) {
-                c.classList.add('pf-bframe-centered');
+            // Localizar el botón real de búsqueda del formulario PRT
+            var buttons = Array.from(document.querySelectorAll('input[type="submit"], input[type="button"], a[id*="btn"], button'));
+            var targetBtn = null;
+            for (var b = 0; b < buttons.length; b++) {
+              var btnTxt = ((buttons[b].value || '') + ' ' + (buttons[b].innerText || '') + ' ' + (buttons[b].id || '')).toLowerCase();
+              if (btnTxt.includes('buscar') || btnTxt.includes('consultar')) {
+                targetBtn = buttons[b];
+                break;
               }
             }
-          }
 
-          // Detección automática del token reCAPTCHA resuelto
-          if (!searchTriggered) {
-            var tokenInput = document.querySelector('textarea[name="g-recaptcha-response"], textarea#g-recaptcha-response');
-            if (tokenInput && tokenInput.value && tokenInput.value.trim().length > 20) {
-              searchTriggered = true;
-              if (window.PrtBridge) {
-                window.PrtBridge.postMessage('SEARCHING');
-              }
-
-              // Buscar el botón o link específico de revisión técnica
-              var candidates = Array.from(document.querySelectorAll('input[type="submit"], input[type="button"], button, a'));
-              var targetBtn = null;
-
-              // Prioridad 1: Botón cuyo texto o ID contenga "consultar" o "buscar" cerca de la patente
-              for (var i = 0; i < candidates.length; i++) {
-                var el = candidates[i];
-                var str = ((el.value || '') + ' ' + (el.id || '') + ' ' + (el.name || '') + ' ' + (el.innerText || '')).toLowerCase();
-                if ((str.includes('buscar') || str.includes('consultar')) && !str.includes('searchbox')) {
-                  targetBtn = el;
-                  break;
-                }
-              }
-
-              if (targetBtn) {
-                if (window.PrtBridge) window.PrtBridge.postMessage('DEBUG:Clicking: ' + (targetBtn.id || targetBtn.value || targetBtn.tagName));
-                targetBtn.click();
-              } else {
-                // Si no hay botón explícito, invocar PostBack de SharePoint o submit del form de contenido
-                var mainForm = document.forms['aspnetForm'] || document.forms[0];
-                if (mainForm) {
-                  if (typeof WebForm_DoPostBackWithOptions === 'function') {
-                    if (window.PrtBridge) window.PrtBridge.postMessage('DEBUG:Invoking WebForm_DoPostBack');
-                  }
-                  mainForm.submit();
-                }
-              }
+            if (targetBtn) {
+              targetBtn.click();
+            } else if (typeof __doPostBack === 'function') {
+              __doPostBack('', '');
+            } else if (document.forms.length > 0) {
+              document.forms[0].submit();
             }
           }
-        }, 120);
+        }, 300);
       })();
     """;
     _controller.runJavaScript(js);
