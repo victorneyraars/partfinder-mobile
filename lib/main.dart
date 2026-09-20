@@ -768,61 +768,79 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
     );
   }
 
-  Widget _buildBoostrTelemetryHud() {
-    final isOnline = _boostrStatus?['status'] == 'ONLINE';
-    final statusColor = isOnline ? const Color(0xFF10B981) : const Color(0xFFF59E0B);
-    final plan = _boostrStatus?['plan'] ?? 'PRO';
-    final dailyLimit = _boostrStatus?['daily_limit']?.toString() ?? '100';
-    final remaining = _boostrStatus?['remaining']?.toString() ?? dailyLimit;
-    final cached = _boostrStatus?['cached_plates']?.toString() ?? '0';
+    Widget _buildBoostrTelemetryHud() {
+    final bool isBoostr = _selectedEngine == 'boostr';
+    final bool isOnline = _boostrTelemetry?['status'] == 'ONLINE';
+    final int remaining = _boostrTelemetry?['remaining'] ?? 100;
+    final int dailyLimit = _boostrTelemetry?['daily_limit'] ?? 100;
+    final int cached = _boostrTelemetry?['cached_count'] ?? 0;
+    final String plan = _boostrTelemetry?['plan']?.toString().toUpperCase() ?? 'PRO';
+
+    final Color accentColor = isBoostr ? const Color(0xFF38BDF8) : const Color(0xFF10B981);
+    final Color dotColor = isBoostr 
+        ? (isOnline ? const Color(0xFF10B981) : const Color(0xFFF59E0B))
+        : const Color(0xFF10B981);
+
+    final String titleText = isBoostr 
+        ? 'BOOSTR API $plan: ' + (isOnline ? 'ONLINE' : 'CONECTANDO')
+        : 'MOTOR PRT CHILE: ACTIVO';
+
+    final String metricsText = isBoostr
+        ? 'Cuota: $remaining/$dailyLimit   •   Caché: $cached'
+        : 'Modo: Directo (P2P)   •   Caché: $cached';
 
     return Container(
       constraints: const BoxConstraints(maxWidth: 360),
-      margin: const EdgeInsets.only(top: 12, bottom: 4),
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      margin: const EdgeInsets.only(top: 10, bottom: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
       decoration: BoxDecoration(
-        color: const Color(0xFF0F172A),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(
-          color: statusColor.withOpacity(0.4),
-        ),
+        color: const Color(0xFF0F172A).withOpacity(0.85),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: accentColor.withOpacity(0.3), width: 1),
       ),
       child: Row(
         children: [
           Container(
-            width: 8,
-            height: 8,
+            width: 9,
+            height: 9,
             decoration: BoxDecoration(
-              color: statusColor,
+              color: dotColor,
               shape: BoxShape.circle,
               boxShadow: [
                 BoxShadow(
-                  color: statusColor.withOpacity(0.7),
+                  color: dotColor.withOpacity(0.6),
                   blurRadius: 6,
                   spreadRadius: 2,
                 )
               ],
             ),
           ),
-          const SizedBox(width: 8),
-          Text(
-            'BOOSTR API $plan: ' + (isOnline ? 'ONLINE' : 'CONECTANDO'),
-            style: const TextStyle(
-              color: Color(0xFFE2E8F0),
-              fontSize: 11,
-              fontWeight: FontWeight.w800,
-              letterSpacing: 0.5,
-            ),
-          ),
-          const Spacer(),
-          Text(
-            _selectedEngine == 'boostr'
-                ? 'Cuota: $remaining/$dailyLimit  •  Caché: $cached'
-                : 'Modo: Directo  •  Caché: $cached',
-            style: const TextStyle(
-              color: Color(0xFF38BDF8),
-              fontSize: 11,
-              fontWeight: FontWeight.w600,
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  titleText,
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 0.8,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  metricsText,
+                  style: TextStyle(
+                    color: accentColor,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 0.3,
+                  ),
+                ),
+              ],
             ),
           ),
         ],
