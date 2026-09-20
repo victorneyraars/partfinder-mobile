@@ -89,7 +89,7 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
   void initState() {
     _fetchBoostrTelemetry();
     super.initState();
-    final initPlate = _generateRandomChileanPlate();
+    final initPlate = _getFreshRandomChileanPlate();
     _plateController.text = initPlate;
     _evalPlateFormat();
     
