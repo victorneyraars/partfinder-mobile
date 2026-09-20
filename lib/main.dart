@@ -44,7 +44,7 @@ class LicensePlateDashboard extends StatefulWidget {
 
 class _LicensePlateDashboardState extends State<LicensePlateDashboard>
     with SingleTickerProviderStateMixin {
-  String _selectedEngine = \'boostr\';
+  String _selectedEngine = 'boostr';
   final TextEditingController _plateController = TextEditingController();
   final FocusNode _focusNode = FocusNode();
   
@@ -135,7 +135,7 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
     try {
       final client = HttpClient();
       client.connectionTimeout = const Duration(seconds: 10);
-      final url = Uri.parse('http://91.99.145.70:8000/api/patente/$rawPlate');
+      final url = Uri.parse('http://91.99.145.70:8000/api/patente/$rawPlate?provider=$_selectedEngine');
       final request = await client.getUrl(url);
       final response = await request.close();
       final body = await response.transform(utf8.decoder).join();
@@ -183,12 +183,11 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
           setState(() {
             _vehicleData = v;
           });
-          _fetchBoostrTelemetry();
-        } else {
+          _fetchBoostrTelemetry();        } else {
           try {
-            final errBody = json.decode(response.body);
-            if (errBody['detail'] is Map && errBody['detail']['require_prt_solve'] == true) {
-              _showPrtCaptchaModal(cleanPlate);
+            final dynamic errJson = jsonDecode(body);
+            if (errJson is Map && errJson['detail'] is Map && errJson['detail']['require_prt_solve'] == true) {
+              _showPrtCaptchaModal(rawPlate);
               return;
             }
           } catch (_) {}
@@ -923,7 +922,7 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
     final rawPlate = _vehicleData?['patente']?.toString().split('-').first.trim().toUpperCase() ?? '';
     if (rawPlate.isEmpty) return;
 
-    final uri = Uri.parse('http://91.99.145.70:8000/api/patente/$rawPlate/pdf');
+    final uri = Uri.parse('http://91.99.145.70:8000/api/patente/$rawPlate?provider=$_selectedEngine');
     try {
       HapticFeedback.mediumImpact();
       final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
