@@ -162,6 +162,7 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
           v['marca'] = make.toString().toUpperCase();
           v['modelo'] = ('$model $version').trim().toUpperCase();
 
+                    v['data_source'] = raw['data_source'] ?? (raw['provider'] == 'prt' ? 'PRT_SCRAPING' : 'BOOSTR_API');
           final plate = raw['plate'] ?? raw['patente'] ?? rawPlate;
           final dv = raw['dv'] != null && raw['dv'].toString().isNotEmpty ? '-${raw['dv']}' : '';
           v['patente'] = '$plate$dv'.toUpperCase();
