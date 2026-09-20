@@ -45,7 +45,7 @@ class LicensePlateDashboard extends StatefulWidget {
 
 class _LicensePlateDashboardState extends State<LicensePlateDashboard>
     with SingleTickerProviderStateMixin {
-  String _selectedEngine = 'local';
+  String _selectedEngine = 'prt';
   final TextEditingController _plateController = TextEditingController();
   final FocusNode _focusNode = FocusNode();
   
@@ -76,8 +76,11 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
   void initState() {
     _fetchBoostrTelemetry();
     super.initState();
-    _plateController.text = _generateRandomChileanPlate();
-    _plateController.text = _generateRandomPlate();
+    final initPlate = _generateRandomChileanPlate();
+    _plateController.text = initPlate;
+    _evalPlateFormat();
+    
+    
     _scannerController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1400),
