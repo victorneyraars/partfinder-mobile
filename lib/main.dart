@@ -1225,16 +1225,17 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             setState(() => _isLoading = false);
             SystemChannels.textInput.invokeMethod('TextInput.hide');
             FocusScope.of(context).unfocus();
-            _injectFocusOptimization();
+            _injectContrastAndFocus();
           },
         ),
       )
       ..loadRequest(Uri.parse('https://www.prt.cl/Paginas/RevisionTecnica.aspx'));
   }
 
-  void _injectFocusOptimization() {
+  void _injectContrastAndFocus() {
     final js = """
       (function() {
+        // 1. Viewport adaptable
         var meta = document.querySelector('meta[name="viewport"]');
         if (!meta) {
           meta = document.createElement('meta');
@@ -1243,44 +1244,46 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
         }
         meta.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes';
 
-        var style = document.getElementById('pf-focus-style');
+        // 2. Estilos de alto contraste y limpieza
+        var style = document.getElementById('pf-contrast-style');
         if (!style) {
           style = document.createElement('style');
-          style.id = 'pf-focus-style';
+          style.id = 'pf-contrast-style';
           document.head.appendChild(style);
         }
         style.innerHTML = `
+          /* Eliminar decoraciones de SharePoint */
           header, nav, footer, #suiteBar, #s4-titlerow, #titleAreaBox, .banner,
           [id*="Logo"], [id*="siteIcon"], [class*="logo"],
           img[src*="logo"], img[src*="Logo"], img[src*="prt"], img[src*="PRT"],
           img[src*="afiche"], img[src*="banner"], img[src*="auto"], img[src*="Auto"],
           table[id*="calendario"], .ms-core-navigation, #sideNavBox,
-          div[class*="footer"], .footer, font[color="red"], span[style*="red"] {
+          div[class*="footer"], .footer {
             display: none !important;
           }
 
           html, body, #s4-workspace, #s4-bodyContainer {
             width: 100% !important;
+            max-width: 100vw !important;
             overflow-x: hidden !important;
-            overflow-y: auto !important;
-            -webkit-overflow-scrolling: touch !important;
             margin: 0 !important;
             padding: 4px !important;
-            background-color: #0F172A !important;
-            color: #F8FAFC !important;
+            background-color: #F8FAFC !important;
+            color: #0F172A !important;
             box-sizing: border-box !important;
           }
 
+          /* Input patente inicial */
           input[type="text"] {
             font-size: 24px !important;
             height: 48px !important;
             font-weight: 900 !important;
             text-align: center !important;
-            background-color: #1E293B !important;
-            color: #38BDF8 !important;
+            background-color: #FFFFFF !important;
+            color: #0284C7 !important;
             border: 2px solid #0284C7 !important;
             border-radius: 8px !important;
-            margin: 8px auto !important;
+            margin: 6px auto !important;
             display: block !important;
             max-width: 250px !important;
           }
@@ -1288,9 +1291,10 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
           .g-recaptcha {
             display: flex !important;
             justify-content: center !important;
-            margin: 10px auto !important;
+            margin: 8px auto !important;
           }
 
+          /* Centrado simétrico de fotos reCAPTCHA */
           div:has(iframe[src*="bframe"]),
           div:has(iframe[title*="challenge"]),
           div:has(iframe[title*="desafío"]),
@@ -1303,42 +1307,53 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             z-index: 2147483647 !important;
           }
 
-          .pf-clean-table {
+          /* ESTILIZACIÓN DE ALTO CONTRASTE PARA TABLAS DE RESULTADOS */
+          table {
             width: 100% !important;
-            margin: 8px 0 16px 0 !important;
+            background-color: #FFFFFF !important;
             border-collapse: collapse !important;
-            background-color: #1E293B !important;
-            border-radius: 12px !important;
-            overflow: hidden !important;
-            border: 1px solid #334155 !important;
           }
-          .pf-clean-table td, .pf-clean-table th {
-            padding: 10px 12px !important;
-            border-bottom: 1px solid #334155 !important;
-            color: #E2E8F0 !important;
+          table, tr, td, th {
+            color: #0F172A !important;
+          }
+          .pf-result-card {
+            width: 100% !important;
+            margin: 8px 0 !important;
+            background-color: #FFFFFF !important;
+            border: 1px solid #CBD5E1 !important;
+            border-radius: 10px !important;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.06) !important;
+            overflow: hidden !important;
+          }
+          .pf-result-card td, .pf-result-card th {
+            padding: 9px 12px !important;
+            border-bottom: 1px solid #E2E8F0 !important;
             font-size: 14px !important;
           }
-          .pf-clean-table th {
+          .pf-result-card td:first-child {
+            font-weight: 700 !important;
+            color: #475569 !important;
+            width: 38% !important;
+            background-color: #F8FAFC !important;
+          }
+          .pf-result-card td:last-child {
+            font-weight: 800 !important;
+            color: #0369A1 !important;
+          }
+          .pf-result-card th {
             background-color: #0284C7 !important;
             color: #FFFFFF !important;
             font-weight: bold !important;
           }
+
+          /* Ocultar elementos innecesarios al cargar resultados */
+          .pf-hide-irrelevant {
+            display: none !important;
+          }
         `;
 
-        function cleanJunk() {
-          document.querySelectorAll('a, span, td, h1, h2, h3, p').forEach(function(el) {
-            var t = (el.innerText || '').trim().toLowerCase();
-            if (t.includes('mi revisión técnica') || t.includes('consulte el estado') ||
-                t.includes('ingrese la patente') || t === 'home' || t === 'calendario' ||
-                t === 'consideraciones' || t === 'plantas' || t.includes('volver a consultar') ||
-                t.includes('ministerio de transportes') || t.includes('la información señalada')) {
-              var p = el.closest('tr') || el.closest('ul') || el.closest('table') || el;
-              if (p && p !== document.body && !p.classList.contains('pf-clean-table')) {
-                p.style.setProperty('display', 'none', 'important');
-              }
-            }
-          });
-
+        // 3. Autocompletar la patente objetivo y quitar el foco táctil
+        function setupInputs() {
           var inputs = document.querySelectorAll('input[type="text"]');
           inputs.forEach(function(inp) {
             if (inp.id.toLowerCase().includes('patente') || inp.name.toLowerCase().includes('patente')) {
@@ -1350,12 +1365,16 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
               inp.blur();
             }
           });
+          if (document.activeElement && document.activeElement.tagName === 'INPUT') {
+            document.activeElement.blur();
+          }
         }
+        setupInputs();
+        setTimeout(setupInputs, 400);
 
-        cleanJunk();
-        setTimeout(cleanJunk, 500);
-
+        // 4. Observador reactivo continuo
         var obs = new MutationObserver(function() {
+          // A) Centrado del desafío fotográfico
           var bframe = document.querySelector('iframe[src*="bframe"]');
           if (bframe) {
             var container = bframe;
@@ -1373,6 +1392,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             }
           }
 
+          // B) Auto-expandir la tabla de revisiones técnicas si no está abierta
           document.querySelectorAll('a, div, span, td').forEach(function(el) {
             var txt = (el.innerText || '').toLowerCase();
             if (txt.includes('pinche para ver información') || txt.includes('información de revisión técnica')) {
@@ -1383,16 +1403,17 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             }
           });
 
+          // C) Localización y extracción de datos oficiales
           var res = {};
           var vehicleTable = null;
           var inspectionTable = null;
 
           document.querySelectorAll('table').forEach(function(tbl) {
             var tText = tbl.innerText || '';
-            if (tText.includes('Marca') && tText.includes('Patente')) {
+            if (tText.includes('Marca') && (tText.includes('Patente') || tText.includes('Modelo'))) {
               vehicleTable = tbl;
             }
-            if (tText.includes('Cod.Planta') || tText.includes('Planta') || tText.includes('Nro.Certificado')) {
+            if (tText.includes('Cod.Planta') || (tText.includes('Planta') && tText.includes('Fecha'))) {
               inspectionTable = tbl;
             }
           });
@@ -1435,20 +1456,37 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             }
           }
 
-          var validPlate = (res['plate'] || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
-          var expectedPlate = '${widget.targetPlate}'.toUpperCase().replace(/[^A-Z0-9]/g, '');
-
-          if (validPlate === expectedPlate && (res.make || res.model)) {
-            document.querySelectorAll('input, .g-recaptcha, img').forEach(function(el) {
+          // D) Si se encontraron datos oficiales: OCULTAR RUIDO Y RESALTAR RESULTADO
+          if (res.make || res.model) {
+            // Ocultar formulario, casilla, patente superior y textos institucionales
+            document.querySelectorAll('input, .g-recaptcha, img, p, h1, h2, h3').forEach(function(el) {
               var p = el.closest('table') || el.closest('div') || el;
-              if (p && p !== vehicleTable && p !== inspectionTable && !vehicleTable.contains(p) && p !== document.body) {
-                p.style.setProperty('display', 'none', 'important');
+              if (p && p !== vehicleTable && p !== inspectionTable && (!vehicleTable || !vehicleTable.contains(p)) && p !== document.body) {
+                p.classList.add('pf-hide-irrelevant');
               }
             });
 
-            vehicleTable.classList.add('pf-clean-table');
-            if (inspectionTable) inspectionTable.classList.add('pf-clean-table');
+            // Ocultar enlaces de menús y pie de página del Ministerio
+            document.querySelectorAll('a, span, td').forEach(function(el) {
+              var txt = (el.innerText || '').toLowerCase();
+              if (txt.includes('ministerio') || txt.includes('volver a consultar') || txt.includes('mi revisión técnica')) {
+                var p = el.closest('tr') || el.closest('table') || el.closest('div') || el;
+                if (p && p !== vehicleTable && p !== inspectionTable && p !== document.body) {
+                  p.classList.add('pf-hide-irrelevant');
+                }
+              }
+            });
 
+            // Aplicar estilos nítidos a las tablas
+            if (vehicleTable) {
+              vehicleTable.classList.add('pf-result-card');
+              vehicleTable.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
+            if (inspectionTable) {
+              inspectionTable.classList.add('pf-result-card');
+            }
+
+            // Notificar a Flutter automáticamente (una única vez)
             if (window.PrtBridge && !window.__pfScrapedSent) {
               window.__pfScrapedSent = true;
               window.PrtBridge.postMessage(JSON.stringify(res));
@@ -1501,8 +1539,8 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
 
           document.querySelectorAll('table').forEach(function(tbl) {
             var tText = tbl.innerText || '';
-            if (tText.includes('Marca') && tText.includes('Patente')) vehicleTable = tbl;
-            if (tText.includes('Cod.Planta') || tText.includes('Planta') || tText.includes('Nro.Certificado')) inspectionTable = tbl;
+            if (tText.includes('Marca') && (tText.includes('Patente') || tText.includes('Modelo'))) vehicleTable = tbl;
+            if (tText.includes('Cod.Planta') || (tText.includes('Planta') && tText.includes('Fecha'))) inspectionTable = tbl;
           });
 
           if (vehicleTable) {
