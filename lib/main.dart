@@ -1197,8 +1197,7 @@ class PrtVerificationScreen extends StatefulWidget {
 }
 
 class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
-  bool _isLoading = true;
-  bool _isSaving = false;
+  bool _isProcessing = false;
   String _statusMessage = 'Toca la casilla para verificar';
   late final WebViewController _controller;
 
@@ -1220,15 +1219,11 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
       ..setNavigationDelegate(
         NavigationDelegate(
           onPageStarted: (_) {
-            if (mounted && !_isSaving) setState(() => _isLoading = true);
+            SystemChannels.textInput.invokeMethod('TextInput.hide');
           },
           onPageFinished: (_) {
             SystemChannels.textInput.invokeMethod('TextInput.hide');
-            _injectUnblockedEngine();
-            // Desactivar la cortina de carga sin depender de eventos fragiles
-            Future.delayed(const Duration(milliseconds: 250), () {
-              if (mounted) setState(() => _isLoading = false);
-            });
+            _injectGroundTruthEngine();
           },
         ),
       )
@@ -1239,8 +1234,8 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
     if (raw == 'CAPTCHA_SOLVED') {
       if (mounted) {
         setState(() {
-          _isSaving = true;
-          _statusMessage = '¡Captcha verificado! Obteniendo ficha técnica...';
+          _isProcessing = true;
+          _statusMessage = '¡Captcha verificado! Extrayendo vehículo...';
         });
       }
       return;
@@ -1255,7 +1250,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
   Future<void> _saveAndExit(Map<String, dynamic> scraped) async {
     if (!mounted) return;
     setState(() {
-      _isSaving = true;
+      _isProcessing = true;
       _statusMessage = '¡Ficha obtenida! Guardando vehículo...';
     });
 
@@ -1277,9 +1272,10 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
     }
   }
 
-  void _injectUnblockedEngine() {
+  void _injectGroundTruthEngine() {
     final js = """
       (function() {
+        // 1. Viewport estricto
         var m = document.querySelector('meta[name="viewport"]');
         if (!m) {
           m = document.createElement('meta');
@@ -1288,20 +1284,9 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
         }
         m.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no';
 
-        // 1. Rellenar patente en el input
-        document.querySelectorAll('input[type="text"]').forEach(function(inp) {
-          if (inp.id.toLowerCase().includes('patente') || inp.name.toLowerCase().includes('patente')) {
-            if (inp.value !== '${widget.targetPlate}') {
-              inp.value = '${widget.targetPlate}';
-              inp.dispatchEvent(new Event('input', { bubbles: true }));
-              inp.dispatchEvent(new Event('change', { bubbles: true }));
-            }
-          }
-        });
-
-        // 2. Estilo protegido limpio y seguro
-        var s = document.getElementById('pf-unblocked-style') || document.createElement('style');
-        s.id = 'pf-unblocked-style';
+        // 2. CSS Maestro Indestructible: Oculta absolutamente TODO excepto reCAPTCHA
+        var s = document.getElementById('pf-master-style') || document.createElement('style');
+        s.id = 'pf-master-style';
         s.innerHTML = `
           html, body {
             background-color: #0F172A !important;
@@ -1312,14 +1297,16 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             overflow: hidden !important;
           }
 
-          /* Ocultar elementos sobrantes */
+          /* Ocultar SharePoint, menús, afiches y tablas */
           header, nav, footer, #suiteBar, #s4-titlerow, #titleAreaBox,
-          .ms-main, img, table, div[id*="WebPartWPQ"] {
+          .ms-core-navigation, #sideNavBox, td[id*="RightCell"], div[id*="WebPartWPQ"],
+          img, table, [id*="Logo"], [id*="siteIcon"], [class*="logo"],
+          img[src*="afiche" i], img[src*="banner" i], table[id*="calendario"] {
             display: none !important;
           }
 
-          /* Mantener visible el formulario en fondo plano */
-          #s4-workspace, #s4-bodyContainer, form {
+          /* Asegurar que el workspace no imponga scroll ni fondo blanco */
+          #s4-workspace, #s4-bodyContainer, .ms-main {
             background-color: #0F172A !important;
             overflow: hidden !important;
             width: 100vw !important;
@@ -1328,18 +1315,20 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             padding: 0 !important;
           }
 
-          /* Centrar el contenedor del Captcha en la pantalla */
+          /* Contenedor exacto del Checkbox "No soy un robot" en el centro */
           .g-recaptcha, div:has(iframe[src*="anchor"]) {
-            display: flex !important;
             position: fixed !important;
             left: 50% !important;
             top: 45% !important;
+            width: 304px !important;
+            height: 78px !important;
             transform: translate(-50%, -50%) !important;
             -webkit-transform: translate(-50%, -50%) !important;
-            z-index: 1000 !important;
+            z-index: 100000 !important;
+            background: transparent !important;
+            display: flex !important;
             justify-content: center !important;
             align-items: center !important;
-            background: transparent !important;
           }
 
           .g-recaptcha-bubble-arrow {
@@ -1362,6 +1351,17 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
           }
         `;
         document.head.appendChild(s);
+
+        // 3. Rellenar patente en el input de SharePoint
+        document.querySelectorAll('input[type="text"]').forEach(function(inp) {
+          if (inp.id.toLowerCase().includes('patente') || inp.name.toLowerCase().includes('patente')) {
+            if (inp.value !== '${widget.targetPlate}') {
+              inp.value = '${widget.targetPlate}';
+              inp.dispatchEvent(new Event('input', { bubbles: true }));
+              inp.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+          }
+        });
 
         function clickLupa() {
           var btn = document.querySelector('input[src*="lupa" i], input[src*="buscar" i], [id*="Buscar" i], a[title*="Buscar" i]');
@@ -1418,7 +1418,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             }
           }
 
-          // Detección de token de Captcha
+          // A) Detección infalible de Captcha Resuelto
           var token = '';
           try {
             if (window.grecaptcha && window.grecaptcha.getResponse) token = window.grecaptcha.getResponse();
@@ -1435,7 +1435,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             setTimeout(clickLupa, 400);
           }
 
-          // Extracción de Ficha Técnica
+          // B) Extracción de la Ficha Técnica
           var d = window.__pfData;
           document.querySelectorAll('tr').forEach(function(r) {
             var cells = Array.from(r.querySelectorAll('td, th')).map(function(c) {
@@ -1539,19 +1539,19 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             alignment: Alignment.centerLeft,
             child: Row(
               children: [
-                if (_isLoading || _isSaving)
+                if (_isProcessing)
                   const SizedBox(
                     width: 14,
                     height: 14,
-                    child: CircularProgressIndicator(color: Color(0xFF38BDF8), strokeWidth: 2),
+                    child: CircularProgressIndicator(color: Color(0xFF10B981), strokeWidth: 2),
                   )
                 else
                   const Icon(Icons.touch_app_rounded, color: Color(0xFF38BDF8), size: 16),
                 const SizedBox(width: 8),
                 Text(
                   _statusMessage,
-                  style: const TextStyle(
-                    color: Color(0xFF38BDF8),
+                  style: TextStyle(
+                    color: _isProcessing ? const Color(0xFF10B981) : const Color(0xFF38BDF8),
                     fontSize: 12,
                     fontWeight: FontWeight.bold,
                   ),
@@ -1565,24 +1565,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
         child: Stack(
           children: [
             WebViewWidget(controller: _controller),
-            if (_isLoading && !_isSaving)
-              Container(
-                color: const Color(0xFF0F172A),
-                width: double.infinity,
-                height: double.infinity,
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: const [
-                    CircularProgressIndicator(color: Color(0xFF38BDF8), strokeWidth: 2.5),
-                    SizedBox(height: 16),
-                    Text(
-                      'Conectando con portal PRT...',
-                      style: TextStyle(color: Color(0xFF94A3B8), fontSize: 13, fontWeight: FontWeight.w600),
-                    ),
-                  ],
-                ),
-              ),
-            if (_isSaving)
+            if (_isProcessing)
               Container(
                 color: const Color(0xFF0F172A),
                 width: double.infinity,
