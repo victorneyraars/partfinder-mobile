@@ -1197,9 +1197,9 @@ class PrtVerificationScreen extends StatefulWidget {
 }
 
 class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
-  bool _isReady = false;
+  bool _isLoading = true;
   bool _isSaving = false;
-  String _statusMessage = 'Preparando verificación...';
+  String _statusMessage = 'Toca la casilla para verificar';
   late final WebViewController _controller;
 
   @override
@@ -1220,11 +1220,15 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
       ..setNavigationDelegate(
         NavigationDelegate(
           onPageStarted: (_) {
-            if (mounted && !_isSaving) setState(() => _isReady = false);
+            if (mounted && !_isSaving) setState(() => _isLoading = true);
           },
           onPageFinished: (_) {
             SystemChannels.textInput.invokeMethod('TextInput.hide');
-            _injectProtectedEngine();
+            _injectUnblockedEngine();
+            // Desactivar la cortina de carga sin depender de eventos fragiles
+            Future.delayed(const Duration(milliseconds: 250), () {
+              if (mounted) setState(() => _isLoading = false);
+            });
           },
         ),
       )
@@ -1232,16 +1236,6 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
   }
 
   void _handleBridge(String raw) {
-    if (raw == 'CAPTCHA_READY') {
-      if (mounted && !_isReady) {
-        setState(() {
-          _isReady = true;
-          _statusMessage = 'Toca la casilla para verificar';
-        });
-      }
-      return;
-    }
-
     if (raw == 'CAPTCHA_SOLVED') {
       if (mounted) {
         setState(() {
@@ -1283,7 +1277,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
     }
   }
 
-  void _injectProtectedEngine() {
+  void _injectUnblockedEngine() {
     final js = """
       (function() {
         var m = document.querySelector('meta[name="viewport"]');
@@ -1294,7 +1288,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
         }
         m.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no';
 
-        // 1. Rellenar patente en el input subyacente
+        // 1. Rellenar patente en el input
         document.querySelectorAll('input[type="text"]').forEach(function(inp) {
           if (inp.id.toLowerCase().includes('patente') || inp.name.toLowerCase().includes('patente')) {
             if (inp.value !== '${widget.targetPlate}') {
@@ -1305,9 +1299,9 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
           }
         });
 
-        // 2. CSS PROTEGIDO (Intacto, idéntico al que funciona perfectamente)
-        var s = document.getElementById('pf-clean-captcha-style') || document.createElement('style');
-        s.id = 'pf-clean-captcha-style';
+        // 2. Estilo protegido limpio y seguro
+        var s = document.getElementById('pf-unblocked-style') || document.createElement('style');
+        s.id = 'pf-unblocked-style';
         s.innerHTML = `
           html, body {
             background-color: #0F172A !important;
@@ -1318,32 +1312,38 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             overflow: hidden !important;
           }
 
-          /* Ocultar SharePoint por completo */
-          #s4-workspace, #s4-bodyContainer, header, nav, footer,
-          .ms-main, form > *:not(#pf-captcha-host), img, table {
+          /* Ocultar elementos sobrantes */
+          header, nav, footer, #suiteBar, #s4-titlerow, #titleAreaBox,
+          .ms-main, img, table, div[id*="WebPartWPQ"] {
             display: none !important;
           }
 
-          /* Contenedor exacto del Checkbox "No soy un robot" */
-          #pf-captcha-host {
+          /* Mantener visible el formulario en fondo plano */
+          #s4-workspace, #s4-bodyContainer, form {
+            background-color: #0F172A !important;
+            overflow: hidden !important;
+            width: 100vw !important;
+            height: 100vh !important;
+            margin: 0 !important;
+            padding: 0 !important;
+          }
+
+          /* Centrar el contenedor del Captcha en la pantalla */
+          .g-recaptcha, div:has(iframe[src*="anchor"]) {
+            display: flex !important;
             position: fixed !important;
             left: 50% !important;
             top: 45% !important;
-            width: 304px !important;
-            height: 78px !important;
             transform: translate(-50%, -50%) !important;
             -webkit-transform: translate(-50%, -50%) !important;
             z-index: 1000 !important;
+            justify-content: center !important;
+            align-items: center !important;
             background: transparent !important;
-            border-radius: 4px !important;
-            box-shadow: 0 4px 18px rgba(0,0,0,0.5) !important;
-            overflow: hidden !important;
           }
 
-          #pf-captcha-host iframe {
-            width: 304px !important;
-            height: 78px !important;
-            border: none !important;
+          .g-recaptcha-bubble-arrow {
+            display: none !important;
           }
 
           /* Desafío fotográfico centrado cuando se active */
@@ -1362,27 +1362,6 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
           }
         `;
         document.head.appendChild(s);
-
-        function mountCaptcha() {
-          var anchor = document.querySelector('iframe[src*="anchor"]');
-          if (anchor) {
-            var host = document.getElementById('pf-captcha-host');
-            if (!host) {
-              host = document.createElement('div');
-              host.id = 'pf-captcha-host';
-              document.body.appendChild(host);
-            }
-            if (anchor.parentElement !== host) {
-              host.appendChild(anchor);
-            }
-            if (window.PrtBridge && !window.__pfNotifiedReady) {
-              window.__pfNotifiedReady = true;
-              window.PrtBridge.postMessage('CAPTCHA_READY');
-            }
-          }
-        }
-
-        mountCaptcha();
 
         function clickLupa() {
           var btn = document.querySelector('input[src*="lupa" i], input[src*="buscar" i], [id*="Buscar" i], a[title*="Buscar" i]');
@@ -1418,11 +1397,8 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
 
         window.__pfData = { plate: '${widget.targetPlate}' };
 
-        // Bucle continuo para detección de visto bueno y extracción de datos
         setInterval(function() {
-          mountCaptcha();
-
-          // Centrado del cuadro de fotos
+          // Centrado del cuadro de fotos si aparece
           var bframe = document.querySelector('iframe[src*="bframe"]');
           if (bframe) {
             var c = bframe;
@@ -1442,7 +1418,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             }
           }
 
-          // A) Detección de Captcha Resuelto (Visto Verde)
+          // Detección de token de Captcha
           var token = '';
           try {
             if (window.grecaptcha && window.grecaptcha.getResponse) token = window.grecaptcha.getResponse();
@@ -1459,9 +1435,8 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             setTimeout(clickLupa, 400);
           }
 
-          // B) Extracción de la Ficha Técnica
+          // Extracción de Ficha Técnica
           var d = window.__pfData;
-
           document.querySelectorAll('tr').forEach(function(r) {
             var cells = Array.from(r.querySelectorAll('td, th')).map(function(c) {
               return (c.textContent || '').trim().split(' ').filter(Boolean).join(' ');
@@ -1497,7 +1472,6 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             }
           });
 
-          // Respaldo por texto general en el documento
           var bodyTxt = document.body.innerText || document.body.textContent || '';
           function findTxt(regex) {
             var match = bodyTxt.match(regex);
@@ -1513,7 +1487,6 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
           if (!d.vin) d.vin = findTxt(/VIN\s*[:\t\n]+\s*([A-Za-z0-9\s\-]+)/i);
           if (!d.seal_type) d.seal_type = findTxt(/Sello(?:\s+Verde|\s+Rojo|\s+Amarillo)?/i);
 
-          // Si el portal ya respondió con los acordeones pero la ficha está colapsada, expandirla
           var onResults = bodyTxt.includes('Volver a Consultar') || bodyTxt.includes('Información del Vehículo');
           if (onResults && (!d.make || !d.model)) {
             if (!window.__pfTabOpened || Date.now() - window.__pfTabOpened > 1200) {
@@ -1522,7 +1495,6 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             }
           }
 
-          // C) Notificar a Flutter y cerrar
           if (d.make || d.model) {
             if (window.PrtBridge && !window.__pfSent) {
               window.__pfSent = true;
@@ -1567,7 +1539,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             alignment: Alignment.centerLeft,
             child: Row(
               children: [
-                if (!_isReady || _isSaving)
+                if (_isLoading || _isSaving)
                   const SizedBox(
                     width: 14,
                     height: 14,
@@ -1592,14 +1564,8 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
       body: SafeArea(
         child: Stack(
           children: [
-            // Vista limpia protegida
-            AnimatedOpacity(
-              opacity: _isReady && !_isSaving ? 1.0 : 0.0,
-              duration: const Duration(milliseconds: 220),
-              child: WebViewWidget(controller: _controller),
-            ),
-            // Pantalla de carga nativa al inicializar
-            if (!_isReady && !_isSaving)
+            WebViewWidget(controller: _controller),
+            if (_isLoading && !_isSaving)
               Container(
                 color: const Color(0xFF0F172A),
                 width: double.infinity,
@@ -1616,7 +1582,6 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
                   ],
                 ),
               ),
-            // Pantalla de guardado automático al marcar el visto verde
             if (_isSaving)
               Container(
                 color: const Color(0xFF0F172A),
