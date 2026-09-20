@@ -1222,17 +1222,16 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
           onPageFinished: (String url) {
             setState(() => _isLoading = false);
             SystemChannels.textInput.invokeMethod('TextInput.hide');
-            _injectUniversalEngine();
+            _injectSequentialEngine();
           },
         ),
       )
       ..loadRequest(Uri.parse('https://www.prt.cl/Paginas/RevisionTecnica.aspx'));
   }
 
-  void _injectUniversalEngine() {
+  void _injectSequentialEngine() {
     final js = """
       (function() {
-        // 1. Viewport adaptable
         var meta = document.querySelector('meta[name="viewport"]');
         if (!meta) {
           meta = document.createElement('meta');
@@ -1241,11 +1240,10 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
         }
         meta.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no';
 
-        // 2. Estilos para centrado del captcha
-        var style = document.getElementById('pf-universal-style');
+        var style = document.getElementById('pf-sequential-style');
         if (!style) {
           style = document.createElement('style');
-          style.id = 'pf-universal-style';
+          style.id = 'pf-sequential-style';
           document.head.appendChild(style);
         }
         style.innerHTML = `
@@ -1298,7 +1296,6 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
           }
         `;
 
-        // 3. Autocompletar la patente y ocultar teclado
         var inputs = document.querySelectorAll('input[type="text"]');
         inputs.forEach(function(inp) {
           if (inp.id.toLowerCase().includes('patente') || inp.name.toLowerCase().includes('patente')) {
@@ -1311,15 +1308,13 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
           }
         });
 
-        // 4. Memoria global acumulativa
-        window.__pfData = window.__pfData || {
+        window.__pfData = {
           plate: '${widget.targetPlate}',
           revisions: []
         };
 
-        // 5. Motor reactivo continuo
         setInterval(function() {
-          // A) Centrado del captcha
+          // Centrado del desafío fotográfico
           var bframe = document.querySelector('iframe[src*="bframe"]');
           if (bframe) {
             var container = bframe;
@@ -1339,7 +1334,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             }
           }
 
-          // B) Auto-disparo de búsqueda al resolver captcha
+          // Auto-disparo de búsqueda al resolver captcha
           var token = '';
           if (window.grecaptcha && typeof window.grecaptcha.getResponse === 'function') {
             try { token = window.grecaptcha.getResponse(); } catch(e) {}
@@ -1356,10 +1351,10 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             }, 300);
           }
 
-          // C) Extracción acumulativa usando textContent (inmune a display: none)
           var data = window.__pfData;
-          var allRows = document.querySelectorAll('tr');
 
+          // 1. EXTRAER FICHA TÉCNICA (Información del Vehículo)
+          var allRows = document.querySelectorAll('tr');
           allRows.forEach(function(r) {
             var cells = Array.from(r.querySelectorAll('td, th')).map(function(c) {
               return (c.textContent || '').trim().split(' ').filter(Boolean).join(' ');
@@ -1397,25 +1392,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             }
           });
 
-          if (data.revisions.length > 0) {
-            data['rt_date'] = data.revisions[0]['date'];
-            data['rt_plant_code'] = data.revisions[0]['plant_code'];
-            data['rt_plant'] = data.revisions[0]['plant'];
-            data['rt_certificate'] = data.revisions[0]['certificate'];
-          }
-
-          // D) Alternancia de paneles: si tenemos revisiones pero falta vehículo, abrir panel vehículo
-          if ((!data.make || !data.model) && data.revisions.length > 0 && !window.__pfClickedVeh) {
-            window.__pfClickedVeh = true;
-            document.querySelectorAll('a, div, span, td').forEach(function(el) {
-              var txt = (el.textContent || '').toLowerCase();
-              if (txt.includes('información del vehículo')) {
-                try { el.click(); } catch(e) {}
-              }
-            });
-          }
-
-          // Si tenemos vehículo pero no revisiones, abrir panel de revisiones
+          // 2. Si ya tenemos Marca/Modelo pero falta el Historial, desplegar el panel de Revisiones
           if ((data.make || data.model) && data.revisions.length === 0 && !window.__pfClickedRev) {
             window.__pfClickedRev = true;
             document.querySelectorAll('a, div, span, td').forEach(function(el) {
@@ -1426,7 +1403,18 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             });
           }
 
-          // E) Notificación automática a Flutter
+          // 3. Si el panel abrió mostrando revisiones pero falta la Ficha, abrir panel Información del Vehículo
+          if ((!data.make || !data.model) && data.revisions.length > 0 && !window.__pfClickedVeh) {
+            window.__pfClickedVeh = true;
+            document.querySelectorAll('a, div, span, td').forEach(function(el) {
+              var txt = (el.textContent || '').toLowerCase();
+              if (txt.includes('información del vehículo')) {
+                try { el.click(); } catch(e) {}
+              }
+            });
+          }
+
+          // 4. NOTIFICAR A FLUTTER CUANDO TENGAMOS AMBOS (O TRAS TIMEOUT SEGURO)
           var hasVehicle = !!(data.make || data.model);
           var hasRevisions = data.revisions.length > 0;
 
@@ -1435,7 +1423,8 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
               window.__pfScrapedSent = true;
               window.PrtBridge.postMessage(JSON.stringify(data));
             }
-          } else if (hasVehicle || hasRevisions) {
+          } else if (hasVehicle) {
+            // Si ya hay vehículo, dar hasta 2 segundos para que el historial responda
             if (!window.__pfTimeoutSend) {
               window.__pfTimeoutSend = setTimeout(function() {
                 if (window.PrtBridge && !window.__pfScrapedSent) {
@@ -1501,7 +1490,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
       } else {
         setState(() => _isAutoProcessing = false);
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Consultando el portal... intenta nuevamente en un segundo.')),
+          const SnackBar(content: Text('Consultando el portal... intenta nuevamente en un momento.')),
         );
       }
     } catch (e) {
