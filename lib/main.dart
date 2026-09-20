@@ -1217,38 +1217,41 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
       )
       ..setNavigationDelegate(
         NavigationDelegate(
-          onPageStarted: (_) => setState(() => _isLoading = true),
+          onPageStarted: (_) {
+            setState(() => _isLoading = true);
+            SystemChannels.textInput.invokeMethod('TextInput.hide');
+          },
           onPageFinished: (String url) {
             setState(() => _isLoading = false);
             SystemChannels.textInput.invokeMethod('TextInput.hide');
-            _injectPrecisionEngine();
+            _injectOptimization();
           },
         ),
       )
       ..loadRequest(Uri.parse('https://www.prt.cl/Paginas/RevisionTecnica.aspx'));
   }
 
-  void _injectPrecisionEngine() {
+  void _injectOptimization() {
     final js = """
       (function() {
-        // 1. Viewport estándar de alta fidelidad
+        // 1. Viewport adaptable estándar
         var meta = document.querySelector('meta[name="viewport"]');
         if (!meta) {
           meta = document.createElement('meta');
           meta.name = 'viewport';
           document.head.appendChild(meta);
         }
-        meta.content = 'width=device-width, initial-scale=1.0, maximum-scale=2.0, user-scalable=yes';
+        meta.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes';
 
-        // 2. CSS Maestro: Limpieza y accesibilidad táctil impecable
-        var style = document.getElementById('pf-precision-style');
+        // 2. CSS Maestro: Limpieza y centrado probado
+        var style = document.getElementById('pf-master-style');
         if (!style) {
           style = document.createElement('style');
-          style.id = 'pf-precision-style';
+          style.id = 'pf-master-style';
           document.head.appendChild(style);
         }
         style.innerHTML = `
-          /* Suprimir decoraciones de SharePoint */
+          /* Eliminar decoraciones de SharePoint */
           header, nav, footer, #suiteBar, #s4-titlerow, #titleAreaBox, .banner,
           [id*="Logo"], [id*="siteIcon"], [class*="logo"],
           img[src*="logo"], img[src*="Logo"], img[src*="prt"], img[src*="PRT"],
@@ -1268,7 +1271,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             box-sizing: border-box !important;
           }
 
-          /* Input patente */
+          /* Input patente centrado */
           input[type="text"] {
             font-size: 24px !important;
             height: 48px !important;
@@ -1283,52 +1286,45 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             max-width: 250px !important;
           }
 
-          /* ÁREA TÁCTIL GARANTIZADA PARA EL BOTÓN DE LA LUPA */
-          input[type="image"], input[src*="lupa"], input[src*="buscar"], 
-          img[src*="lupa"], img[src*="buscar"], a[id*="Buscar"], button[id*="Buscar"] {
-            min-width: 50px !important;
-            min-height: 50px !important;
-            cursor: pointer !important;
-            touch-action: manipulation !important;
-            position: relative !important;
-            z-index: 1000 !important;
-          }
-
           .g-recaptcha {
             display: flex !important;
             justify-content: center !important;
             margin: 8px auto !important;
           }
+          .g-recaptcha-bubble-arrow {
+            display: none !important;
+          }
 
-          /* Centrado simétrico solo cuando esté activo */
-          .pf-centered-active {
-            position: fixed !important;
+          /* CENTRADO HORIZONTAL EXACTO PARA EL DESAFÍO FOTOGRÁFICO */
+          div:has(iframe[src*="bframe"]),
+          div:has(iframe[title*="challenge"]),
+          div:has(iframe[title*="desafío"]),
+          .pf-centered-challenge {
             left: 50% !important;
             right: auto !important;
-            top: 48% !important;
-            transform: translate(-50%, -50%) scale(var(--pf-scale, 0.88)) !important;
-            -webkit-transform: translate(-50%, -50%) scale(var(--pf-scale, 0.88)) !important;
-            transform-origin: center center !important;
+            transform: translateX(-50%) scale(var(--pf-scale, 0.90)) !important;
+            -webkit-transform: translateX(-50%) scale(var(--pf-scale, 0.90)) !important;
+            transform-origin: top center !important;
+            -webkit-transform-origin: top center !important;
             z-index: 2147483647 !important;
-            pointer-events: auto !important;
           }
 
-          /* Desactivar capas invisibles de reCAPTCHA cuando no hay fotos */
-          .pf-centered-inactive {
-            pointer-events: none !important;
-            z-index: -1 !important;
+          /* CONTRASTE MÁXIMO EN TODAS LAS TABLAS */
+          table {
+            background-color: #FFFFFF !important;
+            border-collapse: collapse !important;
           }
-
-          /* Estilización de alto contraste para las tablas oficiales */
+          table, table td, table th, table span, table b, table font {
+            color: #0F172A !important;
+          }
           .pf-result-card {
             width: 100% !important;
             margin: 10px 0 !important;
             background-color: #FFFFFF !important;
             border: 1px solid #CBD5E1 !important;
             border-radius: 12px !important;
-            box-shadow: 0 4px 10px rgba(0,0,0,0.08) !important;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.06) !important;
             overflow: hidden !important;
-            border-collapse: collapse !important;
           }
           .pf-result-card td, .pf-result-card th {
             padding: 10px 14px !important;
@@ -1337,9 +1333,9 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
           }
           .pf-result-card td:first-child {
             font-weight: 700 !important;
-            color: #334155 !important;
-            width: 40% !important;
-            background-color: #F1F5F9 !important;
+            color: #475569 !important;
+            background-color: #F8FAFC !important;
+            width: 38% !important;
           }
           .pf-result-card td:last-child {
             font-weight: 800 !important;
@@ -1351,57 +1347,71 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             color: #FFFFFF !important;
             font-weight: bold !important;
           }
+
+          /* Interactividad garantizada en la lupa */
+          input[type="image"], input[src*="lupa"], input[src*="buscar"], a[id*="Buscar"] {
+            cursor: pointer !important;
+            touch-action: manipulation !important;
+          }
         `;
 
-        // 3. Autocompletar la patente objetivo
-        var inputs = document.querySelectorAll('input[type="text"]');
-        inputs.forEach(function(inp) {
-          if (inp.id.toLowerCase().includes('patente') || inp.name.toLowerCase().includes('patente')) {
-            if (inp.value !== '${widget.targetPlate}') {
-              inp.value = '${widget.targetPlate}';
-              inp.dispatchEvent(new Event('input', { bubbles: true }));
-              inp.dispatchEvent(new Event('change', { bubbles: true }));
+        // 3. Autocompletar la patente y ocultar teclado
+        function setupInputs() {
+          var inputs = document.querySelectorAll('input[type="text"]');
+          inputs.forEach(function(inp) {
+            if (inp.id.toLowerCase().includes('patente') || inp.name.toLowerCase().includes('patente')) {
+              if (inp.value !== '${widget.targetPlate}') {
+                inp.value = '${widget.targetPlate}';
+                inp.dispatchEvent(new Event('input', { bubbles: true }));
+                inp.dispatchEvent(new Event('change', { bubbles: true }));
+              }
+              inp.blur();
             }
+          });
+          if (document.activeElement && document.activeElement.tagName === 'INPUT') {
+            document.activeElement.blur();
           }
-        });
+        }
+        setupInputs();
+        setTimeout(setupInputs, 400);
 
-        // 4. Control reactivo estricto
-        setInterval(function() {
-          // A) Control de visibilidad de reCAPTCHA
+        // 4. Observador continuo
+        var obs = new MutationObserver(function() {
+          // A) Centrado del desafío fotográfico de Google
           var bframe = document.querySelector('iframe[src*="bframe"]');
           if (bframe) {
             var container = bframe;
             while (container.parentElement && container.parentElement !== document.body && container.parentElement.tagName !== 'HTML') {
               container = container.parentElement;
             }
-            if (container && container !== document.body) {
-              var topVal = parseInt(container.style.top || '0', 10);
-              var styleObj = window.getComputedStyle(container);
-              var isVisible = topVal > -1000 &&
-                              styleObj.display !== 'none' &&
-                              styleObj.visibility !== 'hidden' &&
-                              styleObj.opacity !== '0';
+            if (container && container !== document.body && container.tagName !== 'FORM') {
+              var winW = window.innerWidth || document.documentElement.clientWidth;
+              var winH = window.innerHeight || document.documentElement.clientHeight;
+              var scaleW = (winW - 14) / 400;
+              var scaleH = (winH - 100) / 580;
+              var targetScale = Math.min(scaleW, scaleH);
+              if (targetScale > 1.0) targetScale = 1.0;
+              if (targetScale < 0.72) targetScale = 0.72;
+              document.documentElement.style.setProperty('--pf-scale', targetScale.toFixed(3));
 
-              if (isVisible) {
-                var winW = window.innerWidth || document.documentElement.clientWidth;
-                var winH = window.innerHeight || document.documentElement.clientHeight;
-                var scaleW = (winW * 0.94) / 400;
-                var scaleH = (winH * 0.84) / 580;
-                var scale = Math.min(scaleW, scaleH);
-                if (scale > 0.90) scale = 0.90;
-                if (scale < 0.60) scale = 0.60;
-                document.documentElement.style.setProperty('--pf-scale', scale.toFixed(3));
-
-                container.classList.remove('pf-centered-inactive');
-                container.classList.add('pf-centered-active');
-              } else {
-                container.classList.remove('pf-centered-active');
-                container.classList.add('pf-centered-inactive');
+              if (!container.classList.contains('pf-centered-challenge')) {
+                container.classList.add('pf-centered-challenge');
               }
             }
           }
 
-          // B) Extracción cuando el usuario presiona la lupa y llegan los datos
+          // B) Desplegar tabla de revisiones técnicas si existe
+          document.querySelectorAll('a, div, span, td').forEach(function(el) {
+            var txt = (el.innerText || '').toLowerCase();
+            if (txt.includes('pinche para ver información') || txt.includes('información de revisión técnica')) {
+              if (!el.getAttribute('data-pf-opened')) {
+                el.setAttribute('data-pf-opened', 'true');
+                try { el.click(); } catch (_) {}
+              }
+            }
+          });
+
+          // C) Localizar datos de las tablas
           var res = {};
           var vehicleTable = null;
           var inspectionTable = null;
@@ -1454,20 +1464,8 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             }
           }
 
-          // C) Si los datos pertenecen a la patente consultada:
-          var validPlate = (res['plate'] || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
-          var expectedPlate = '${widget.targetPlate}'.toUpperCase().replace(/[^A-Z0-9]/g, '');
-
-          if ((validPlate === expectedPlate || validPlate.length >= 4) && (res.make || res.model)) {
-            // Ocultar formulario de búsqueda y elementos residuales
-            document.querySelectorAll('input, .g-recaptcha, img, p, h1, h2, h3').forEach(function(el) {
-              var p = el.closest('table') || el.closest('div') || el;
-              if (p && p !== vehicleTable && p !== inspectionTable && (!vehicleTable || !vehicleTable.contains(p)) && p !== document.body) {
-                p.style.setProperty('display', 'none', 'important');
-              }
-            });
-
-            // Resaltar tablas con contraste nítido
+          // D) Cuando se cargan los resultados: resaltar y centrar
+          if (res.make || res.model) {
             if (vehicleTable && !vehicleTable.classList.contains('pf-result-card')) {
               vehicleTable.classList.add('pf-result-card');
               vehicleTable.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -1476,13 +1474,23 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
               inspectionTable.classList.add('pf-result-card');
             }
 
-            // Notificar a Flutter
+            // Ocultar la barra de búsqueda superior
+            document.querySelectorAll('input[type="text"], .g-recaptcha').forEach(function(el) {
+              var p = el.closest('table') || el.closest('div');
+              if (p && p !== vehicleTable && p !== inspectionTable && (!vehicleTable || !vehicleTable.contains(p))) {
+                p.style.setProperty('display', 'none', 'important');
+              }
+            });
+
+            // Enviar automáticamente a Flutter
             if (window.PrtBridge && !window.__pfScrapedSent) {
               window.__pfScrapedSent = true;
               window.PrtBridge.postMessage(JSON.stringify(res));
             }
           }
-        }, 120);
+        });
+
+        obs.observe(document.body, { childList: true, subtree: true });
       })();
     """;
     _controller.runJavaScript(js);
@@ -1595,6 +1603,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFF0F172A),
+      resizeToAvoidBottomInset: false,
       appBar: AppBar(
         backgroundColor: const Color(0xFF0F172A),
         elevation: 0,
