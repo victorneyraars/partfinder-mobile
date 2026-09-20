@@ -1222,7 +1222,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
           onPageFinished: (_) {
             setState(() => _isLoading = false);
             SystemChannels.textInput.invokeMethod('TextInput.hide');
-            _injectMasterEngine();
+            _injectIsolationEngine();
           },
         ),
       )
@@ -1290,11 +1290,10 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
     }
   }
 
-  void _injectMasterEngine() {
+  void _injectIsolationEngine() {
     final js = """
       (function() {
-        function enforceMobileSetup() {
-          // 1. Bloqueo estricto de zoom y desplazamiento horizontal
+        function applyStyles() {
           var m = document.querySelector('meta[name="viewport"]');
           if (!m) {
             m = document.createElement('meta');
@@ -1303,32 +1302,39 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
           }
           m.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no';
 
-          // 2. CSS Maestro indestructible (se vuelve a inyectar si SharePoint lo borra)
-          var s = document.getElementById('pf-master-style');
+          var s = document.getElementById('pf-clean-style');
           if (!s) {
             s = document.createElement('style');
-            s.id = 'pf-master-style';
+            s.id = 'pf-clean-style';
             document.head.appendChild(s);
           }
           s.innerHTML = `
-            header, nav, footer, #suiteBar, #s4-titlerow, #titleAreaBox, .banner,
-            [id*="Logo"], [id*="siteIcon"], [class*="logo"],
-            img[src*="logo"], img[src*="Logo"], img[src*="prt"], img[src*="PRT"],
-            img[src*="afiche"], img[src*="banner"], img[src*="auto"],
-            table[id*="calendario"], .ms-core-navigation, #sideNavBox,
-            td[id*="RightCell"], div[id*="WebPartWPQ"], .ms-WPBorder {
+            /* 1. Supresión radical de cabeceras, afiches, banners y widgets laterales */
+            header, nav, footer, #suiteBar, #s4-titlerow, #titleAreaBox,
+            .ms-core-navigation, #sideNavBox, td[id*="RightCell"], div[id*="WebPartWPQ"],
+            img, table[id*="calendario"], .ms-WPBorder {
               display: none !important;
             }
-            html, body, #s4-workspace, #s4-bodyContainer {
+
+            /* 2. Forzar layout vertical puro del ancho del teléfono */
+            html, body, #s4-workspace, #s4-bodyContainer, .ms-main, form {
               width: 100% !important;
               max-width: 100vw !important;
+              min-width: 0 !important;
               overflow-x: hidden !important;
               margin: 0 !important;
-              padding: 6px !important;
-              box-sizing: border-box !important;
+              padding: 0 !important;
               background-color: #0F172A !important;
+              color: #F8FAFC !important;
               touch-action: pan-y !important;
             }
+
+            /* 3. Re-mostrar únicamente la imagen de la lupa */
+            input[type="image"], input[src*="lupa" i], input[src*="buscar" i] {
+              display: inline-block !important;
+            }
+
+            /* 4. Estilo de casilla de patente */
             input[type="text"] {
               font-size: 24px !important;
               height: 48px !important;
@@ -1338,10 +1344,11 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
               color: #38BDF8 !important;
               border: 2px solid #0284C7 !important;
               border-radius: 8px !important;
-              margin: 6px auto !important;
+              margin: 12px auto !important;
               display: block !important;
               max-width: 250px !important;
             }
+
             .g-recaptcha {
               display: flex !important;
               justify-content: center !important;
@@ -1350,7 +1357,8 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             .g-recaptcha-bubble-arrow {
               display: none !important;
             }
-            /* Centrado horizontal exacto del popup de fotos */
+
+            /* 5. Centrado simétrico de las fotos del Captcha */
             div:has(iframe[src*="bframe"]),
             div:has(iframe[title*="challenge"]),
             div:has(iframe[title*="desafío"]),
@@ -1366,7 +1374,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             }
           `;
 
-          // Autocompletar la patente y ocultar teclado
+          // Autocompletar la patente
           document.querySelectorAll('input[type="text"]').forEach(function(inp) {
             if (inp.id.toLowerCase().includes('patente') || inp.name.toLowerCase().includes('patente')) {
               if (inp.value !== '${widget.targetPlate}') {
@@ -1379,7 +1387,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
           });
         }
 
-        enforceMobileSetup();
+        applyStyles();
         window.__pfData = { plate: '${widget.targetPlate}' };
 
         function clickLupa() {
@@ -1416,9 +1424,9 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
         }
 
         setInterval(function() {
-          enforceMobileSetup();
+          applyStyles();
 
-          // A) Detección de token de captcha
+          // Detección de token de captcha
           var token = '';
           try {
             if (window.grecaptcha && window.grecaptcha.getResponse) token = window.grecaptcha.getResponse();
@@ -1460,7 +1468,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             }
           }
 
-          // B) Extracción exhaustiva de la ficha técnica
+          // Extracción de datos técnicos
           var d = window.__pfData;
 
           document.querySelectorAll('tr').forEach(function(r) {
@@ -1498,10 +1506,23 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             }
           });
 
-          // C) Si se detecta la pantalla de resultados pero la ficha está cerrada, abrirla
+          // Respaldo por expresiones regulares en texto plano
           var bodyTxt = document.body.innerText || document.body.textContent || '';
-          var onResults = bodyTxt.includes('Volver a Consultar') || bodyTxt.includes('Información del Vehículo');
+          function findTxt(regex) {
+            var match = bodyTxt.match(regex);
+            return match && match[1] ? match[1].trim() : '';
+          }
 
+          if (!d.make) d.make = findTxt(/Marca\s*[:\t\n]+\s*([A-Za-z0-9\s\-]+)/i);
+          if (!d.model) d.model = findTxt(/Modelo\s*[:\t\n]+\s*([A-Za-z0-9\s\-]+)/i);
+          if (!d.year) d.year = findTxt(/A[ñn]o(?:\s+de\s+Fabricaci[oó]n)?\s*[:\t\n]+\s*([0-9]{4})/i);
+          if (!d.type) d.type = findTxt(/Tipo(?:\s+de\s+Veh[ií]culo)?\s*[:\t\n]+\s*([A-Za-z0-9\s\-]+)/i);
+          if (!d.engine_number) d.engine_number = findTxt(/Motor\s*[:\t\n]+\s*([A-Za-z0-9\s\-]+)/i);
+          if (!d.chassis) d.chassis = findTxt(/Chasis\s*[:\t\n]+\s*([A-Za-z0-9\s\-]+)/i);
+          if (!d.vin) d.vin = findTxt(/VIN\s*[:\t\n]+\s*([A-Za-z0-9\s\-]+)/i);
+          if (!d.seal_type) d.seal_type = findTxt(/Sello(?:\s+Verde|\s+Rojo|\s+Amarillo)?/i);
+
+          var onResults = bodyTxt.includes('Volver a Consultar') || bodyTxt.includes('Información del Vehículo');
           if (onResults && (!d.make || !d.model)) {
             if (!window.__pfTabOpened || Date.now() - window.__pfTabOpened > 1200) {
               window.__pfTabOpened = Date.now();
@@ -1509,7 +1530,6 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             }
           }
 
-          // D) En cuanto se obtiene Marca o Modelo, transferir a Flutter y cerrar
           if (d.make || d.model) {
             if (window.PrtBridge && !window.__pfSent) {
               window.__pfSent = true;
