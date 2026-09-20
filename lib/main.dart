@@ -1,3 +1,4 @@
+import 'dart:math';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
@@ -44,7 +45,7 @@ class LicensePlateDashboard extends StatefulWidget {
 
 class _LicensePlateDashboardState extends State<LicensePlateDashboard>
     with SingleTickerProviderStateMixin {
-  String _selectedEngine = 'boostr';
+  String _selectedEngine = 'local';
   final TextEditingController _plateController = TextEditingController();
   final FocusNode _focusNode = FocusNode();
   
@@ -75,6 +76,7 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
   void initState() {
     _fetchBoostrTelemetry();
     super.initState();
+    _plateController.text = _generateRandomPlate();
     _scannerController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1400),
@@ -1197,6 +1199,17 @@ class PrtVerificationScreen extends StatefulWidget {
 }
 
 class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
+  String _generateRandomPlate() {
+    const letters = 'BCDFGHJKLPRSTVWXYZ';
+    final rand = Random();
+    String p = '';
+    for (int i = 0; i < 4; i++) {
+      p += letters[rand.nextInt(letters.length)];
+    }
+    int num = 10 + rand.nextInt(90); // 10 a 99
+    return '$p$num';
+  }
+
   bool _isReady = false;
   String _statusMessage = 'Preparando verificación...';
   late final WebViewController _controller;
