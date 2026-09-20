@@ -1280,7 +1280,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
           }
         });
 
-        // 2. CSS que oculta absolutamente todo SharePoint
+        // 2. CSS con aislamiento visual seguro
         var s = document.getElementById('pf-clean-captcha-style') || document.createElement('style');
         s.id = 'pf-clean-captcha-style';
         s.innerHTML = `
@@ -1292,15 +1292,11 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             height: 100vh !important;
             overflow: hidden !important;
           }
-
-          /* Ocultar SharePoint por completo */
-          #s4-workspace, #s4-bodyContainer, header, nav, footer,
-          .ms-main, form > *:not(#pf-captcha-host), img, table {
-            display: none !important;
+          #s4-workspace, #s4-bodyContainer, header, nav, footer, .ms-main {
+            opacity: 0.01 !important;
           }
-
-          /* Contenedor exacto del Checkbox "No soy un robot" */
-          #pf-captcha-host {
+          /* Posicionamiento del widget sin mover su nodo en el DOM */
+          .pf-captcha-container {
             position: fixed !important;
             left: 50% !important;
             top: 45% !important;
@@ -1308,20 +1304,12 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             height: 78px !important;
             transform: translate(-50%, -50%) !important;
             -webkit-transform: translate(-50%, -50%) !important;
-            z-index: 1000 !important;
-            background: transparent !important;
+            z-index: 10000 !important;
             border-radius: 4px !important;
             box-shadow: 0 4px 18px rgba(0,0,0,0.5) !important;
-            overflow: hidden !important;
+            background: transparent !important;
           }
-
-          #pf-captcha-host iframe {
-            width: 304px !important;
-            height: 78px !important;
-            border: none !important;
-          }
-
-          /* Desafío fotográfico centrado cuando se active */
+          /* Desafio fotografico centrado */
           div:has(iframe[src*="bframe"]),
           div:has(iframe[title*="challenge"]),
           div:has(iframe[title*="desafío"]),
@@ -1338,26 +1326,48 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
         `;
         document.head.appendChild(s);
 
+        var __pfSubmitted = false;
+
         function mountCaptcha() {
           var anchor = document.querySelector('iframe[src*="anchor"]');
           if (anchor) {
-            var host = document.getElementById('pf-captcha-host');
-            if (!host) {
-              host = document.createElement('div');
-              host.id = 'pf-captcha-host';
-              document.body.appendChild(host);
+            var box = anchor.closest('div.g-recaptcha') || anchor.parentElement;
+            if (box && !box.classList.contains('pf-captcha-container')) {
+              box.classList.add('pf-captcha-container');
             }
-            if (anchor.parentElement !== host) {
-              host.appendChild(anchor);
-            }
-            // Notificar a Flutter que el captcha ya está aislado y listo para verse
             if (window.PrtBridge && !window.__pfNotifiedReady) {
               window.__pfNotifiedReady = true;
               window.PrtBridge.postMessage('CAPTCHA_READY');
             }
           }
-        }
 
+          // Vigilante de resolución de token
+          if (!__pfSubmitted) {
+            var tokenArea = document.querySelector('textarea[name="g-recaptcha-response"], textarea#g-recaptcha-response');
+            if (tokenArea && tokenArea.value && tokenArea.value.trim().length > 30) {
+              __pfSubmitted = true;
+              if (window.PrtBridge) window.PrtBridge.postMessage('SEARCHING');
+
+              // Buscar el elemento de la lupa (input type image o imagen con link)
+              var btn = document.querySelector('input[type="image"], input[id*="Buscar" i], input[id*="Consultar" i], input[id*="ImageButton" i]');
+              if (!btn) {
+                var img = document.querySelector('img[src*="lupa" i], img[src*="search" i]');
+                if (img) btn = img.closest('a, button, input');
+              }
+              if (!btn) {
+                btn = document.querySelector('input[type="submit"], button[type="submit"]');
+              }
+
+              if (btn) {
+                btn.click();
+              } else if (typeof WebForm_DoPostBackWithOptions === 'function') {
+                try { WebForm_DoPostBackWithOptions(new WebForm_PostBackOptions('', '', true, '', '', false, false)); } catch(e) {}
+              } else if (document.forms.length > 0) {
+                document.forms[0].submit();
+              }
+            }
+          }
+        }
         mountCaptcha();
 
         setInterval(function() {
