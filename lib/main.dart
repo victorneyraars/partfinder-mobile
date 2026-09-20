@@ -1222,16 +1222,17 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
           onPageFinished: (String url) {
             setState(() => _isLoading = false);
             SystemChannels.textInput.invokeMethod('TextInput.hide');
-            _injectHeadlessEngine();
+            _injectUniversalEngine();
           },
         ),
       )
       ..loadRequest(Uri.parse('https://www.prt.cl/Paginas/RevisionTecnica.aspx'));
   }
 
-  void _injectHeadlessEngine() {
+  void _injectUniversalEngine() {
     final js = """
       (function() {
+        // 1. Viewport adaptable
         var meta = document.querySelector('meta[name="viewport"]');
         if (!meta) {
           meta = document.createElement('meta');
@@ -1240,10 +1241,11 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
         }
         meta.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no';
 
-        var style = document.getElementById('pf-headless-style');
+        // 2. Estilos para centrado del captcha
+        var style = document.getElementById('pf-universal-style');
         if (!style) {
           style = document.createElement('style');
-          style.id = 'pf-headless-style';
+          style.id = 'pf-universal-style';
           document.head.appendChild(style);
         }
         style.innerHTML = `
@@ -1258,7 +1260,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             max-width: 100vw !important;
             overflow-x: hidden !important;
             margin: 0 !important;
-            padding: 6px !important;
+            padding: 4px !important;
             box-sizing: border-box !important;
             background-color: #0F172A !important;
           }
@@ -1278,7 +1280,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
           .g-recaptcha {
             display: flex !important;
             justify-content: center !important;
-            margin: 10px auto !important;
+            margin: 8px auto !important;
           }
           .g-recaptcha-bubble-arrow {
             display: none !important;
@@ -1296,6 +1298,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
           }
         `;
 
+        // 3. Autocompletar la patente y ocultar teclado
         var inputs = document.querySelectorAll('input[type="text"]');
         inputs.forEach(function(inp) {
           if (inp.id.toLowerCase().includes('patente') || inp.name.toLowerCase().includes('patente')) {
@@ -1308,7 +1311,15 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
           }
         });
 
+        // 4. Memoria global acumulativa
+        window.__pfData = window.__pfData || {
+          plate: '${widget.targetPlate}',
+          revisions: []
+        };
+
+        // 5. Motor reactivo continuo
         setInterval(function() {
+          // A) Centrado del captcha
           var bframe = document.querySelector('iframe[src*="bframe"]');
           if (bframe) {
             var container = bframe;
@@ -1328,95 +1339,113 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             }
           }
 
-          var token = document.querySelector('textarea[name="g-recaptcha-response"], #g-recaptcha-response');
-          if (token && token.value && token.value.length > 20) {
-            if (!window.__pfSearched) {
-              window.__pfSearched = true;
+          // B) Auto-disparo de búsqueda al resolver captcha
+          var token = '';
+          if (window.grecaptcha && typeof window.grecaptcha.getResponse === 'function') {
+            try { token = window.grecaptcha.getResponse(); } catch(e) {}
+          }
+          if (!token) {
+            var ta = document.querySelector('textarea[name="g-recaptcha-response"], #g-recaptcha-response');
+            if (ta && ta.value) token = ta.value;
+          }
+          if (token && token.length > 20 && !window.__pfSearched) {
+            window.__pfSearched = true;
+            setTimeout(function() {
               var btn = document.querySelector('input[type="image"], input[src*="lupa"], input[src*="buscar"], a[id*="Buscar"]');
               if (btn) btn.click();
-            }
+            }, 300);
           }
 
-          document.querySelectorAll('a, div, span, td').forEach(function(el) {
-            var txt = (el.innerText || '').toLowerCase();
-            if (txt.includes('pinche para ver información') || txt.includes('información de revisión técnica')) {
-              if (!el.getAttribute('data-pf-opened')) {
-                el.setAttribute('data-pf-opened', 'true');
-                try { el.click(); } catch (_) {}
+          // C) Extracción acumulativa usando textContent (inmune a display: none)
+          var data = window.__pfData;
+          var allRows = document.querySelectorAll('tr');
+
+          allRows.forEach(function(r) {
+            var cells = Array.from(r.querySelectorAll('td, th')).map(function(c) {
+              return (c.textContent || '').trim().replace(/\s+/g, ' ');
+            }).filter(Boolean);
+
+            if (cells.length >= 2) {
+              var k = cells[0].toLowerCase();
+              var v = cells[cells.length - 1];
+              if (k.includes('patente')) data['plate'] = v;
+              else if (k.includes('tipo') && !k.includes('sello')) data['type'] = v;
+              else if (k.includes('marca')) data['make'] = v;
+              else if (k.includes('modelo')) data['model'] = v;
+              else if (k.includes('año') || k.includes('fabricaci')) data['year'] = v;
+              else if (k.includes('motor')) data['engine_number'] = v;
+              else if (k.includes('chasis')) data['chassis'] = v;
+              else if (k.includes('vin')) data['vin'] = v;
+              else if (k.includes('sello')) data['seal_type'] = v;
+            }
+
+            var tdCells = Array.from(r.querySelectorAll('td')).map(function(c) {
+              return (c.textContent || '').trim().replace(/\s+/g, ' ');
+            });
+            if (tdCells.length >= 3 && /^\d{2}\/\d{2}\/\d{4}$/.test(tdCells[0])) {
+              var exists = data.revisions.some(function(item) {
+                return item.date === tdCells[0] && item.plant_code === tdCells[1];
+              });
+              if (!exists) {
+                data.revisions.push({
+                  'date': tdCells[0],
+                  'plant_code': tdCells[1] || '',
+                  'plant': tdCells[2] || '',
+                  'certificate': tdCells.length >= 4 ? tdCells[3] : ''
+                });
               }
             }
           });
 
-          var res = {};
-          var vehicleTable = null;
-          var inspectionTable = null;
+          if (data.revisions.length > 0) {
+            data['rt_date'] = data.revisions[0]['date'];
+            data['rt_plant_code'] = data.revisions[0]['plant_code'];
+            data['rt_plant'] = data.revisions[0]['plant'];
+            data['rt_certificate'] = data.revisions[0]['certificate'];
+          }
 
-          document.querySelectorAll('table').forEach(function(tbl) {
-            var tText = tbl.innerText || '';
-            if (tText.includes('Marca') && (tText.includes('Patente') || tText.includes('Modelo'))) {
-              vehicleTable = tbl;
-            }
-            if (tText.includes('Cod.Planta') || (tText.includes('Planta') && tText.includes('Fecha'))) {
-              inspectionTable = tbl;
-            }
-          });
-
-          if (vehicleTable) {
-            var rows = vehicleTable.querySelectorAll('tr');
-            rows.forEach(function(r) {
-              var cells = Array.from(r.querySelectorAll('td, th')).map(function(c) {
-                return c.innerText.trim();
-              }).filter(Boolean);
-
-              if (cells.length >= 2) {
-                var k = cells[0].toLowerCase();
-                var v = cells[cells.length - 1];
-                if (k.includes('patente')) res['plate'] = v;
-                else if (k.includes('tipo') && !k.includes('sello')) res['type'] = v;
-                else if (k.includes('marca')) res['make'] = v;
-                else if (k.includes('modelo')) res['model'] = v;
-                else if (k.includes('año') || k.includes('fabricaci')) res['year'] = v;
-                else if (k.includes('motor')) res['engine_number'] = v;
-                else if (k.includes('chasis')) res['chassis'] = v;
-                else if (k.includes('vin')) res['vin'] = v;
-                else if (k.includes('sello')) res['seal_type'] = v;
+          // D) Alternancia de paneles: si tenemos revisiones pero falta vehículo, abrir panel vehículo
+          if ((!data.make || !data.model) && data.revisions.length > 0 && !window.__pfClickedVeh) {
+            window.__pfClickedVeh = true;
+            document.querySelectorAll('a, div, span, td').forEach(function(el) {
+              var txt = (el.textContent || '').toLowerCase();
+              if (txt.includes('información del vehículo')) {
+                try { el.click(); } catch(e) {}
               }
             });
           }
 
-          if (inspectionTable) {
-            var iRows = inspectionTable.querySelectorAll('tr');
-            var revList = [];
-            for (var idx = 1; idx < iRows.length; idx++) {
-              var rowCells = Array.from(iRows[idx].querySelectorAll('td')).map(function(c) { return c.innerText.trim(); });
-              if (rowCells.length >= 3 && rowCells[0].length > 4) {
-                revList.push({
-                  'date': rowCells[0],
-                  'plant_code': rowCells[1],
-                  'plant': rowCells[2],
-                  'certificate': rowCells.length >= 4 ? rowCells[3] : ''
-                });
+          // Si tenemos vehículo pero no revisiones, abrir panel de revisiones
+          if ((data.make || data.model) && data.revisions.length === 0 && !window.__pfClickedRev) {
+            window.__pfClickedRev = true;
+            document.querySelectorAll('a, div, span, td').forEach(function(el) {
+              var txt = (el.textContent || '').toLowerCase();
+              if (txt.includes('pinche para ver información') || txt.includes('información de revisión técnica')) {
+                try { el.click(); } catch(e) {}
               }
-            }
-            if (revList.length > 0) {
-              res['revisions'] = revList;
-              res['rt_date'] = revList[0]['date'];
-              res['rt_plant_code'] = revList[0]['plant_code'];
-              res['rt_plant'] = revList[0]['plant'];
-              res['rt_certificate'] = revList[0]['certificate'];
-            }
+            });
           }
 
-          var validPlate = (res['plate'] || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
-          var expectedPlate = '${widget.targetPlate}'.toUpperCase().replace(/[^A-Z0-9]/g, '');
+          // E) Notificación automática a Flutter
+          var hasVehicle = !!(data.make || data.model);
+          var hasRevisions = data.revisions.length > 0;
 
-          if ((validPlate === expectedPlate || validPlate.length >= 4) && (res.make || res.model)) {
+          if (hasVehicle && hasRevisions) {
             if (window.PrtBridge && !window.__pfScrapedSent) {
               window.__pfScrapedSent = true;
-              window.PrtBridge.postMessage(JSON.stringify(res));
+              window.PrtBridge.postMessage(JSON.stringify(data));
+            }
+          } else if (hasVehicle || hasRevisions) {
+            if (!window.__pfTimeoutSend) {
+              window.__pfTimeoutSend = setTimeout(function() {
+                if (window.PrtBridge && !window.__pfScrapedSent) {
+                  window.__pfScrapedSent = true;
+                  window.PrtBridge.postMessage(JSON.stringify(data));
+                }
+              }, 2200);
             }
           }
-        }, 140);
+        }, 150);
       })();
     """;
     _controller.runJavaScript(js);
@@ -1426,7 +1455,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
     if (_isAutoProcessing) return;
     setState(() {
       _isAutoProcessing = true;
-      _statusMessage = '¡Validado! Sincronizando ficha e historial...';
+      _statusMessage = '¡Datos extraídos! Sincronizando en base de datos...';
     });
 
     try {
@@ -1457,56 +1486,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
     try {
       final js = """
         (function() {
-          var res = {};
-          var vehicleTable = null;
-          var inspectionTable = null;
-          document.querySelectorAll('table').forEach(function(tbl) {
-            var tText = tbl.innerText || '';
-            if (tText.includes('Marca') && (tText.includes('Patente') || tText.includes('Modelo'))) vehicleTable = tbl;
-            if (tText.includes('Cod.Planta') || (tText.includes('Planta') && tText.includes('Fecha'))) inspectionTable = tbl;
-          });
-          if (vehicleTable) {
-            var rows = vehicleTable.querySelectorAll('tr');
-            rows.forEach(function(r) {
-              var cells = Array.from(r.querySelectorAll('td, th')).map(function(c) { return c.innerText.trim(); }).filter(Boolean);
-              if (cells.length >= 2) {
-                var k = cells[0].toLowerCase();
-                var v = cells[cells.length - 1];
-                if (k.includes('patente')) res['plate'] = v;
-                else if (k.includes('tipo') && !k.includes('sello')) res['type'] = v;
-                else if (k.includes('marca')) res['make'] = v;
-                else if (k.includes('modelo')) res['model'] = v;
-                else if (k.includes('año') || k.includes('fabricaci')) res['year'] = v;
-                else if (k.includes('motor')) res['engine_number'] = v;
-                else if (k.includes('chasis')) res['chassis'] = v;
-                else if (k.includes('vin')) res['vin'] = v;
-                else if (k.includes('sello')) res['seal_type'] = v;
-              }
-            });
-          }
-          if (inspectionTable) {
-            var iRows = inspectionTable.querySelectorAll('tr');
-            var revList = [];
-            for (var idx = 1; idx < iRows.length; idx++) {
-              var rowCells = Array.from(iRows[idx].querySelectorAll('td')).map(function(c) { return c.innerText.trim(); });
-              if (rowCells.length >= 3 && rowCells[0].length > 4) {
-                revList.push({
-                  'date': rowCells[0],
-                  'plant_code': rowCells[1],
-                  'plant': rowCells[2],
-                  'certificate': rowCells.length >= 4 ? rowCells[3] : ''
-                });
-              }
-            }
-            if (revList.length > 0) {
-              res['revisions'] = revList;
-              res['rt_date'] = revList[0]['date'];
-              res['rt_plant_code'] = revList[0]['plant_code'];
-              res['rt_plant'] = revList[0]['plant'];
-              res['rt_certificate'] = revList[0]['certificate'];
-            }
-          }
-          return JSON.stringify(res);
+          return JSON.stringify(window.__pfData || {});
         })();
       """;
       final rawResult = await _controller.runJavaScriptReturningResult(js);
@@ -1515,12 +1495,13 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
         cleanJson = json.decode(cleanJson);
       }
       final Map<String, dynamic> scraped = json.decode(cleanJson);
-      if (scraped.isNotEmpty && (scraped['make'] != null || scraped['model'] != null)) {
+
+      if (scraped.isNotEmpty && (scraped['make'] != null || (scraped['revisions'] != null && (scraped['revisions'] as List).isNotEmpty))) {
         _handleAutoScraped(json.encode(scraped));
       } else {
         setState(() => _isAutoProcessing = false);
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Esperando que aparezcan los datos del portal...')),
+          const SnackBar(content: Text('Consultando el portal... intenta nuevamente en un segundo.')),
         );
       }
     } catch (e) {
