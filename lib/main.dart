@@ -202,9 +202,9 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
           ..setNavigationDelegate(
             NavigationDelegate(
               onPageFinished: (String url) {
-                final jsCenteringEngine = """
+                final jsUniversalResponsive = """
                   (function() {
-                    // 1. Viewport estricto adaptado a la pantalla del móvil
+                    // 1. Viewport estándar adaptable
                     var meta = document.querySelector('meta[name="viewport"]');
                     if (!meta) {
                       meta = document.createElement('meta');
@@ -213,11 +213,12 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
                     }
                     meta.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no';
 
-                    // 2. Estilos para contener el ancho y limpiar elementos innecesarios
+                    // 2. Estilos para suprimir cabeceras, menús y barras innecesarias
                     var style = document.createElement('style');
                     style.innerHTML = `
                       header, nav, footer, #suiteBar, #s4-titlerow, .banner,
-                      img[src*="afiche"], img[src*="banner"], table[id*="calendario"] {
+                      img[src*="afiche"], img[src*="banner"], img[src*="logo"], img[src*="Logo"],
+                      table[id*="calendario"] {
                         display: none !important;
                       }
                       html, body, #s4-workspace, #s4-bodyContainer, form {
@@ -225,17 +226,17 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
                         max-width: 100vw !important;
                         overflow-x: hidden !important;
                         margin: 0 !important;
-                        padding: 4px !important;
+                        padding: 2px !important;
                         box-sizing: border-box !important;
                       }
                       input[type="text"] {
                         font-size: 22px !important;
-                        height: 48px !important;
+                        height: 46px !important;
                         font-weight: 800 !important;
                         text-align: center !important;
                         border: 2px solid #0284C7 !important;
                         border-radius: 8px !important;
-                        margin: 8px auto !important;
+                        margin: 6px auto !important;
                         display: block !important;
                         max-width: 240px !important;
                       }
@@ -243,13 +244,24 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
                         display: flex !important;
                         justify-content: center !important;
                         align-items: center !important;
-                        margin: 10px auto !important;
+                        margin: 8px auto !important;
                         width: 100% !important;
                       }
                     `;
                     document.head.appendChild(style);
 
-                    // 3. Autocompletar la patente objetivo
+                    // 3. Ocultar enlaces de navegación ("Home", "Calendario", etc.)
+                    document.querySelectorAll('a, span, td').forEach(function(el) {
+                      var txt = (el.innerText || '').trim().toLowerCase();
+                      if (txt === 'home' || txt === 'calendario' || txt === 'consideraciones' || txt === 'plantas') {
+                        var container = el.closest('tr') || el.closest('ul') || el.closest('table') || el.closest('div');
+                        if (container && container !== document.body) {
+                          container.style.setProperty('display', 'none', 'important');
+                        }
+                      }
+                    });
+
+                    // 4. Autocompletar la patente
                     var inputs = document.querySelectorAll('input[type="text"]');
                     inputs.forEach(function(inp) {
                       if (inp.id.toLowerCase().includes('patente') || inp.name.toLowerCase().includes('patente')) {
@@ -259,15 +271,15 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
                       }
                     });
 
-                    // 4. Centrado inicial en el checkbox "No soy un robot"
+                    // 5. Centrado inicial suave del formulario
                     setTimeout(function() {
                       var anchor = document.querySelector('.g-recaptcha') || document.querySelector('input[type="text"]');
                       if (anchor) {
                         anchor.scrollIntoView({ behavior: 'smooth', block: 'center' });
                       }
-                    }, 400);
+                    }, 350);
 
-                    // 5. OBSERVADOR QUIRÚRGICO PARA CENTRAR EL DESAFÍO FOTOGRÁFICO
+                    // 6. MOTOR DE ESCALADO Y CENTRADO RESPONSIVE BIDIMENSIONAL
                     var challengeObserver = new MutationObserver(function() {
                       var bframe = document.querySelector('iframe[src*="bframe"]') ||
                                    document.querySelector('iframe[title*="recaptcha"]') ||
@@ -279,25 +291,29 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
                         }
                         if (container && container !== document.body) {
                           var topVal = parseInt(container.style.top || '0');
-                          // Solo si Google lo ha colocado en pantalla (top no negativo)
                           if (topVal > -1000 && container.style.visibility !== 'hidden' && container.style.display !== 'none') {
-                            if (container.style.position !== 'fixed') {
-                              var winW = window.innerWidth;
-                              var scale = winW < 420 ? (winW / 415) : 0.95;
-                              if (scale < 0.72) scale = 0.72;
+                            var winW = window.innerWidth;
+                            var winH = window.innerHeight;
 
-                              container.style.setProperty('position', 'fixed', 'important');
-                              container.style.setProperty('top', '50%', 'important');
-                              container.style.setProperty('left', '50%', 'important');
-                              container.style.setProperty('transform', 'translate(-50%, -50%) scale(' + scale.toFixed(2) + ')', 'important');
-                              container.style.setProperty('transform-origin', 'center center', 'important');
-                              container.style.setProperty('z-index', '2147483647', 'important');
-                            }
+                            // Cálculo bidimensional considerando los 590px de desafíos 4x4
+                            var scaleW = (winW * 0.95) / 400;
+                            var scaleH = (winH * 0.94) / 590;
+                            var scale = Math.min(scaleW, scaleH);
+
+                            if (scale > 1.0) scale = 1.0;
+                            if (scale < 0.50) scale = 0.50;
+
+                            container.style.setProperty('position', 'fixed', 'important');
+                            container.style.setProperty('top', '50%', 'important');
+                            container.style.setProperty('left', '50%', 'important');
+                            container.style.setProperty('transform', 'translate(-50%, -50%) scale(' + scale.toFixed(3) + ')', 'important');
+                            container.style.setProperty('transform-origin', 'center center', 'important');
+                            container.style.setProperty('z-index', '2147483647', 'important');
                           }
                         }
                       }
 
-                      // 6. AUTO-CENTRO AL APARECER LA TABLA CON LOS DATOS DEL VEHÍCULO
+                      // 7. Auto-scroll suave a la información técnica del vehículo al aparecer
                       var infoHeader = Array.from(document.querySelectorAll('div, td, th, span, b, a')).find(function(el) {
                         return el.innerText && el.innerText.includes('Información del Vehículo');
                       });
@@ -313,7 +329,7 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
                     challengeObserver.observe(document.body, { childList: true, subtree: true, attributes: true });
                   })();
                 """;
-                controller.runJavaScript(jsCenteringEngine);
+                controller.runJavaScript(jsUniversalResponsive);
               },
             ),
           )
@@ -322,7 +338,7 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
         return StatefulBuilder(
           builder: (context, setModalState) {
             return Container(
-              height: MediaQuery.of(context).size.height * 0.94,
+              height: MediaQuery.of(context).size.height * 0.95,
               decoration: const BoxDecoration(
                 color: Color(0xFF0F172A),
                 borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
@@ -354,7 +370,7 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
                   const Padding(
                     padding: EdgeInsets.symmetric(horizontal: 16, vertical: 2),
                     child: Text(
-                      'Resuelve el captcha, presiona la lupa y guarda la información.',
+                      'Resuelve el captcha, pulsa la lupa del portal y presiona Extraer.',
                       style: TextStyle(color: Color(0xFF94A3B8), fontSize: 12),
                     ),
                   ),
