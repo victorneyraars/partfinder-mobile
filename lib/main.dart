@@ -1198,8 +1198,7 @@ class PrtVerificationScreen extends StatefulWidget {
 
 class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
   bool _isLoading = true;
-  bool _isSaving = false;
-  String _statusMessage = 'Resuelve el captcha para verificar';
+  String _statusMessage = 'Toca "No soy un robot" para continuar';
   late final WebViewController _controller;
 
   @override
@@ -1210,333 +1209,118 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
     _controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..setUserAgent("Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36")
-      ..addJavaScriptChannel(
-        'PrtBridge',
-        onMessageReceived: (JavaScriptMessage message) {
-          _handleBridge(message.message);
-        },
-      )
       ..setNavigationDelegate(
         NavigationDelegate(
           onPageStarted: (_) => setState(() => _isLoading = true),
           onPageFinished: (_) {
             setState(() => _isLoading = false);
             SystemChannels.textInput.invokeMethod('TextInput.hide');
-            _injectIsolationEngine();
+            _injectFocusSetup();
           },
         ),
       )
       ..loadRequest(Uri.parse('https://www.prt.cl/Paginas/RevisionTecnica.aspx'));
   }
 
-  void _handleBridge(String raw) {
-    try {
-      final Map<String, dynamic> data = json.decode(raw);
-      if (data['status'] == 'CAPTCHA_SOLVED') {
-        if (mounted) setState(() => _statusMessage = '¡Validado! Obteniendo ficha técnica...');
-        return;
-      }
-      _saveAndExit(data);
-    } catch (_) {
-      try {
-        _saveAndExit(json.decode(raw));
-      } catch (_) {}
-    }
-  }
-
-  Future<void> _saveAndExit(Map<String, dynamic> scraped) async {
-    if (_isSaving) return;
-    setState(() {
-      _isSaving = true;
-      _statusMessage = '¡Ficha obtenida! Guardando vehículo...';
-    });
-
-    try {
-      scraped['patente'] = widget.targetPlate;
-      scraped['data_source'] = 'PRT_SCRAPING';
-      scraped.remove('revisions');
-
-      await http.post(
-        Uri.parse('http://91.99.145.70:8000/api/vehicle/cache'),
-        headers: {'Content-Type': 'application/json'},
-        body: json.encode({'plate': widget.targetPlate, 'data': scraped}),
-      ).timeout(const Duration(seconds: 5));
-    } catch (_) {}
-
-    if (mounted) {
-      widget.onVehicleSaved(scraped);
-      Navigator.pop(context);
-    }
-  }
-
-  Future<void> _manualExtract() async {
-    if (_isSaving) return;
-    try {
-      final raw = await _controller.runJavaScriptReturningResult('JSON.stringify(window.__pfData || {})');
-      String clean = raw.toString();
-      if (clean.startsWith('"') && clean.endsWith('"')) clean = json.decode(clean);
-      final Map<String, dynamic> d = json.decode(clean);
-      if (d.isNotEmpty && (d['make'] != null || d['model'] != null)) {
-        await _saveAndExit(d);
-      } else {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Obteniendo información del portal...')),
-          );
-        }
-      }
-    } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
-    }
-  }
-
-  void _injectIsolationEngine() {
+  void _injectFocusSetup() {
     final js = """
       (function() {
-        function applyStyles() {
+        // 1. Limpieza física del DOM: eliminar nodos basura en lugar de sólo CSS
+        function cleanJunk() {
+          var selectors = [
+            'header', 'nav', 'footer', '#suiteBar', '#s4-titlerow', '#titleAreaBox',
+            'img[src*="afiche" i]', 'img[src*="banner" i]', 'img[src*="prt" i]', 'img[src*="logo" i]',
+            'table[id*="calendario" i]', '.ms-core-navigation', '#sideNavBox', 'td[id*="RightCell"]'
+          ];
+          selectors.forEach(function(sel) {
+            document.querySelectorAll(sel).forEach(function(el) {
+              try { el.remove(); } catch(e) { el.style.display = 'none'; }
+            });
+          });
+
+          // Asegurar viewport adaptado sin zoom horizontal descontrolado
           var m = document.querySelector('meta[name="viewport"]');
           if (!m) {
             m = document.createElement('meta');
             m.name = 'viewport';
             document.head.appendChild(m);
           }
-          m.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no';
+          m.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no';
 
-          var s = document.getElementById('pf-clean-style');
-          if (!s) {
-            s = document.createElement('style');
-            s.id = 'pf-clean-style';
-            document.head.appendChild(s);
-          }
-          s.innerHTML = `
-            /* 1. Supresión radical de cabeceras, afiches, banners y widgets laterales */
-            header, nav, footer, #suiteBar, #s4-titlerow, #titleAreaBox,
-            .ms-core-navigation, #sideNavBox, td[id*="RightCell"], div[id*="WebPartWPQ"],
-            img, table[id*="calendario"], .ms-WPBorder {
-              display: none !important;
-            }
-
-            /* 2. Forzar layout vertical puro del ancho del teléfono */
-            html, body, #s4-workspace, #s4-bodyContainer, .ms-main, form {
-              width: 100% !important;
-              max-width: 100vw !important;
-              min-width: 0 !important;
-              overflow-x: hidden !important;
-              margin: 0 !important;
-              padding: 0 !important;
-              background-color: #0F172A !important;
-              color: #F8FAFC !important;
-              touch-action: pan-y !important;
-            }
-
-            /* 3. Re-mostrar únicamente la imagen de la lupa */
-            input[type="image"], input[src*="lupa" i], input[src*="buscar" i] {
-              display: inline-block !important;
-            }
-
-            /* 4. Estilo de casilla de patente */
-            input[type="text"] {
-              font-size: 24px !important;
-              height: 48px !important;
-              font-weight: 900 !important;
-              text-align: center !important;
-              background-color: #1E293B !important;
-              color: #38BDF8 !important;
-              border: 2px solid #0284C7 !important;
-              border-radius: 8px !important;
-              margin: 12px auto !important;
-              display: block !important;
-              max-width: 250px !important;
-            }
-
-            .g-recaptcha {
-              display: flex !important;
-              justify-content: center !important;
-              margin: 10px auto !important;
-            }
-            .g-recaptcha-bubble-arrow {
-              display: none !important;
-            }
-
-            /* 5. Centrado simétrico de las fotos del Captcha */
-            div:has(iframe[src*="bframe"]),
-            div:has(iframe[title*="challenge"]),
-            div:has(iframe[title*="desafío"]),
-            .pf-centered-active {
-              position: fixed !important;
-              left: 50% !important;
-              right: auto !important;
-              transform: translateX(-50%) scale(var(--pf-scale, 0.90)) !important;
-              -webkit-transform: translateX(-50%) scale(var(--pf-scale, 0.90)) !important;
-              transform-origin: top center !important;
-              z-index: 2147483647 !important;
-              pointer-events: auto !important;
-            }
-          `;
-
-          // Autocompletar la patente
-          document.querySelectorAll('input[type="text"]').forEach(function(inp) {
-            if (inp.id.toLowerCase().includes('patente') || inp.name.toLowerCase().includes('patente')) {
-              if (inp.value !== '${widget.targetPlate}') {
-                inp.value = '${widget.targetPlate}';
-                inp.dispatchEvent(new Event('input', { bubbles: true }));
-                inp.dispatchEvent(new Event('change', { bubbles: true }));
-              }
-              inp.blur();
-            }
-          });
+          // Fondo oscuro unificado y ajuste de ancho
+          document.body.style.backgroundColor = '#0F172A';
+          document.body.style.color = '#F8FAFC';
+          document.body.style.maxWidth = '100vw';
+          document.body.style.overflowX = 'hidden';
         }
 
-        applyStyles();
-        window.__pfData = { plate: '${widget.targetPlate}' };
+        cleanJunk();
 
-        function clickLupa() {
-          var inp = document.querySelector('input[type="text"]');
-          var btn = null;
-          if (inp && inp.parentElement) {
-            btn = inp.parentElement.querySelector('input[type="image"], input[type="submit"], button, a, img');
+        // 2. Colocar la patente y desenfocar
+        var plateInput = null;
+        document.querySelectorAll('input[type="text"]').forEach(function(inp) {
+          if (inp.id.toLowerCase().includes('patente') || inp.name.toLowerCase().includes('patente')) {
+            plateInput = inp;
+            inp.value = '${widget.targetPlate}';
+            inp.dispatchEvent(new Event('input', { bubbles: true }));
+            inp.dispatchEvent(new Event('change', { bubbles: true }));
+            inp.style.fontSize = '24px';
+            inp.style.fontWeight = 'bold';
+            inp.style.textAlign = 'center';
+            inp.style.background = '#1E293B';
+            inp.style.color = '#38BDF8';
+            inp.style.border = '2px solid #0284C7';
+            inp.style.borderRadius = '8px';
+            inp.blur();
           }
-          if (!btn) {
-            btn = document.querySelector('input[src*="lupa" i], input[src*="buscar" i], [id*="Buscar" i], a[title*="Buscar" i]');
-          }
-          if (btn) {
-            btn = btn.closest('a') || btn.closest('button') || btn;
-            try {
-              btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-              if (typeof btn.click === 'function') btn.click();
-            } catch(e) {}
-          }
-        }
+        });
 
-        function openVehicleTab() {
-          var els = document.querySelectorAll('a, span, div, td, b');
-          for (var i = 0; i < els.length; i++) {
-            var t = (els[i].textContent || '').trim().toLowerCase();
-            if (t.includes('información del vehículo') || t.includes('informacion del vehiculo')) {
-              var target = els[i].closest('a') || els[i].closest('div[onclick]') || els[i].closest('td') || els[i];
-              try {
-                target.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-                if (typeof target.click === 'function') target.click();
-              } catch(e) {}
-              return;
-            }
+        // 3. Centrado del desafío fotográfico de reCAPTCHA
+        var s = document.getElementById('pf-captcha-style') || document.createElement('style');
+        s.id = 'pf-captcha-style';
+        s.innerHTML = `
+          div:has(iframe[src*="bframe"]),
+          div:has(iframe[title*="challenge"]),
+          div:has(iframe[title*="desafío"]),
+          .pf-centered-active {
+            position: fixed !important;
+            left: 50% !important;
+            right: auto !important;
+            transform: translateX(-50%) scale(var(--pf-scale, 0.90)) !important;
+            -webkit-transform: translateX(-50%) scale(var(--pf-scale, 0.90)) !important;
+            transform-origin: top center !important;
+            z-index: 2147483647 !important;
           }
-        }
+        `;
+        document.head.appendChild(s);
 
+        // 4. Auto-Scroll suave directo hacia el Captcha
+        setTimeout(function() {
+          var captcha = document.querySelector('.g-recaptcha, iframe[src*="recaptcha"]');
+          if (captcha) {
+            captcha.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }
+        }, 300);
+
+        // Bucle de mantenimiento de escala y centrado para las fotos del captcha
         setInterval(function() {
-          applyStyles();
+          cleanJunk();
 
-          // Detección de token de captcha
-          var token = '';
-          try {
-            if (window.grecaptcha && window.grecaptcha.getResponse) token = window.grecaptcha.getResponse();
-          } catch(e) {}
-          if (!token) {
-            var ta = document.querySelector('textarea[name="g-recaptcha-response"], #g-recaptcha-response');
-            if (ta && ta.value) token = ta.value;
-          }
-
-          if (token && token.length > 20) {
-            document.querySelectorAll('iframe[src*="bframe"]').forEach(function(f) {
-              var p = f.parentElement;
-              while (p && p !== document.body && p.tagName !== 'HTML') {
-                p.style.setProperty('display', 'none', 'important');
-                p.style.setProperty('pointer-events', 'none', 'important');
-                p = p.parentElement;
-              }
-            });
-            if (!window.__pfSearched) {
-              window.__pfSearched = true;
-              if (window.PrtBridge) window.PrtBridge.postMessage(JSON.stringify({status: 'CAPTCHA_SOLVED'}));
-              clickLupa();
-              setTimeout(clickLupa, 500);
-            }
-          } else {
-            var bframe = document.querySelector('iframe[src*="bframe"]');
-            if (bframe) {
-              var c = bframe;
-              while (c.parentElement && c.parentElement !== document.body && c.parentElement.tagName !== 'HTML') c = c.parentElement;
-              if (c && c !== document.body && c.tagName !== 'FORM') {
-                var winW = window.innerWidth || document.documentElement.clientWidth;
-                var winH = window.innerHeight || document.documentElement.clientHeight;
-                var scale = Math.min((winW - 14) / 400, (winH - 100) / 580);
-                if (scale > 1.0) scale = 1.0;
-                if (scale < 0.72) scale = 0.72;
-                document.documentElement.style.setProperty('--pf-scale', scale.toFixed(3));
-                if (!c.classList.contains('pf-centered-active')) c.classList.add('pf-centered-active');
-              }
+          var bframe = document.querySelector('iframe[src*="bframe"]');
+          if (bframe) {
+            var c = bframe;
+            while (c.parentElement && c.parentElement !== document.body && c.parentElement.tagName !== 'HTML') c = c.parentElement;
+            if (c && c !== document.body && c.tagName !== 'FORM') {
+              var winW = window.innerWidth || document.documentElement.clientWidth;
+              var winH = window.innerHeight || document.documentElement.clientHeight;
+              var scale = Math.min((winW - 14) / 400, (winH - 100) / 580);
+              if (scale > 1.0) scale = 1.0;
+              if (scale < 0.72) scale = 0.72;
+              document.documentElement.style.setProperty('--pf-scale', scale.toFixed(3));
+              if (!c.classList.contains('pf-centered-active')) c.classList.add('pf-centered-active');
             }
           }
-
-          // Extracción de datos técnicos
-          var d = window.__pfData;
-
-          document.querySelectorAll('tr').forEach(function(r) {
-            var cells = Array.from(r.querySelectorAll('td, th')).map(function(c) {
-              return (c.textContent || '').trim().split(' ').filter(Boolean).join(' ');
-            }).filter(Boolean);
-
-            for (var i = 0; i < cells.length; i++) {
-              var label = cells[i].toLowerCase();
-              var val = (i + 1 < cells.length) ? cells[i + 1] : '';
-
-              if (cells[i].indexOf(':') !== -1) {
-                var parts = cells[i].split(':');
-                label = parts[0].toLowerCase();
-                val = parts.slice(1).join(':').trim();
-              }
-
-              if (label.indexOf('marca') !== -1 && label.indexOf('modelo') === -1) {
-                if (val && !d.make) d.make = val;
-              } else if (label.indexOf('modelo') !== -1) {
-                if (val && !d.model) d.model = val;
-              } else if (label.indexOf('año') !== -1 || label.indexOf('fabricaci') !== -1) {
-                if (val && !d.year) d.year = val;
-              } else if (label.indexOf('tipo') !== -1 && label.indexOf('sello') === -1) {
-                if (val && !d.type) d.type = val;
-              } else if (label.indexOf('motor') !== -1) {
-                if (val && !d.engine_number) d.engine_number = val;
-              } else if (label.indexOf('chasis') !== -1) {
-                if (val && !d.chassis) d.chassis = val;
-              } else if (label.indexOf('vin') !== -1) {
-                if (val && !d.vin) d.vin = val;
-              } else if (label.indexOf('sello') !== -1) {
-                if (val && !d.seal_type) d.seal_type = val;
-              }
-            }
-          });
-
-          // Respaldo por expresiones regulares en texto plano
-          var bodyTxt = document.body.innerText || document.body.textContent || '';
-          function findTxt(regex) {
-            var match = bodyTxt.match(regex);
-            return match && match[1] ? match[1].trim() : '';
-          }
-
-          if (!d.make) d.make = findTxt(/Marca\s*[:\t\n]+\s*([A-Za-z0-9\s\-]+)/i);
-          if (!d.model) d.model = findTxt(/Modelo\s*[:\t\n]+\s*([A-Za-z0-9\s\-]+)/i);
-          if (!d.year) d.year = findTxt(/A[ñn]o(?:\s+de\s+Fabricaci[oó]n)?\s*[:\t\n]+\s*([0-9]{4})/i);
-          if (!d.type) d.type = findTxt(/Tipo(?:\s+de\s+Veh[ií]culo)?\s*[:\t\n]+\s*([A-Za-z0-9\s\-]+)/i);
-          if (!d.engine_number) d.engine_number = findTxt(/Motor\s*[:\t\n]+\s*([A-Za-z0-9\s\-]+)/i);
-          if (!d.chassis) d.chassis = findTxt(/Chasis\s*[:\t\n]+\s*([A-Za-z0-9\s\-]+)/i);
-          if (!d.vin) d.vin = findTxt(/VIN\s*[:\t\n]+\s*([A-Za-z0-9\s\-]+)/i);
-          if (!d.seal_type) d.seal_type = findTxt(/Sello(?:\s+Verde|\s+Rojo|\s+Amarillo)?/i);
-
-          var onResults = bodyTxt.includes('Volver a Consultar') || bodyTxt.includes('Información del Vehículo');
-          if (onResults && (!d.make || !d.model)) {
-            if (!window.__pfTabOpened || Date.now() - window.__pfTabOpened > 1200) {
-              window.__pfTabOpened = Date.now();
-              openVehicleTab();
-            }
-          }
-
-          if (d.make || d.model) {
-            if (window.PrtBridge && !window.__pfSent) {
-              window.__pfSent = true;
-              window.PrtBridge.postMessage(JSON.stringify(d));
-            }
-          }
-        }, 150);
+        }, 200);
       })();
     """;
     _controller.runJavaScript(js);
@@ -1560,15 +1344,6 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             Text('Patente: ${widget.targetPlate}', style: const TextStyle(color: Color(0xFF10B981), fontSize: 12, fontWeight: FontWeight.bold)),
           ],
         ),
-        actions: [
-          TextButton.icon(
-            onPressed: _isSaving ? null : _manualExtract,
-            icon: _isSaving
-                ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                : const Icon(Icons.download_rounded, color: Color(0xFF10B981), size: 18),
-            label: const Text('Extraer', style: TextStyle(color: Color(0xFF10B981), fontWeight: FontWeight.bold)),
-          ),
-        ],
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(28),
           child: Container(
@@ -1577,15 +1352,12 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             alignment: Alignment.centerLeft,
             child: Row(
               children: [
-                if (_isSaving)
-                  const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(color: Color(0xFF10B981), strokeWidth: 2))
-                else
-                  const Icon(Icons.touch_app_rounded, color: Color(0xFF38BDF8), size: 16),
+                const Icon(Icons.touch_app_rounded, color: Color(0xFF38BDF8), size: 16),
                 const SizedBox(width: 8),
                 Text(
                   _statusMessage,
-                  style: TextStyle(
-                    color: _isSaving ? const Color(0xFF10B981) : const Color(0xFF94A3B8),
+                  style: const TextStyle(
+                    color: Color(0xFF38BDF8),
                     fontSize: 12,
                     fontWeight: FontWeight.bold,
                   ),
@@ -1595,26 +1367,8 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
           ),
         ),
       ),
-      body: Stack(
-        children: [
-          SafeArea(child: WebViewWidget(controller: _controller)),
-          if (_isSaving)
-            Container(
-              color: const Color(0xFF0F172A),
-              width: double.infinity,
-              height: double.infinity,
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: const [
-                  CircularProgressIndicator(color: Color(0xFF10B981), strokeWidth: 3),
-                  SizedBox(height: 20),
-                  Text('Extrayendo ficha técnica oficial...', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
-                  SizedBox(height: 6),
-                  Text('Guardando en base de datos permanente', style: TextStyle(color: Color(0xFF94A3B8), fontSize: 13)),
-                ],
-              ),
-            ),
-        ],
+      body: SafeArea(
+        child: WebViewWidget(controller: _controller),
       ),
     );
   }
