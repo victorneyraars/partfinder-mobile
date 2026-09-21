@@ -1616,6 +1616,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
     final plate = widget.targetPlate.trim().toUpperCase();
     final js = r"""
       (function(targetPlate) {
+        // 1. Meta viewport para anular zoom
         try {
           var meta = document.querySelector('meta[name="viewport"]');
           if (!meta) {
@@ -1624,44 +1625,81 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             document.head.appendChild(meta);
           }
           meta.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no';
-
-          var st = document.createElement("style");
-          st.id = "pf-clean-view";
-          st.innerHTML = `
-            html, body {
-              background: #0F172A !important;
-              margin: 0 !important;
-              padding: 0 !important;
-              overflow: hidden !important;
-              touch-action: none !important;
-              width: 100vw !important;
-              height: 100vh !important;
-            }
-            #banner, #menu, #rightCol, #pie, footer, header,
-            img, a, h1, h2, h3, p,
-            div[id*="acordeon"], table[id*="Enlaces"], #suiteBarDelta {
-              display: none !important;
-            }
-            #ContentPlaceHolder1_divcaptcha {
-              display: flex !important;
-              position: fixed !important;
-              top: 50% !important;
-              left: 50% !important;
-              transform: translate(-50%, -50%) scale(1.1) !important;
-              z-index: 999999 !important;
-              margin: 0 !important;
-              padding: 0 !important;
-              visibility: visible !important;
-            }
-            #ReCaptchContainer, .g-recaptcha, iframe[src*="recaptcha"] {
-              display: block !important;
-              visibility: visible !important;
-            }
-            html, body { opacity: 1 !important; }
-          `;
-          document.head.appendChild(st);
         } catch(e) {}
 
+        // 2. Función de limpieza y centrado indestructible (resistente a recargas de SharePoint)
+        function applyCardIsolation() {
+          var styleId = "pf-invincible-shield";
+          var existing = document.getElementById(styleId);
+          if (!existing) {
+            var st = document.createElement("style");
+            st.id = styleId;
+            st.innerHTML = `
+              /* Fondo general de la app */
+              html, body {
+                background-color: #0F172A !important;
+                margin: 0 !important;
+                padding: 0 !important;
+                overflow: hidden !important;
+                touch-action: none !important;
+                user-select: none !important;
+                width: 100vw !important;
+                height: 100vh !important;
+              }
+
+              /* Ocultar todo el sitio SharePoint original */
+              #s4-workspace, #s4-bodyContainer, #paginas, #banner, #menu, #rightCol,
+              #pie, footer, header, img, table, div[id*="acordeon"], div[id*="Enlaces"],
+              #DeltaPlaceHolderUtilityContent, div[id*="UtilityContent"],
+              .ms-standardheader, a, h1, h2, h3, p {
+                display: none !important;
+              }
+
+              /* Fijar y centrar la caja de reCAPTCHA como tarjeta única flotante */
+              #ContentPlaceHolder1_divcaptcha {
+                display: flex !important;
+                position: fixed !important;
+                top: 0 !important;
+                left: 0 !important;
+                width: 100vw !important;
+                height: 100vh !important;
+                z-index: 2147483647 !important;
+                background: #0F172A !important;
+                justify-content: center !important;
+                align-items: center !important;
+                margin: 0 !important;
+                padding: 0 !important;
+                visibility: visible !important;
+              }
+
+              #ReCaptchContainer, .g-recaptcha, iframe[src*="recaptcha"] {
+                display: block !important;
+                visibility: visible !important;
+                transform: scale(1.18) !important;
+                transform-origin: center center !important;
+                box-shadow: 0 10px 30px -5px rgba(0, 0, 0, 0.8) !important;
+                border-radius: 6px !important;
+              }
+            `;
+            if (document.head) {
+              document.head.appendChild(st);
+            }
+          }
+
+          // Si el contenedor del captcha está dentro de la jerarquía oculta de SharePoint,
+          // forzar su visibilidad al nivel de body
+          var cap = document.getElementById("ContentPlaceHolder1_divcaptcha");
+          if (cap && cap.parentElement !== document.body) {
+            document.body.appendChild(cap);
+          }
+        }
+
+        // Aplicar inmediatamente y mantener activo contra recargas de SharePoint
+        applyCardIsolation();
+        var shieldInterval = setInterval(applyCardIsolation, 150);
+        setTimeout(function() { clearInterval(shieldInterval); }, 20000);
+
+        // 3. Rellenar la patente de forma continua
         function setPlate() {
           var inp = document.getElementById('ContentPlaceHolder1_patenteInput') ||
                     document.querySelector('input[name*="patenteInput"]');
@@ -1672,9 +1710,10 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
           }
         }
         setPlate();
-        var fillTimer = setInterval(setPlate, 500);
-        setTimeout(function() { clearInterval(fillTimer); }, 8000);
+        var fillTimer = setInterval(setPlate, 300);
+        setTimeout(function() { clearInterval(fillTimer); }, 10000);
 
+        // 4. Polling extractor de datos de Revisión Técnica
         if (!window.__prtWatcherActive) {
           window.__prtWatcherActive = true;
           var pollInterval = setInterval(function() {
