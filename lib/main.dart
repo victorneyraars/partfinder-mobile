@@ -242,12 +242,36 @@ _vehicleData = v;
       MaterialPageRoute(
         builder: (context) => PrtVerificationScreen(
           targetPlate: targetPlate,
-          onVehicleSaved: (scraped) {
+          onVehicleSaved: (scraped) async {
             setState(() {
               _vehicleData = scraped;
             });
-            _fetchBoostrTelemetry();
-            _showSnack('¡Vehículo verificado en PRT y guardado en caché permanente!');
+
+            // 1. Guardar en PostgreSQL via backend
+            final plateClean = _plateController.text.trim().toUpperCase();
+            try {
+              final cacheUri = Uri.parse("http://91.99.145.70:8000/api/patente/cache");
+              final res = await http.post(
+                cacheUri,
+                headers: {"Content-Type": "application/json"},
+                body: jsonEncode({
+                  "plate": plateClean,
+                  "data": scraped,
+                }),
+              );
+              if (res.statusCode == 200) {
+                _fetchBoostrTelemetry();
+                _showSnack("¡Vehículo $plateClean sincronizado en la base de datos!");
+              }
+            } catch (e) {
+              debugPrint("Error persistiendo en backend: $e");
+            }
+
+            // 2. Consultar tasacion oficial SII
+            final sMarca = scraped["marca"] ?? scraped["make"];
+            final sModelo = scraped["modelo"] ?? scraped["model"];
+            final sAnio = scraped["anio"] ?? scraped["year"];
+            _fetchSiiTasacion(sMarca?.toString(), sModelo?.toString(), sAnio);
           },
         ),
       ),
