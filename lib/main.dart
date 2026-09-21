@@ -1272,7 +1272,6 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
     final plate = widget.targetPlate.trim().toUpperCase();
     final js = r"""
       (function(targetPlate) {
-        // 1. Inyección directa idéntica a la versión que funcionó
         function setPlate() {
           var inp = document.getElementById('ContentPlaceHolder1_patenteInput') || 
                     document.querySelector('input[name*="patenteInput"]');
@@ -1286,7 +1285,6 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
         var fillTimer = setInterval(setPlate, 500);
         setTimeout(function() { clearInterval(fillTimer); }, 8000);
 
-        // 2. Extractor pasivo sin alterar el DOM ni forzar clics
         if (!window.__prtWatcherActive) {
           window.__prtWatcherActive = true;
           var pollInterval = setInterval(function() {
@@ -1321,24 +1319,26 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             var chasis = map['n° chasis'] || map['n chasis'] || map['chasis'] || '';
 
             if (marca !== '' || modelo !== '' || motor !== '' || chasis !== '') {
-              // Buscar si la tabla de RT ya está en el DOM
               var rtTable = Array.from(document.querySelectorAll('table')).find(function(t) {
                 return t.innerText.includes('Fecha') && t.innerText.includes('Nro.Certificado');
               });
 
-              var rtData = { fecha: '', planta: '', certificado: '', vencimiento: '', estado: '' };
+              var historial = [];
               if (rtTable) {
-                var row = rtTable.querySelector('tr:nth-child(2)');
-                if (row) {
+                var allRows = Array.from(rtTable.querySelectorAll('tr')).slice(1);
+                allRows.forEach(function(row) {
                   var tds = Array.from(row.querySelectorAll('td')).map(function(c) { return c.innerText.trim(); });
                   if (tds.length >= 6) {
-                    rtData.fecha = tds[0];
-                    rtData.planta = tds[2];
-                    rtData.certificado = tds[3].split('\n')[0].trim();
-                    rtData.vencimiento = tds[4];
-                    rtData.estado = tds[5];
+                    historial.push({
+                      fecha: tds[0],
+                      cod_planta: tds[1],
+                      planta: tds[2],
+                      certificado: tds[3].replace(/\n/g, ' ').trim(),
+                      vencimiento: tds[4],
+                      estado: tds[5]
+                    });
                   }
-                }
+                });
               }
 
               clearInterval(pollInterval);
@@ -1352,11 +1352,9 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
                 chasis: chasis,
                 vin: map['n° vin'] || map['n vin'] || map['vin'] || '',
                 sello: map['tipo sello'] || map['sello'] || '',
-                rt_fecha: rtData.fecha,
-                rt_vencimiento: rtData.vencimiento,
-                rt_planta: rtData.planta,
-                rt_certificado: rtData.certificado,
-                rt_estado: rtData.estado,
+                historial_rt: historial,
+                rt_vencimiento: historial.length > 0 ? historial[0].vencimiento : '',
+                rt_estado: historial.length > 0 ? historial[0].estado : '',
                 fuente: 'PRT Oficial'
               };
 
