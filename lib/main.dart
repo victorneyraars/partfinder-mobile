@@ -1375,11 +1375,6 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             try {
               final jsonStr = msg.substring(5);
               final map = jsonDecode(jsonStr) as Map<String, dynamic>;
-              // Disparar consulta SII para datos PRT
-              final pMarca = map["marca"] ?? map["make"];
-              final pModelo = map["modelo"] ?? map["model"];
-              final pAnio = map["anio"] ?? map["year"];
-              _fetchSiiTasacion(pMarca?.toString(), pModelo?.toString(), pAnio);
               if (widget.onVehicleSaved != null) {
                 widget.onVehicleSaved!(map);
               }
