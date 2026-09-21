@@ -92,6 +92,11 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
   void initState() {
     _fetchBoostrTelemetry();
     super.initState();
+    Future.delayed(const Duration(milliseconds: 2500), () {
+      if (mounted && !_pageLoaded) {
+        setState(() => _pageLoaded = true);
+      }
+    });
     final initPlate = _getFreshRandomChileanPlate();
     _plateController.text = initPlate;
     _evalPlateFormat();
@@ -1394,11 +1399,21 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
       )
       ..setNavigationDelegate(
         NavigationDelegate(
+          onProgress: (progress) {
+            if (progress > 60 && !_pageLoaded && mounted) {
+              setState(() => _pageLoaded = true);
+            }
+          },
           onPageFinished: (url) {
             if (mounted) {
               setState(() => _pageLoaded = true);
             }
             _injectStableBridge();
+          },
+          onWebResourceError: (error) {
+            if (mounted) {
+              setState(() => _pageLoaded = true);
+            }
           },
         ),
       )
