@@ -1057,113 +1057,113 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
           const Divider(color: Color(0xFF334155), height: 22),
           ..._vehicleData!.entries.where((e) {
             final k = e.key.toLowerCase();
-            return k != 'marca' && k != 'modelo' && k != 'repuestos_compatibles';
+            return k != 'marca' && k != 'modelo' && k != 'repuestos_compatibles' && k != 'historial_rt' && !k.startsWith('rt_');
           }).map((e) {
             final label = e.key.replaceAll('_', ' ').toUpperCase();
             final isHighlight = e.key.toLowerCase() == 'patente';
             return _specRow(label, e.value?.toString() ?? '---', isHighlight: isHighlight);
           }),
           const SizedBox(height: 16),
+            // SECCIÓN DE HISTORIAL COMPLETO DE REVISIÓN TÉCNICA
+            if (_vehicleData!['historial_rt'] != null &&
+                (_vehicleData!['historial_rt'] is List) &&
+                (_vehicleData!['historial_rt'] as List).isNotEmpty) ...[
+              Theme(
+                data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+                child: ExpansionTile(
+                  tilePadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.history, color: Color(0xFF38BDF8), size: 22),
+                  title: Text(
+                    'Historial de Revisiones (${(_vehicleData!['historial_rt'] as List).length} registros)',
+                    style: const TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFF38BDF8),
+                      letterSpacing: 0.5,
+                    ),
+                  ),
+                  children: (_vehicleData!['historial_rt'] as List).map<Widget>((item) {
+                    final rt = item as Map<String, dynamic>;
+                    final bool isApproved = (rt['estado'] ?? '').toString().toLowerCase().contains('aprob');
+                    return Container(
+                      margin: const EdgeInsets.only(bottom: 8),
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF0F172A),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                          color: isApproved ? const Color(0xFF10B981).withOpacity(0.35) : Colors.redAccent.withOpacity(0.35),
+                          width: 0.8,
+                        ),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text(
+                                'Control: ' + (rt['fecha']?.toString() ?? '-'),
+                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.white),
+                              ),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: isApproved ? const Color(0xFF10B981).withOpacity(0.2) : Colors.redAccent.withOpacity(0.2),
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: Text(
+                                  (rt['estado']?.toString() ?? '').toUpperCase(),
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.bold,
+                                    color: isApproved ? const Color(0xFF10B981) : Colors.redAccent,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 6),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text(
+                                'Vence: ' + (rt['vencimiento']?.toString() ?? '-'),
+                                style: const TextStyle(fontSize: 12, color: Color(0xFF38BDF8), fontWeight: FontWeight.w600),
+                              ),
+                              Text(
+                                rt['cod_planta']?.toString() ?? '',
+                                style: const TextStyle(fontSize: 11, color: Colors.white38),
+                              ),
+                            ],
+                          ),
+                          if (rt['planta'] != null && rt['planta'].toString().isNotEmpty) ...[
+                            const SizedBox(height: 4),
+                            Text(
+                              rt['planta'].toString(),
+                              style: const TextStyle(fontSize: 11, color: Colors.white70),
+                            ),
+                          ],
+                          if (rt['certificado'] != null && rt['certificado'].toString().isNotEmpty) ...[
+                            const SizedBox(height: 4),
+                            Text(
+                              'Cert: ' + rt['certificado'].toString(),
+                              style: const TextStyle(fontSize: 10, color: Colors.white38),
+                            ),
+                          ],
+                        ],
+                      ),
+                    );
+                  }).toList(),
+                ),
+              ),
+              const SizedBox(height: 12),
+            ],
           SizedBox(
             width: double.infinity,
             height: 48,
             child: ElevatedButton.icon(
               onPressed: _openPdfReport,
-
-                  // SECCIÓN DE HISTORIAL COMPLETO DE REVISIÓN TÉCNICA
-                  if (vehicle['historial_rt'] != null && (vehicle['historial_rt'] is List) && (vehicle['historial_rt'] as List).isNotEmpty) ...[
-                    const Divider(color: Color(0xFF334155), height: 28),
-                    Theme(
-                      data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-                      child: ExpansionTile(
-                        tilePadding: EdgeInsets.zero,
-                        leading: const Icon(Icons.history, color: Color(0xFF38BDF8), size: 22),
-                        title: Text(
-                          'Historial de Revisiones (${(vehicle['historial_rt'] as List).length} registros)',
-                          style: const TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.bold,
-                            color: Color(0xFF38BDF8),
-                            letterSpacing: 0.5,
-                          ),
-                        ),
-                        children: (vehicle['historial_rt'] as List).map<Widget>((item) {
-                          final rt = item as Map<String, dynamic>;
-                          final bool isApproved = (rt['estado'] ?? '').toString().toLowerCase().contains('aprob');
-                          return Container(
-                            margin: const EdgeInsets.only(bottom: 8),
-                            padding: const EdgeInsets.all(12),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFF0F172A),
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(
-                                color: isApproved ? const Color(0xFF10B981).withOpacity(0.35) : Colors.redAccent.withOpacity(0.35),
-                                width: 0.8,
-                              ),
-                            ),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Row(
-                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                  children: [
-                                    Text(
-                                      'Control: ' + (rt['fecha']?.toString() ?? '-'),
-                                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.white),
-                                    ),
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                                      decoration: BoxDecoration(
-                                        color: isApproved ? const Color(0xFF10B981).withOpacity(0.2) : Colors.redAccent.withOpacity(0.2),
-                                        borderRadius: BorderRadius.circular(4),
-                                      ),
-                                      child: Text(
-                                        (rt['estado']?.toString() ?? '').toUpperCase(),
-                                        style: TextStyle(
-                                          fontSize: 10,
-                                          fontWeight: FontWeight.bold,
-                                          color: isApproved ? const Color(0xFF10B981) : Colors.redAccent,
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                                const SizedBox(height: 6),
-                                Row(
-                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                  children: [
-                                    Text(
-                                      'Vence: ' + (rt['vencimiento']?.toString() ?? '-'),
-                                      style: const TextStyle(fontSize: 12, color: Color(0xFF38BDF8), fontWeight: FontWeight.w600),
-                                    ),
-                                    Text(
-                                      rt['cod_planta']?.toString() ?? '',
-                                      style: const TextStyle(fontSize: 11, color: Colors.white38),
-                                    ),
-                                  ],
-                                ),
-                                if (rt['planta'] != null && rt['planta'].toString().isNotEmpty) ...[
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    rt['planta'].toString(),
-                                    style: const TextStyle(fontSize: 11, color: Colors.white70),
-                                  ),
-                                ],
-                                if (rt['certificado'] != null && rt['certificado'].toString().isNotEmpty) ...[
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    'Cert: ' + rt['certificado'].toString(),
-                                    style: const TextStyle(fontSize: 10, color: Colors.white38),
-                                  ),
-                                ],
-                              ],
-                            ),
-                          );
-                        }).toList(),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                  ],
               style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFF00E5FF).withOpacity(0.15),
                 foregroundColor: const Color(0xFF00E5FF),
@@ -1512,6 +1512,4 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
       ),
     );
   }
-
-
 }
