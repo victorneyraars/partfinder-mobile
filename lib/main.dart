@@ -560,6 +560,7 @@ _vehicleData = v;
                 _buildScanButton(),
                 const SizedBox(height: 28),
                 if (_vehicleData != null) _buildVehicleSpecsCard(),
+            _buildSiiCard(),
               ],
             ),
           ),
@@ -1018,6 +1019,143 @@ _vehicleData = v;
     } catch (e) {
       _showSnack('Error al intentar abrir el PDF ($e)');
     }
+  }
+
+  
+  Widget _buildSiiCard() {
+    final sii = _vehicleData?["sii"] ?? _siiData?["summary"];
+    if (sii == null && !_isLoadingSii) {
+      return const SizedBox.shrink();
+    }
+
+    if (_isLoadingSii) {
+      return Container(
+        margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: const Color(0xFF0F172A),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: const Color(0xFF38BDF8).withOpacity(0.2)),
+        ),
+        child: const Row(
+          children: [
+            SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF38BDF8))),
+            SizedBox(width: 12),
+            Text("Sincronizando tasación fiscal SII 2026...", style: TextStyle(color: Colors.white70, fontSize: 12)),
+          ],
+        ),
+      );
+    }
+
+    final tMin = sii?["tasacion_min"];
+    final tMax = sii?["tasacion_max"];
+    final pMin = sii?["permiso_min"];
+    final pMax = sii?["permiso_max"];
+    final codSii = _vehicleData?["sii"]?["codigo_sii"] ?? "HOMOLOGADO";
+    final traccion = _vehicleData?["sii"]?["traccion"] ?? _vehicleData?["traccion"];
+    final transmision = _vehicleData?["sii"]?["transmision"] ?? _vehicleData?["transmision"];
+
+    String fmt(dynamic n) {
+      if (n == null) return "N/D";
+      final s = n.toString();
+      return "$" + s.replaceAllMapped(RegExp(r"(\d{1,3})(?=(\d{3})+(?!\d))"), (m) => "${m[1]}.");
+    }
+
+    final tasacionStr = (tMin != null && tMax != null && tMin != tMax) ? "${fmt(tMin)} - ${fmt(tMax)}" : fmt(tMin ?? tMax);
+    final permisoStr = (pMin != null && pMax != null && pMin != pMax) ? "${fmt(pMin)} - ${fmt(pMax)}" : fmt(pMin ?? pMax);
+
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [Color(0xFF0F172A), Color(0xFF1E293B)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFF38BDF8).withOpacity(0.35)),
+        boxShadow: [
+          BoxShadow(color: const Color(0xFF38BDF8).withOpacity(0.08), blurRadius: 12, offset: const Offset(0, 4)),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF0284C7).withOpacity(0.2),
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(color: const Color(0xFF38BDF8).withOpacity(0.4)),
+                ),
+                child: const Text("SII TRIBUTARIO 2026", style: TextStyle(color: Color(0xFF38BDF8), fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 0.5)),
+              ),
+              const Spacer(),
+              Text("CÓD: $codSii", style: const TextStyle(color: Colors.white38, fontSize: 11, fontFamily: "monospace")),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text("Avalúo Fiscal Oficial", style: TextStyle(color: Colors.white54, fontSize: 11)),
+                    const SizedBox(height: 3),
+                    Text(tasacionStr, style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold)),
+                  ],
+                ),
+              ),
+              Container(width: 1, height: 32, color: Colors.white12),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text("Permiso Circulación", style: TextStyle(color: Colors.white54, fontSize: 11)),
+                    const SizedBox(height: 3),
+                    Text(permisoStr, style: const TextStyle(color: Color(0xFF4ADE80), fontSize: 15, fontWeight: FontWeight.bold)),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          if (traccion != null || transmision != null) ...[
+            const SizedBox(height: 12),
+            const Divider(color: Colors.white10, height: 1),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                if (transmision != null)
+                  Expanded(
+                    child: Row(
+                      children: [
+                        const Icon(Icons.settings_suggest_rounded, size: 14, color: Color(0xFF38BDF8)),
+                        const SizedBox(width: 6),
+                        Flexible(child: Text("$transmision", style: const TextStyle(color: Colors.white70, fontSize: 11), overflow: TextOverflow.ellipsis)),
+                      ],
+                    ),
+                  ),
+                if (traccion != null)
+                  Expanded(
+                    child: Row(
+                      children: [
+                        const Icon(Icons.all_inclusive_rounded, size: 14, color: Color(0xFF38BDF8)),
+                        const SizedBox(width: 6),
+                        Flexible(child: Text("$traccion", style: const TextStyle(color: Colors.white70, fontSize: 11), overflow: TextOverflow.ellipsis)),
+                      ],
+                    ),
+                  ),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
   }
 
   Widget _buildVehicleSpecsCard() {
