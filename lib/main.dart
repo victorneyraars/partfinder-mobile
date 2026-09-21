@@ -1616,7 +1616,6 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
     final plate = widget.targetPlate.trim().toUpperCase();
     final js = r"""
       (function(targetPlate) {
-        // Estilos para enfocar unicamente el formulario y ocultar publicidad/banners
         try {
           var meta = document.querySelector('meta[name="viewport"]');
           if (!meta) {
@@ -1626,85 +1625,45 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
           }
           meta.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no';
 
-          var cleanStyle = document.createElement("style");
-          cleanStyle.id = "pf-clean-card";
-          cleanStyle.innerHTML = `
-            /* 1. Fondo oscuro global */
-            html, body, #s4-workspace, #s4-bodyContainer, #paginas, form#form1 {
-              background-color: #0F172A !important;
-              color: #F8FAFC !important;
-              overflow-x: hidden !important;
-              touch-action: pan-y !important;
-              user-select: none !important;
+          var st = document.createElement("style");
+          st.id = "pf-clean-view";
+          st.innerHTML = `
+            html, body {
+              background: #0F172A !important;
               margin: 0 !important;
               padding: 0 !important;
+              overflow: hidden !important;
+              touch-action: none !important;
+              width: 100vw !important;
+              height: 100vh !important;
             }
-
-            /* 2. Ocultar especificamente banners, afiches, menus y footers sin tocar tables */
-            #banner, #menu, #rightCol, #suiteBarDelta, #s4-ribbonrow,
-            header, footer, #pie, .footer,
-            #DeltaPlaceHolderUtilityContent, div[id*="UtilityContent"],
-            img[src*="afiche"], img[src*="banner"], img[src*="Banner"], img[src*="Planta"],
-            div[id*="acordeon"], div:has(> a[href*="mtt.gob.cl"]), table[id*="Enlaces"] {
+            #banner, #menu, #rightCol, #pie, footer, header,
+            img, a, h1, h2, h3, p,
+            div[id*="acordeon"], table[id*="Enlaces"], #suiteBarDelta {
               display: none !important;
             }
-
-            /* 3. Centrar el contenedor principal */
-            #paginas {
+            #ContentPlaceHolder1_divcaptcha {
               display: flex !important;
-              flex-direction: column !important;
-              align-items: center !important;
-              justify-content: center !important;
-              min-height: 80vh !important;
-              width: 100% !important;
-            }
-
-            #leftCol {
-              float: none !important;
-              width: 100% !important;
-              max-width: 380px !important;
-              margin: 0 auto !important;
-              display: flex !important;
-              flex-direction: column !important;
-              align-items: center !important;
-              justify-content: center !important;
-              background: transparent !important;
-            }
-
-            /* 4. Asegurar visibilidad del reCAPTCHA */
-            #ContentPlaceHolder1_divcaptcha, #ReCaptchContainer {
-              display: flex !important;
-              justify-content: center !important;
-              align-items: center !important;
-              width: 100% !important;
-              margin: 30px auto !important;
+              position: fixed !important;
+              top: 50% !important;
+              left: 50% !important;
+              transform: translate(-50%, -50%) scale(1.1) !important;
+              z-index: 999999 !important;
+              margin: 0 !important;
+              padding: 0 !important;
               visibility: visible !important;
             }
-
-            .g-recaptcha, iframe[src*="recaptcha"] {
+            #ReCaptchContainer, .g-recaptcha, iframe[src*="recaptcha"] {
               display: block !important;
               visibility: visible !important;
-              margin: 0 auto !important;
-              transform: scale(1.15) !important;
-              transform-origin: center center !important;
             }
-
-            /* 5. Ocultar enlaces de navegacion residuales */
-            #leftCol a[href*="javascript"], #leftCol a[id*="lnkVolver"] {
-              display: none !important;
-            }
-
-            html, body {
-              opacity: 1 !important;
-            }
+            html, body { opacity: 1 !important; }
           `;
-          document.head.appendChild(cleanStyle);
-
-          var initStyle = document.getElementById("pf-init");
-          if (initStyle) initStyle.remove();
+          document.head.appendChild(st);
         } catch(e) {}
+
         function setPlate() {
-          var inp = document.getElementById('ContentPlaceHolder1_patenteInput') || 
+          var inp = document.getElementById('ContentPlaceHolder1_patenteInput') ||
                     document.querySelector('input[name*="patenteInput"]');
           if (inp && inp.value !== targetPlate) {
             inp.value = targetPlate;
@@ -1764,7 +1723,8 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
                       fecha: tds[0],
                       cod_planta: tds[1],
                       planta: tds[2],
-                      certificado: tds[3].replace(/\n/g, ' ').trim(),
+                      certificado: tds[3].replace(/
+/g, ' ').trim(),
                       vencimiento: tds[4],
                       estado: tds[5]
                     });
