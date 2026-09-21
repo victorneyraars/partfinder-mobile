@@ -1260,61 +1260,82 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
   void _injectAutoFillAndScraper() {
     final js = """
       (function() {
-        // 1. Rellenar patente en el input oficial si está vacío
-        var inputs = document.querySelectorAll('input[type="text"]');
-        for (var i = 0; i < inputs.length; i++) {
-          var inp = inputs[i];
-          if ((inp.id && inp.id.toLowerCase().includes('patente')) || 
-              (inp.name && inp.name.toLowerCase().includes('patente')) || 
-              (inp.parentElement && inp.parentElement.id === 'patenteContainer')) {
-            if (!inp.value || inp.value.trim() === '') {
-              inp.value = '${widget.targetPlate}';
-              inp.dispatchEvent(new Event('input', { bubbles: true }));
-              inp.dispatchEvent(new Event('change', { bubbles: true }));
+        // 1. Inyectar patente en todos los campos de texto candidatos
+        function fillPlate() {
+          var inputs = document.querySelectorAll('input[type="text"], input:not([type])');
+          for (var i = 0; i < inputs.length; i++) {
+            var el = inputs[i];
+            var id = (el.id || '').toLowerCase();
+            var name = (el.name || '').toLowerCase();
+            if (id.includes('patente') || name.includes('patente') || el.maxLength === 6 || el.maxLength === 8) {
+              if (el.value !== '${widget.targetPlate}') {
+                el.value = '${widget.targetPlate}';
+                el.dispatchEvent(new Event('input', { bubbles: true }));
+                el.dispatchEvent(new Event('change', { bubbles: true }));
+              }
             }
           }
         }
+        fillPlate();
+        var fillInterval = setInterval(fillPlate, 800);
+        setTimeout(function() { clearInterval(fillInterval); }, 5000);
 
-        // 2. Escuchar pasivamente cuando aparezca la tabla oficial #vehiculox
-        if (!window.__pfScraperStarted) {
-          window.__pfScraperStarted = true;
-          var checkTimer = setInterval(function() {
-            var box = document.getElementById('vehiculox') || document.getElementById('ContentPlaceHolder1_accordionContent');
-            if (box && box.innerText && box.innerText.toLowerCase().includes('marca')) {
-              var txt = box.innerText;
-              var lines = txt.split('\n').map(function(l) { return l.trim(); }).filter(Boolean);
+        // 2. Extraer datos directamente desde span#ContentPlaceHolder1_lblDatosVehiculo
+        if (!window.__pfScraperWatcher) {
+          window.__pfScraperWatcher = true;
+          var pollTimer = setInterval(function() {
+            var container = document.getElementById('ContentPlaceHolder1_lblDatosVehiculo') || 
+                            document.querySelector('#vehiculox .dataPS') ||
+                            document.getElementById('vehiculox');
 
-              function getVal(lbl) {
-                for (var i = 0; i < lines.length; i++) {
-                  var clean = lines[i].toLowerCase().replace(':', '').replace('.', '').trim();
-                  if (clean === lbl.toLowerCase().replace(':', '').replace('.', '').trim()) {
-                    if (i + 1 < lines.length) return lines[i + 1].trim();
-                  }
-                }
-                return '';
+            if (!container) return;
+
+            var labels = container.querySelectorAll('label');
+            var values = container.querySelectorAll('span');
+
+            var map = {};
+            if (labels.length > 0 && values.length > 0) {
+              for (var i = 0; i < labels.length; i++) {
+                var k = labels[i].innerText.replace(':', '').replace('.', '').trim().toLowerCase();
+                var v = values[i] ? values[i].innerText.trim() : '';
+                if (k) map[k] = v;
               }
-
-              var data = {
-                patente: '${widget.targetPlate}',
-                tipo: getVal('Tipo'),
-                marca: getVal('Marca'),
-                modelo: getVal('Modelo'),
-                anio: getVal('Año Fab') || getVal('Año'),
-                nro_motor: getVal('N° Motor') || getVal('Motor'),
-                chasis: getVal('N° Chasis') || getVal('Chasis'),
-                vin: getVal('N° Vin') || getVal('VIN'),
-                sello: getVal('Tipo Sello') || getVal('Sello'),
-                fuente: 'PRT Oficial'
-              };
-
-              if (data.marca || data.modelo || data.nro_motor || data.chasis) {
-                clearInterval(checkTimer);
-                if (window.PrtBridge) {
-                  window.PrtBridge.postMessage('DATA:' + JSON.stringify(data));
+            } else {
+              // Fallback basado en texto plano
+              var lines = container.innerText.split('\n').map(function(s) { return s.trim(); }).filter(Boolean);
+              for (var j = 0; j < lines.length; j++) {
+                var clean = lines[j].replace(':', '').replace('.', '').trim().toLowerCase();
+                if (j + 1 < lines.length) {
+                  map[clean] = lines[j + 1];
                 }
               }
             }
-          }, 400);
+
+            var marca = map['marca'] || '';
+            var modelo = map['modelo'] || '';
+            var motor = map['n° motor'] || map['n motor'] || map['motor'] || '';
+            var chasis = map['n° chasis'] || map['n chasis'] || map['chasis'] || '';
+
+            if (marca || modelo || motor || chasis) {
+              clearInterval(pollTimer);
+              var data = {
+                patente: '${widget.targetPlate}',
+                tipo: map['tipo'] || '',
+                marca: marca,
+                modelo: modelo,
+                anio: map['año fab'] || map['año de fabricacion'] || map['año'] || '',
+                nro_motor: motor,
+                chasis: chasis,
+                vin: map['n° vin'] || map['n vin'] || map['vin'] || '',
+                sello: map['tipo sello'] || map['sello'] || '',
+                fuente: 'PRT Oficial'
+              };
+
+              if (window.PrtBridge) {
+                window.PrtBridge.postMessage('DATA:' + JSON.stringify(data));
+              }
+            }
+          }, 350);
         }
       })();
     """;
