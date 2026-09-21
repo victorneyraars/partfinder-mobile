@@ -66,6 +66,9 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
   late Animation<double> _scannerAnimation;
   
   bool _isLoading = false;
+  Map<String, dynamic>? _siiData;
+  bool _isLoadingSii = false;
+
   Map<String, dynamic>? _vehicleData;
   String _activeFormat = "AUTO NUEVO (4L+2N)";
 
@@ -129,6 +132,27 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
     });
   }
 
+  
+  Future<void> _fetchSiiTasacion(String? marca, String? modelo, dynamic anio) async {
+    if (marca == null || modelo == null || anio == null) return;
+    setState(() => _isLoadingSii = true);
+    try {
+      final uri = Uri.parse('http://91.99.145.70:8000/api/tasacion?marca=${Uri.encodeComponent(marca)}&modelo=${Uri.encodeComponent(modelo)}&anio=$anio');
+      final res = await http.get(uri).timeout(const Duration(seconds: 8));
+      if (res.statusCode == 200) {
+        final decoded = jsonDecode(res.body);
+        if (decoded['status'] == 'SUCCESS') {
+          setState(() {
+            _siiData = decoded;
+            _isLoadingSii = false;
+          });
+          return;
+        }
+      }
+    } catch (_) {}
+    setState(() => _isLoadingSii = false);
+  }
+
   Future<void> _searchPlate() async {
     final rawPlate = _plateController.text.replaceAll(RegExp(r'[^A-Za-z0-9]'), '').toUpperCase();
     if (rawPlate.length < 5) {
@@ -170,7 +194,13 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
           final plate = raw['plate'] ?? raw['patente'] ?? rawPlate;
           v['patente'] = plate;
           setState(() {
-            _vehicleData = v;
+            
+      // Consultar tasacion fiscal SII
+      final sMarca = v['marca']?.toString();
+      final sModelo = v['modelo']?.toString();
+      final sAnio = v['anio'] ?? v['year'];
+      _fetchSiiTasacion(sMarca, sModelo, sAnio);
+_vehicleData = v;
           });
           _fetchBoostrTelemetry();
         } else {
