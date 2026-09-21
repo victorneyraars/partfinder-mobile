@@ -1248,7 +1248,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(
                   backgroundColor: Colors.redAccent.shade700,
-                  content: Text('La patente ${widget.targetPlate} no figura registrada en el portal PRT.'),
+                  content: Text('La patente ' + widget.targetPlate + ' no figura registrada en el portal PRT.'),
                 ),
               );
             }
@@ -1272,7 +1272,6 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
     final plate = widget.targetPlate.trim().toUpperCase();
     final js = r"""
       (function(targetPlate) {
-        // Adaptar Viewport para moviles
         var meta = document.querySelector('meta[name="viewport"]');
         if (!meta) {
           meta = document.createElement('meta');
@@ -1281,7 +1280,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
         }
         meta.content = 'width=device-width, initial-scale=0.9, maximum-scale=2.0';
 
-        // 1. Relleno con selector directo ID de SharePoint
+        // 1. Relleno automatico
         function setPlate() {
           var inp = document.getElementById('ContentPlaceHolder1_patenteInput') || 
                     document.querySelector('input[name*="patenteInput"]');
@@ -1295,11 +1294,12 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
         var fillTimer = setInterval(setPlate, 500);
         setTimeout(function() { clearInterval(fillTimer); }, 6000);
 
-        // 2. Extractor y observador de estado
+        // 2. Extractor combinado: Datos Vehiculo + Historial RT
         if (!window.__prtWatcherActive) {
           window.__prtWatcherActive = true;
+          var clickedAccordion = false;
+
           var pollInterval = setInterval(function() {
-            // Detección de patente no encontrada
             var bodyText = document.body.innerText || '';
             if (bodyText.includes('La placa ingresada no existe') || bodyText.includes('no existe registro')) {
               clearInterval(pollInterval);
@@ -1314,7 +1314,6 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
 
             var labels = Array.from(container.querySelectorAll('label'));
             var spans = Array.from(container.querySelectorAll('span'));
-
             if (labels.length === 0 && spans.length === 0) return;
 
             var map = {};
@@ -1332,22 +1331,70 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             var chasis = map['n° chasis'] || map['n chasis'] || map['chasis'] || '';
 
             if (marca !== '' || modelo !== '' || motor !== '' || chasis !== '') {
-              clearInterval(pollInterval);
-              var payload = {
-                patente: targetPlate,
-                tipo: map['tipo'] || '',
-                marca: marca,
-                modelo: modelo,
-                anio: map['año fab'] || map['año de fabricacion'] || map['año'] || '',
-                nro_motor: motor,
-                chasis: chasis,
-                vin: map['n° vin'] || map['n vin'] || map['vin'] || '',
-                sello: map['tipo sello'] || map['sello'] || '',
-                fuente: 'PRT Oficial'
+              // Si ya tenemos los datos del vehiculo, abrir acordeon de RT si no se ha hecho
+              if (!clickedAccordion) {
+                clickedAccordion = true;
+                var h2List = Array.from(document.querySelectorAll('h2')).filter(function(h) {
+                  return h.innerText.toLowerCase().includes('revisión técnica');
+                });
+                if (h2List.length > 0) {
+                  h2List[0].click();
+                }
+              }
+
+              // Buscar la tabla con el historial de revisiones
+              var rtTable = Array.from(document.querySelectorAll('table')).find(function(t) {
+                return t.innerText.includes('Fecha') && t.innerText.includes('Nro.Certificado');
+              });
+
+              var rtData = {
+                fecha: '',
+                cod_planta: '',
+                planta: '',
+                certificado: '',
+                vencimiento: '',
+                estado: ''
               };
 
-              if (window.PrtBridge) {
-                window.PrtBridge.postMessage('DATA:' + JSON.stringify(payload));
+              if (rtTable) {
+                var firstRowCells = Array.from(rtTable.querySelectorAll('tr:nth-child(2) td'))
+                  .map(function(c) { return c.innerText.trim(); });
+
+                if (firstRowCells.length >= 6) {
+                  rtData.fecha = firstRowCells[0];
+                  rtData.cod_planta = firstRowCells[1];
+                  rtData.planta = firstRowCells[2];
+                  rtData.certificado = firstRowCells[3].split('
+')[0].trim();
+                  rtData.vencimiento = firstRowCells[4];
+                  rtData.estado = firstRowCells[5];
+                }
+              }
+
+              // Si ya capturo los datos de RT o pasaron 2.5s desde el click, enviar payload
+              if (rtData.vencimiento || (clickedAccordion && !rtTable)) {
+                clearInterval(pollInterval);
+                var payload = {
+                  patente: targetPlate,
+                  tipo: map['tipo'] || '',
+                  marca: marca,
+                  modelo: modelo,
+                  anio: map['año fab'] || map['año de fabricacion'] || map['año'] || '',
+                  nro_motor: motor,
+                  chasis: chasis,
+                  vin: map['n° vin'] || map['n vin'] || map['vin'] || '',
+                  sello: map['tipo sello'] || map['sello'] || '',
+                  rt_fecha: rtData.fecha,
+                  rt_vencimiento: rtData.vencimiento,
+                  rt_planta: rtData.planta,
+                  rt_certificado: rtData.certificado,
+                  rt_estado: rtData.estado,
+                  fuente: 'PRT Oficial'
+                };
+
+                if (window.PrtBridge) {
+                  window.PrtBridge.postMessage('DATA:' + JSON.stringify(payload));
+                }
               }
             }
           }, 300);
