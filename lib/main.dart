@@ -92,11 +92,6 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
   void initState() {
     _fetchBoostrTelemetry();
     super.initState();
-    Future.delayed(const Duration(milliseconds: 2500), () {
-      if (mounted && !_pageLoaded) {
-        setState(() => _pageLoaded = true);
-      }
-    });
     final initPlate = _getFreshRandomChileanPlate();
     _plateController.text = initPlate;
     _evalPlateFormat();
@@ -1364,6 +1359,11 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
   @override
   void initState() {
     super.initState();
+    Future.delayed(const Duration(milliseconds: 2500), () {
+      if (mounted && !_pageLoaded) {
+        setState(() => _pageLoaded = true);
+      }
+    });
     _controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..setUserAgent("Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36")
