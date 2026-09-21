@@ -1084,7 +1084,19 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
                   ),
                   children: (_vehicleData!['historial_rt'] as List).map<Widget>((item) {
                     final rt = item as Map<String, dynamic>;
-                    final bool isApproved = (rt['estado'] ?? '').toString().toLowerCase().contains('aprob');
+                    final rawEstado = (rt['estado'] ?? '').toString().toUpperCase();
+                          final bool isApproved = rawEstado.contains('APROB');
+                          final bool isRechazado = rawEstado.contains('RECHAZ');
+                          final cert = (rt['certificado'] ?? '').toString().toLowerCase();
+                          
+                          String displayEstado = rawEstado;
+                          if (isRechazado) {
+                            if (cert.contains('(g)') || cert.contains('gases')) {
+                              displayEstado = 'RECHAZADO: GASES';
+                            } else {
+                              displayEstado = 'RECHAZADO: MECÁNICA';
+                            }
+                          }
                     return Container(
                       margin: const EdgeInsets.only(bottom: 8),
                       padding: const EdgeInsets.all(12),
@@ -1113,7 +1125,7 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
                                   borderRadius: BorderRadius.circular(4),
                                 ),
                                 child: Text(
-                                  (rt['estado']?.toString() ?? '').toUpperCase(),
+                                  displayEstado,
                                   style: TextStyle(
                                     fontSize: 10,
                                     fontWeight: FontWeight.bold,
