@@ -616,129 +616,6 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: const [
                     Icon(Icons.precision_manufacturing, size: 16, color: Color(0xFF10B981)),
-                  // TARJETA DE REVISIÓN TÉCNICA E HISTORIAL
-                  if (vehicle['rt_vencimiento'] != null && vehicle['rt_vencimiento'].toString().isNotEmpty) ...[
-                    const Divider(color: Color(0xFF334155), height: 32),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        const Row(
-                          children: [
-                            Icon(Icons.verified_outlined, color: Color(0xFF38BDF8), size: 18),
-                            SizedBox(width: 8),
-                            Text(
-                              'REVISIÓN TÉCNICA VIGENTE',
-                              style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF38BDF8), letterSpacing: 0.5),
-                            ),
-                          ],
-                        ),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: ((vehicle['rt_estado'] ?? '').toString().toLowerCase().contains('aprob'))
-                                ? const Color(0xFF10B981).withOpacity(0.15)
-                                : Colors.red.withOpacity(0.15),
-                            borderRadius: BorderRadius.circular(4),
-                            border: Border.all(
-                              color: ((vehicle['rt_estado'] ?? '').toString().toLowerCase().contains('aprob'))
-                                  ? const Color(0xFF10B981)
-                                  : Colors.red,
-                              width: 0.8,
-                            ),
-                          ),
-                          child: Text(
-                            (vehicle['rt_estado'] ?? 'VIGENTE').toString().toUpperCase(),
-                            style: TextStyle(
-                              fontSize: 10,
-                              fontWeight: FontWeight.bold,
-                              color: ((vehicle['rt_estado'] ?? '').toString().toLowerCase().contains('aprob'))
-                                  ? const Color(0xFF10B981)
-                                  : Colors.red,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    _buildDataRow('VENCIMIENTO', vehicle['rt_vencimiento']?.toString() ?? '-'),
-                    if (vehicle['rt_fecha'] != null && vehicle['rt_fecha'].toString().isNotEmpty)
-                      _buildDataRow('FECHA CONTROL', vehicle['rt_fecha']?.toString() ?? '-'),
-                    if (vehicle['rt_planta'] != null && vehicle['rt_planta'].toString().isNotEmpty)
-                      _buildDataRow('PLANTA PRT', vehicle['rt_planta']?.toString() ?? '-'),
-                    if (vehicle['rt_certificado'] != null && vehicle['rt_certificado'].toString().isNotEmpty)
-                      _buildDataRow('N° CERTIFICADO', vehicle['rt_certificado']?.toString() ?? '-'),
-                  ],
-
-                  // TIMELINE HISTORIAL COMPLETO
-                  if (vehicle['historial_rt'] != null && (vehicle['historial_rt'] is List) && (vehicle['historial_rt'] as List).isNotEmpty) ...[
-                    const SizedBox(height: 16),
-                    Theme(
-                      data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-                      child: ExpansionTile(
-                        tilePadding: EdgeInsets.zero,
-                        title: Text(
-                          'Ver historial completo (${(vehicle['historial_rt'] as List).length} registros)',
-                          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF94A3B8)),
-                        ),
-                        leading: const Icon(Icons.history, color: Color(0xFF94A3B8), size: 20),
-                        children: (vehicle['historial_rt'] as List).map<Widget>((item) {
-                          final rt = item as Map<String, dynamic>;
-                          final approved = (rt['estado'] ?? '').toString().toLowerCase().contains('aprob');
-                          return Container(
-                            margin: const EdgeInsets.only(bottom: 8),
-                            padding: const EdgeInsets.all(10),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFF0B132B),
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(
-                                color: approved ? const Color(0xFF10B981).withOpacity(0.25) : Colors.red.withOpacity(0.25),
-                                width: 0.8,
-                              ),
-                            ),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Row(
-                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                  children: [
-                                    Text(
-                                      rt['fecha'] ?? '-',
-                                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.white),
-                                    ),
-                                    Text(
-                                      (rt['estado'] ?? '').toString().toUpperCase(),
-                                      style: TextStyle(
-                                        fontWeight: FontWeight.bold,
-                                        fontSize: 10,
-                                        color: approved ? const Color(0xFF10B981) : Colors.redAccent,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                                const SizedBox(height: 4),
-                                Row(
-                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                  children: [
-                                    Text('Vence: ' + (rt['vencimiento'] ?? '-'), style: const TextStyle(fontSize: 11, color: Color(0xFF38BDF8))),
-                                    Text(rt['cod_planta'] ?? '', style: const TextStyle(fontSize: 10, color: Colors.white38)),
-                                  ],
-                                ),
-                                if (rt['planta'] != null && rt['planta'].toString().isNotEmpty) ...[
-                                  const SizedBox(height: 2),
-                                  Text(rt['planta'].toString(), style: const TextStyle(fontSize: 10, color: Colors.white70)),
-                                ],
-                                if (rt['certificado'] != null && rt['certificado'].toString().isNotEmpty) ...[
-                                  const SizedBox(height: 2),
-                                  Text('Cert: ' + rt['certificado'].toString(), style: const TextStyle(fontSize: 9, color: Colors.white38)),
-                                ],
-                              ],
-                            ),
-                          );
-                        }).toList(),
-                      ),
-                    ),
-                  ],
-
                     SizedBox(width: 6),
                     Text(
                       'Motor PRT (Local)',
@@ -1192,75 +1069,7 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
             height: 48,
             child: ElevatedButton.icon(
               onPressed: _openPdfReport,
-
-                    Theme(
-                      data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-                      child: ExpansionTile(
-                        tilePadding: EdgeInsets.zero,
-                        title: Text(
-                          'Ver historial completo (${(vehicle['historial_rt'] as List).length} registros)',
-                          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF94A3B8)),
-                        ),
-                        leading: const Icon(Icons.history, color: Color(0xFF94A3B8), size: 20),
-                        children: (vehicle['historial_rt'] as List).map<Widget>((item) {
-                          final rt = item as Map<String, dynamic>;
-                          final approved = (rt['estado'] ?? '').toString().toLowerCase().contains('aprob');
-                          return Container(
-                            margin: const EdgeInsets.only(bottom: 8),
-                            padding: const EdgeInsets.all(10),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFF0B132B),
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(
-                                color: approved ? const Color(0xFF10B981).withOpacity(0.25) : Colors.red.withOpacity(0.25),
-                                width: 0.8,
-                              ),
-                            ),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Row(
-                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                  children: [
-                                    Text(
-                                      rt['fecha'] ?? '-',
-                                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.white),
-                                    ),
-                                    Text(
-                                      (rt['estado'] ?? '').toString().toUpperCase(),
-                                      style: TextStyle(
-                                        fontWeight: FontWeight.bold,
-                                        fontSize: 10,
-                                        color: approved ? const Color(0xFF10B981) : Colors.redAccent,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                                const SizedBox(height: 4),
-                                Row(
-                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                  children: [
-                                    Text('Vence: ' + (rt['vencimiento'] ?? '-'), style: const TextStyle(fontSize: 11, color: Color(0xFF38BDF8))),
-                                    Text(rt['cod_planta'] ?? '', style: const TextStyle(fontSize: 10, color: Colors.white38)),
-                                  ],
-                                ),
-                                if (rt['planta'] != null && rt['planta'].toString().isNotEmpty) ...[
-                                  const SizedBox(height: 2),
-                                  Text(rt['planta'].toString(), style: const TextStyle(fontSize: 10, color: Colors.white70)),
-                                ],
-                                if (rt['certificado'] != null && rt['certificado'].toString().isNotEmpty) ...[
-                                  const SizedBox(height: 2),
-                                  Text('Cert: ' + rt['certificado'].toString(), style: const TextStyle(fontSize: 9, color: Colors.white38)),
-                                ],
-                              ],
-                            ),
-                          );
-                        }).toList(),
-                      ),
-                    ),
-                  ],
-                  const SizedBox(height: 16),
-                                style: ElevatedButton.styleFrom(
+              style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFF00E5FF).withOpacity(0.15),
                 foregroundColor: const Color(0xFF00E5FF),
                 side: const BorderSide(color: Color(0xFF00E5FF), width: 1.5),
@@ -1608,4 +1417,107 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
       ),
     );
   }
+
+  Widget _buildHistorialRtSection(Map<String, dynamic> vehicle) {
+    final list = vehicle['historial_rt'];
+    if (list == null || list is! List || list.isEmpty) {
+      return const SizedBox.shrink();
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Divider(color: Color(0xFF334155), height: 32),
+        Theme(
+          data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+          child: ExpansionTile(
+            tilePadding: EdgeInsets.zero,
+            leading: const Icon(Icons.history, color: Color(0xFF38BDF8), size: 22),
+            title: Text(
+              'Historial de Revisiones (${list.length} registros)',
+              style: const TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.bold,
+                color: Color(0xFF38BDF8),
+                letterSpacing: 0.5,
+              ),
+            ),
+            children: list.map<Widget>((item) {
+              final rt = item as Map<String, dynamic>;
+              final bool isApproved = (rt['estado'] ?? '').toString().toLowerCase().contains('aprob');
+              return Container(
+                margin: const EdgeInsets.only(bottom: 8),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF0F172A),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: isApproved ? const Color(0xFF10B981).withOpacity(0.3) : Colors.redAccent.withOpacity(0.3),
+                    width: 0.8,
+                  ),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          'Fecha: ' + (rt['fecha']?.toString() ?? '-'),
+                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.white),
+                        ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: isApproved ? const Color(0xFF10B981).withOpacity(0.15) : Colors.redAccent.withOpacity(0.15),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Text(
+                            (rt['estado']?.toString() ?? '').toUpperCase(),
+                            style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.bold,
+                              color: isApproved ? const Color(0xFF10B981) : Colors.redAccent,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          'Vence: ' + (rt['vencimiento']?.toString() ?? '-'),
+                          style: const TextStyle(fontSize: 12, color: Color(0xFF38BDF8), fontWeight: FontWeight.w600),
+                        ),
+                        Text(
+                          rt['cod_planta']?.toString() ?? '',
+                          style: const TextStyle(fontSize: 11, color: Colors.white38),
+                        ),
+                      ],
+                    ),
+                    if (rt['planta'] != null && rt['planta'].toString().isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        rt['planta'].toString(),
+                        style: const TextStyle(fontSize: 11, color: Colors.white70),
+                      ),
+                    ],
+                    if (rt['certificado'] != null && rt['certificado'].toString().isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        'Cert: ' + rt['certificado'].toString(),
+                        style: const TextStyle(fontSize: 10, color: Colors.white38),
+                      ),
+                    ],
+                  ],
+                ),
+              );
+            }).toList(),
+          ),
+        ),
+      ],
+    );
+  }
+
 }
