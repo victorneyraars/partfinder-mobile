@@ -1586,6 +1586,30 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
     final plate = widget.targetPlate.trim().toUpperCase();
     final js = r"""
       (function(targetPlate) {
+        // Estilos para enfocar unicamente el formulario y ocultar publicidad/banners
+        try {
+          var cleanStyle = document.createElement("style");
+          cleanStyle.innerHTML = `
+            header, footer, #pie, .footer,
+            img[src*="banner"], img[src*="Banner"], img[src*="Digital"],
+            table[id*="Enlaces"], div[id*="Enlaces"],
+            div:has(> img[src*="Digital"]),
+            div:has(> a[href*="mtt.gob.cl"]) {
+              display: none !important;
+            }
+            body {
+              background: #ffffff !important;
+              padding: 6px !important;
+              margin: 0 !important;
+            }
+            #ContentPlaceHolder1_patenteInput {
+              font-size: 18px !important;
+              font-weight: bold !important;
+              text-align: center !important;
+            }
+          `;
+          document.head.appendChild(cleanStyle);
+        } catch(e) {}
         function setPlate() {
           var inp = document.getElementById('ContentPlaceHolder1_patenteInput') || 
                     document.querySelector('input[name*="patenteInput"]');
