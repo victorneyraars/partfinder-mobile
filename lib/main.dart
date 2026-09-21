@@ -1626,18 +1626,31 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
           }
           meta.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no';
 
+          var meta = document.querySelector('meta[name="viewport"]');
+          if (!meta) {
+            meta = document.createElement('meta');
+            meta.name = 'viewport';
+            document.head.appendChild(meta);
+          }
+          meta.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no';
+
           var cleanStyle = document.createElement("style");
           cleanStyle.id = "pf-clean-card";
           cleanStyle.innerHTML = `
+            /* Ocultar todo lo que sobra */
             header, footer, #pie, .footer, #banner, #menu, #rightCol, #suiteBarDelta, #s4-ribbonrow,
+            #DeltaPlaceHolderUtilityContent, div[id*="UtilityContent"],
             img, table, div[id*="acordeon"], div:has(> img[src*="check"]),
-            #ContentPlaceHolder1_patenteInput, #searchPanel, p, b, h1, h2, h3,
-            .ms-standardheader, div[id*="Enlaces"], a[href*="mtt.gob.cl"] {
+            #ContentPlaceHolder1_patenteInput, #searchPanel,
+            .ms-standardheader, div[id*="Enlaces"], a[href*="mtt.gob.cl"],
+            div:has(> a[href*="mtt.gob.cl"]) {
               display: none !important;
             }
 
+            /* Estructura limpia y centrada */
             html, body, #s4-workspace, #s4-bodyContainer, #paginas, form#form1 {
-              background: #0F172A !important;
+              background-color: #0F172A !important;
+              color: #F8FAFC !important;
               overflow: hidden !important;
               touch-action: none !important;
               user-select: none !important;
@@ -1645,29 +1658,47 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
               height: 100vh !important;
               margin: 0 !important;
               padding: 0 !important;
+              display: flex !important;
+              flex-direction: column !important;
+              align-items: center !important;
+              justify-content: center !important;
             }
 
-            #ContentPlaceHolder1_divcaptcha {
+            #leftCol, #panelMiRT2 {
+              width: 100% !important;
+              max-width: 360px !important;
+              margin: 0 auto !important;
+              padding: 0 !important;
               display: flex !important;
-              position: fixed !important;
-              top: 0 !important;
-              left: 0 !important;
-              width: 100vw !important;
-              height: 100vh !important;
-              z-index: 99999 !important;
-              background: #0F172A !important;
+              flex-direction: column !important;
+              align-items: center !important;
+              justify-content: center !important;
+              background: transparent !important;
+              border: none !important;
+            }
+
+            /* Caja de Captcha visible y centrada */
+            #ContentPlaceHolder1_divcaptcha, #ReCaptchContainer {
+              display: flex !important;
               justify-content: center !important;
               align-items: center !important;
-              margin: 0 !important;
-              padding: 0 !important;
+              width: 100% !important;
+              margin: 0 auto !important;
+              visibility: visible !important;
             }
 
-            #ReCaptchContainer, .g-recaptcha {
+            .g-recaptcha, iframe[src*="recaptcha"] {
               display: block !important;
+              visibility: visible !important;
               transform: scale(1.15) !important;
               transform-origin: center center !important;
-              box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5) !important;
+              box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.6) !important;
               border-radius: 6px !important;
+            }
+
+            /* Ocultar textos de SharePoint sobrantes */
+            #leftCol h1, #leftCol h2, #leftCol h3, #leftCol p, #leftCol b, #leftCol span:not(.g-recaptcha *) {
+              display: none !important;
             }
 
             html, body {
