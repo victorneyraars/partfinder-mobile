@@ -1626,78 +1626,71 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
           }
           meta.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no';
 
-          var meta = document.querySelector('meta[name="viewport"]');
-          if (!meta) {
-            meta = document.createElement('meta');
-            meta.name = 'viewport';
-            document.head.appendChild(meta);
-          }
-          meta.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no';
-
           var cleanStyle = document.createElement("style");
           cleanStyle.id = "pf-clean-card";
           cleanStyle.innerHTML = `
-            /* Ocultar todo lo que sobra */
-            header, footer, #pie, .footer, #banner, #menu, #rightCol, #suiteBarDelta, #s4-ribbonrow,
-            #DeltaPlaceHolderUtilityContent, div[id*="UtilityContent"],
-            img, table, div[id*="acordeon"], div:has(> img[src*="check"]),
-            #ContentPlaceHolder1_patenteInput, #searchPanel,
-            .ms-standardheader, div[id*="Enlaces"], a[href*="mtt.gob.cl"],
-            div:has(> a[href*="mtt.gob.cl"]) {
-              display: none !important;
-            }
-
-            /* Estructura limpia y centrada */
+            /* 1. Fondo oscuro global */
             html, body, #s4-workspace, #s4-bodyContainer, #paginas, form#form1 {
               background-color: #0F172A !important;
               color: #F8FAFC !important;
-              overflow: hidden !important;
-              touch-action: none !important;
+              overflow-x: hidden !important;
+              touch-action: pan-y !important;
               user-select: none !important;
-              width: 100vw !important;
-              height: 100vh !important;
               margin: 0 !important;
               padding: 0 !important;
+            }
+
+            /* 2. Ocultar especificamente banners, afiches, menus y footers sin tocar tables */
+            #banner, #menu, #rightCol, #suiteBarDelta, #s4-ribbonrow,
+            header, footer, #pie, .footer,
+            #DeltaPlaceHolderUtilityContent, div[id*="UtilityContent"],
+            img[src*="afiche"], img[src*="banner"], img[src*="Banner"], img[src*="Planta"],
+            div[id*="acordeon"], div:has(> a[href*="mtt.gob.cl"]), table[id*="Enlaces"] {
+              display: none !important;
+            }
+
+            /* 3. Centrar el contenedor principal */
+            #paginas {
               display: flex !important;
               flex-direction: column !important;
               align-items: center !important;
               justify-content: center !important;
+              min-height: 80vh !important;
+              width: 100% !important;
             }
 
-            #leftCol, #panelMiRT2 {
+            #leftCol {
+              float: none !important;
               width: 100% !important;
-              max-width: 360px !important;
+              max-width: 380px !important;
               margin: 0 auto !important;
-              padding: 0 !important;
               display: flex !important;
               flex-direction: column !important;
               align-items: center !important;
               justify-content: center !important;
               background: transparent !important;
-              border: none !important;
             }
 
-            /* Caja de Captcha visible y centrada */
+            /* 4. Asegurar visibilidad del reCAPTCHA */
             #ContentPlaceHolder1_divcaptcha, #ReCaptchContainer {
               display: flex !important;
               justify-content: center !important;
               align-items: center !important;
               width: 100% !important;
-              margin: 0 auto !important;
+              margin: 30px auto !important;
               visibility: visible !important;
             }
 
             .g-recaptcha, iframe[src*="recaptcha"] {
               display: block !important;
               visibility: visible !important;
+              margin: 0 auto !important;
               transform: scale(1.15) !important;
               transform-origin: center center !important;
-              box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.6) !important;
-              border-radius: 6px !important;
             }
 
-            /* Ocultar textos de SharePoint sobrantes */
-            #leftCol h1, #leftCol h2, #leftCol h3, #leftCol p, #leftCol b, #leftCol span:not(.g-recaptcha *) {
+            /* 5. Ocultar enlaces de navegacion residuales */
+            #leftCol a[href*="javascript"], #leftCol a[id*="lnkVolver"] {
               display: none !important;
             }
 
