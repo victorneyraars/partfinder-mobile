@@ -1228,9 +1228,10 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
       ..addJavaScriptChannel(
         'PrtBridge',
         onMessageReceived: (JavaScriptMessage message) {
-          if (message.message.startsWith('DATA:')) {
+          final msg = message.message;
+          if (msg.startsWith('DATA:')) {
             try {
-              final jsonStr = message.message.substring(5);
+              final jsonStr = msg.substring(5);
               final map = jsonDecode(jsonStr) as Map<String, dynamic>;
               if (widget.onVehicleSaved != null) {
                 widget.onVehicleSaved!(map);
@@ -1240,6 +1241,16 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
               }
             } catch (e) {
               debugPrint('Error parsing PRT payload: $e');
+            }
+          } else if (msg == 'ERROR:NOT_FOUND') {
+            if (mounted) {
+              Navigator.of(context).pop();
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  backgroundColor: Colors.redAccent.shade700,
+                  content: Text('La patente ${widget.targetPlate} no figura registrada en el portal PRT.'),
+                ),
+              );
             }
           }
         },
@@ -1261,6 +1272,15 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
     final plate = widget.targetPlate.trim().toUpperCase();
     final js = r"""
       (function(targetPlate) {
+        // Adaptar Viewport para moviles
+        var meta = document.querySelector('meta[name="viewport"]');
+        if (!meta) {
+          meta = document.createElement('meta');
+          meta.name = 'viewport';
+          document.head.appendChild(meta);
+        }
+        meta.content = 'width=device-width, initial-scale=0.9, maximum-scale=2.0';
+
         // 1. Relleno con selector directo ID de SharePoint
         function setPlate() {
           var inp = document.getElementById('ContentPlaceHolder1_patenteInput') || 
@@ -1275,10 +1295,20 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
         var fillTimer = setInterval(setPlate, 500);
         setTimeout(function() { clearInterval(fillTimer); }, 6000);
 
-        // 2. Extractor sobre pares label y span de ContentPlaceHolder1_lblDatosVehiculo
+        // 2. Extractor y observador de estado
         if (!window.__prtWatcherActive) {
           window.__prtWatcherActive = true;
           var pollInterval = setInterval(function() {
+            // Detección de patente no encontrada
+            var bodyText = document.body.innerText || '';
+            if (bodyText.includes('La placa ingresada no existe') || bodyText.includes('no existe registro')) {
+              clearInterval(pollInterval);
+              if (window.PrtBridge) {
+                window.PrtBridge.postMessage('ERROR:NOT_FOUND');
+              }
+              return;
+            }
+
             var container = document.getElementById('ContentPlaceHolder1_lblDatosVehiculo');
             if (!container) return;
 
