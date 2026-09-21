@@ -1629,57 +1629,47 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
           var cleanStyle = document.createElement("style");
           cleanStyle.id = "pf-clean-card";
           cleanStyle.innerHTML = `
+            header, footer, #pie, .footer, #banner, #menu, #rightCol, #suiteBarDelta, #s4-ribbonrow,
+            img, table, div[id*="acordeon"], div:has(> img[src*="check"]),
+            #ContentPlaceHolder1_patenteInput, #searchPanel, p, b, h1, h2, h3,
+            .ms-standardheader, div[id*="Enlaces"], a[href*="mtt.gob.cl"] {
+              display: none !important;
+            }
+
             html, body, #s4-workspace, #s4-bodyContainer, #paginas, form#form1 {
-              background-color: #0F172A !important;
-              color: #F8FAFC !important;
+              background: #0F172A !important;
               overflow: hidden !important;
               touch-action: none !important;
               user-select: none !important;
-              margin: 0 !important;
-              padding: 0 !important;
               width: 100vw !important;
               height: 100vh !important;
-              display: flex !important;
-              flex-direction: column !important;
-              align-items: center !important;
-              justify-content: center !important;
-            }
-            #banner, #menu, #rightCol, header, footer, .banner, #suiteBarDelta, #s4-ribbonrow,
-            img[src*="afiche"], img[src*="banner"], img[src*="Banner"], img[src*="Digital"], img[src*="Planta"],
-            table[id*="Enlaces"], div[id*="Enlaces"], div:has(> a[href*="mtt.gob.cl"]) {
-              display: none !important;
-            }
-            #leftCol, #panelMiRT2, #searchPanel {
-              width: 100% !important;
-              max-width: 360px !important;
-              margin: 0 auto !important;
+              margin: 0 !important;
               padding: 0 !important;
-              display: flex !important;
-              flex-direction: column !important;
-              align-items: center !important;
-              justify-content: center !important;
-              text-align: center !important;
-              border: none !important;
-              background: transparent !important;
             }
-            #searchPanel table, #searchPanel tbody, #searchPanel tr, #searchPanel td {
-              display: none !important;
-            }
-            #ContentPlaceHolder1_divcaptcha, #ReCaptchContainer {
+
+            #ContentPlaceHolder1_divcaptcha {
               display: flex !important;
+              position: fixed !important;
+              top: 0 !important;
+              left: 0 !important;
+              width: 100vw !important;
+              height: 100vh !important;
+              z-index: 99999 !important;
+              background: #0F172A !important;
               justify-content: center !important;
               align-items: center !important;
-              margin: 0 auto !important;
-              width: 100% !important;
+              margin: 0 !important;
+              padding: 0 !important;
             }
-            .g-recaptcha, iframe[src*="recaptcha"] {
-              transform: scale(1.18) !important;
+
+            #ReCaptchContainer, .g-recaptcha {
+              display: block !important;
+              transform: scale(1.15) !important;
               transform-origin: center center !important;
-              margin: 0 auto !important;
+              box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5) !important;
+              border-radius: 6px !important;
             }
-            div[id*="acordeon"], div:has(> img[src*="check"]) {
-              display: none !important;
-            }
+
             html, body {
               opacity: 1 !important;
             }
