@@ -1592,10 +1592,15 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             }
           },
           onPageFinished: (url) {
+            _injectStableBridge();
             if (mounted) {
               setState(() => _pageLoaded = true);
             }
-            _injectStableBridge();
+          },
+          onPageStarted: (url) {
+            _controller.runJavaScript(
+              'var s=document.createElement("style");s.id="pf-init";s.innerHTML="html,body{background:#0F172A!important;opacity:0!important;}";document.head.appendChild(s);'
+            );
           },
           onWebResourceError: (error) {
             if (mounted) {
@@ -1613,27 +1618,76 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
       (function(targetPlate) {
         // Estilos para enfocar unicamente el formulario y ocultar publicidad/banners
         try {
+          var meta = document.querySelector('meta[name="viewport"]');
+          if (!meta) {
+            meta = document.createElement('meta');
+            meta.name = 'viewport';
+            document.head.appendChild(meta);
+          }
+          meta.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no';
+
           var cleanStyle = document.createElement("style");
+          cleanStyle.id = "pf-clean-card";
           cleanStyle.innerHTML = `
-            header, footer, #pie, .footer,
-            img[src*="banner"], img[src*="Banner"], img[src*="Digital"],
-            table[id*="Enlaces"], div[id*="Enlaces"],
-            div:has(> img[src*="Digital"]),
-            div:has(> a[href*="mtt.gob.cl"]) {
+            html, body, #s4-workspace, #s4-bodyContainer, #paginas, form#form1 {
+              background-color: #0F172A !important;
+              color: #F8FAFC !important;
+              overflow: hidden !important;
+              touch-action: none !important;
+              user-select: none !important;
+              margin: 0 !important;
+              padding: 0 !important;
+              width: 100vw !important;
+              height: 100vh !important;
+              display: flex !important;
+              flex-direction: column !important;
+              align-items: center !important;
+              justify-content: center !important;
+            }
+            #banner, #menu, #rightCol, header, footer, .banner, #suiteBarDelta, #s4-ribbonrow,
+            img[src*="afiche"], img[src*="banner"], img[src*="Banner"], img[src*="Digital"], img[src*="Planta"],
+            table[id*="Enlaces"], div[id*="Enlaces"], div:has(> a[href*="mtt.gob.cl"]) {
               display: none !important;
             }
-            body {
-              background: #ffffff !important;
-              padding: 6px !important;
-              margin: 0 !important;
-            }
-            #ContentPlaceHolder1_patenteInput {
-              font-size: 18px !important;
-              font-weight: bold !important;
+            #leftCol, #panelMiRT2, #searchPanel {
+              width: 100% !important;
+              max-width: 360px !important;
+              margin: 0 auto !important;
+              padding: 0 !important;
+              display: flex !important;
+              flex-direction: column !important;
+              align-items: center !important;
+              justify-content: center !important;
               text-align: center !important;
+              border: none !important;
+              background: transparent !important;
+            }
+            #searchPanel table, #searchPanel tbody, #searchPanel tr, #searchPanel td {
+              display: none !important;
+            }
+            #ContentPlaceHolder1_divcaptcha, #ReCaptchContainer {
+              display: flex !important;
+              justify-content: center !important;
+              align-items: center !important;
+              margin: 0 auto !important;
+              width: 100% !important;
+            }
+            .g-recaptcha, iframe[src*="recaptcha"] {
+              transform: scale(1.18) !important;
+              transform-origin: center center !important;
+              margin: 0 auto !important;
+            }
+            div[id*="acordeon"], div:has(> img[src*="check"]) {
+              display: none !important;
+            }
+            html, body {
+              opacity: 1 !important;
             }
           `;
           document.head.appendChild(cleanStyle);
+
+          var initStyle = document.getElementById("pf-init");
+          if (initStyle) initStyle.remove();
         } catch(e) {}
         function setPlate() {
           var inp = document.getElementById('ContentPlaceHolder1_patenteInput') || 
