@@ -1258,24 +1258,24 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
   }
 
   void _injectExactBridge() {
-    final js = """
-      (function() {
-        // 1. Relleno automático en el input oficial ContentPlaceHolder1_patenteInput
-        function setPlateValue() {
+    final plate = widget.targetPlate.trim().toUpperCase();
+    final js = r"""
+      (function(targetPlate) {
+        // 1. Relleno con selector directo ID de SharePoint
+        function setPlate() {
           var inp = document.getElementById('ContentPlaceHolder1_patenteInput') || 
-                    document.querySelector('input[name="ctl00\\$ContentPlaceHolder1\\$patenteInput"]');
-          if (inp && inp.value !== '${widget.targetPlate}') {
-            inp.value = '${widget.targetPlate}';
+                    document.querySelector('input[name*="patenteInput"]');
+          if (inp && inp.value !== targetPlate) {
+            inp.value = targetPlate;
             inp.dispatchEvent(new Event('input', { bubbles: true }));
             inp.dispatchEvent(new Event('change', { bubbles: true }));
-            inp.focus();
           }
         }
-        setPlateValue();
-        var fillTimer = setInterval(setPlateValue, 600);
+        setPlate();
+        var fillTimer = setInterval(setPlate, 500);
         setTimeout(function() { clearInterval(fillTimer); }, 6000);
 
-        // 2. Extractor reactivo sobre ContentPlaceHolder1_lblDatosVehiculo
+        // 2. Extractor sobre pares label y span de ContentPlaceHolder1_lblDatosVehiculo
         if (!window.__prtWatcherActive) {
           window.__prtWatcherActive = true;
           var pollInterval = setInterval(function() {
@@ -1304,7 +1304,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             if (marca !== '' || modelo !== '' || motor !== '' || chasis !== '') {
               clearInterval(pollInterval);
               var payload = {
-                patente: '${widget.targetPlate}',
+                patente: targetPlate,
                 tipo: map['tipo'] || '',
                 marca: marca,
                 modelo: modelo,
@@ -1322,7 +1322,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             }
           }, 300);
         }
-      })();
+      })('""" + plate + r"""');
     """;
     _controller.runJavaScript(js);
   }
@@ -1341,7 +1341,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
               style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white),
             ),
             Text(
-              'Patente: ${widget.targetPlate}',
+              'Patente: ' + widget.targetPlate,
               style: const TextStyle(fontSize: 12, color: Color(0xFF38BDF8)),
             ),
           ],
