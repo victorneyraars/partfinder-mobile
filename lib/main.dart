@@ -1280,7 +1280,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
           }
         });
 
-        // 2. CSS que oculta absolutamente todo SharePoint
+        // 2. CSS con aislamiento visual seguro
         var s = document.getElementById('pf-clean-captcha-style') || document.createElement('style');
         s.id = 'pf-clean-captcha-style';
         s.innerHTML = `
@@ -1292,15 +1292,22 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             height: 100vh !important;
             overflow: hidden !important;
           }
-
-          /* Ocultar SharePoint por completo */
-          #s4-workspace, #s4-bodyContainer, header, nav, footer,
-          .ms-main, form > *:not(#pf-captcha-host), img, table {
+          /* Ocultar banners, menus y decorados pero NO el formulario */
+          header, nav, footer, #suiteBarLeft, #suiteBarRight, #s4-ribbonrow,
+          .banner, img[src*="logo"], img[src*="Banner"], a[href*="Home"],
+          div.ms-dialogHidden, #sideNavBox {
             display: none !important;
           }
-
-          /* Contenedor exacto del Checkbox "No soy un robot" */
-          #pf-captcha-host {
+          body {
+            background-color: #0F172A !important;
+            color: #FFFFFF !important;
+          }
+          /* Ocultar elementos irrelevantes de SharePoint */
+          #s4-workspace {
+            background: #0F172A !important;
+          }
+          /* Posicionamiento del widget sin mover su nodo en el DOM */
+          .pf-captcha-container {
             position: fixed !important;
             left: 50% !important;
             top: 45% !important;
@@ -1308,20 +1315,12 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             height: 78px !important;
             transform: translate(-50%, -50%) !important;
             -webkit-transform: translate(-50%, -50%) !important;
-            z-index: 1000 !important;
-            background: transparent !important;
+            z-index: 10000 !important;
             border-radius: 4px !important;
             box-shadow: 0 4px 18px rgba(0,0,0,0.5) !important;
-            overflow: hidden !important;
+            background: transparent !important;
           }
-
-          #pf-captcha-host iframe {
-            width: 304px !important;
-            height: 78px !important;
-            border: none !important;
-          }
-
-          /* Desafío fotográfico centrado cuando se active */
+          /* Desafio fotografico centrado */
           div:has(iframe[src*="bframe"]),
           div:has(iframe[title*="challenge"]),
           div:has(iframe[title*="desafío"]),
@@ -1339,14 +1338,13 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
         document.head.appendChild(s);
 
         var __pfSubmitted = false;
-        var __pfExtracted = false;
 
         function mountCaptcha() {
           var anchor = document.querySelector('iframe[src*="anchor"]');
           if (anchor) {
-            var box = anchor.closest('.g-recaptcha') || anchor.parentElement;
-            if (box) {
-              box.style.cssText = 'position: fixed !important; left: 50% !important; top: 45% !important; transform: translate(-50%, -50%) !important; -webkit-transform: translate(-50%, -50%) !important; z-index: 1000 !important; width: 304px !important; height: 78px !important; display: block !important; visibility: visible !important;';
+            var box = anchor.closest('div.g-recaptcha') || anchor.parentElement;
+            if (box && !box.classList.contains('pf-captcha-container')) {
+              box.classList.add('pf-captcha-container');
             }
             if (window.PrtBridge && !window.__pfNotifiedReady) {
               window.__pfNotifiedReady = true;
@@ -1354,60 +1352,33 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             }
           }
 
-          // A. Si se resuelve el captcha, presionar la lupa oficial de la PRT
+          // Vigilante de resolución de token
           if (!__pfSubmitted) {
             var tokenArea = document.querySelector('textarea[name="g-recaptcha-response"], textarea#g-recaptcha-response');
             if (tokenArea && tokenArea.value && tokenArea.value.trim().length > 30) {
               __pfSubmitted = true;
-              var btn = document.getElementById('ContentPlaceHolder1_buscar') || 
-                        document.querySelector('input[name*="buscar"]') ||
-                        document.querySelector('input[type="image"]');
+              if (window.PrtBridge) window.PrtBridge.postMessage('SEARCHING');
+
+              // Buscar el elemento de la lupa (input type image o imagen con link)
+              var btn = document.querySelector('input[type="image"], input[id*="Buscar" i], input[id*="Consultar" i], input[id*="ImageButton" i]');
+              if (!btn) {
+                var img = document.querySelector('img[src*="lupa" i], img[src*="search" i]');
+                if (img) btn = img.closest('a, button, input');
+              }
+              if (!btn) {
+                btn = document.querySelector('input[type="submit"], button[type="submit"]');
+              }
+
               if (btn) {
                 btn.click();
-              }
-            }
-          }
-
-          // B. Extracción de datos del contenedor oficial vehiculox
-          if (!__pfExtracted) {
-            var boxData = document.getElementById('vehiculox') || 
-                          document.getElementById('ContentPlaceHolder1_accordionContent');
-            if (boxData && boxData.innerText && boxData.innerText.toLowerCase().includes('marca')) {
-              var txt = boxData.innerText;
-              var lines = txt.split('\n').map(function(l) { return l.trim(); }).filter(Boolean);
-              function getVal(lbl) {
-                for (var i = 0; i < lines.length; i++) {
-                  var clean = lines[i].toLowerCase().replace(':', '').replace('.', '').trim();
-                  if (clean === lbl.toLowerCase().replace(':', '').replace('.', '').trim()) {
-                    if (i + 1 < lines.length) return lines[i + 1].trim();
-                  }
-                }
-                return '';
-              }
-
-              var result = {
-                patente: '${widget.targetPlate}',
-                tipo: getVal('Tipo'),
-                marca: getVal('Marca'),
-                modelo: getVal('Modelo'),
-                anio: getVal('Año Fab') || getVal('Año'),
-                nro_motor: getVal('N° Motor') || getVal('Motor'),
-                chasis: getVal('N° Chasis') || getVal('Chasis'),
-                vin: getVal('N° Vin') || getVal('VIN'),
-                sello: getVal('Tipo Sello') || getVal('Sello'),
-                fuente: 'PRT Oficial'
-              };
-
-              if (result.marca || result.modelo || result.nro_motor || result.chasis) {
-                __pfExtracted = true;
-                if (window.PrtBridge) {
-                  window.PrtBridge.postMessage('DATA:' + JSON.stringify(result));
-                }
+              } else if (typeof WebForm_DoPostBackWithOptions === 'function') {
+                try { WebForm_DoPostBackWithOptions(new WebForm_PostBackOptions('', '', true, '', '', false, false)); } catch(e) {}
+              } else if (document.forms.length > 0) {
+                document.forms[0].submit();
               }
             }
           }
         }
-
         mountCaptcha();
 
         setInterval(function() {
