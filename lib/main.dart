@@ -1550,11 +1550,36 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             if (mounted) {
               Navigator.of(context).pop();
               ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  backgroundColor: Colors.redAccent.shade700,
-                  content: Text('La patente ' + widget.targetPlate + ' no figura en el portal PRT.'),
+                const SnackBar(
+                  backgroundColor: Color(0xFF0F2B48),
+                  content: Row(
+                    children: [
+                      SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.cyanAccent)),
+                      SizedBox(width: 12),
+                      Expanded(child: Text("Vehículo sin registro PRT. Consultando padrón...", style: TextStyle(color: Colors.white, fontSize: 13))),
+                    ],
+                  ),
+                  duration: Duration(seconds: 4),
                 ),
               );
+              Future.microtask(() async {
+                try {
+                  final resp = await http.post(
+                    Uri.parse("https://api.partfinder360.com/api/patente/fallback-boostr"),
+                    headers: {"Content-Type": "application/json"},
+                    body: jsonEncode({"patente": widget.targetPlate}),
+                  );
+                  if (resp.statusCode == 200) {
+                    final dataRes = jsonDecode(resp.body) as Map<String, dynamic>;
+                    final vData = dataRes["data"] as Map<String, dynamic>?;
+                    if (vData != null && widget.onVehicleSaved != null) {
+                      widget.onVehicleSaved!(vData);
+                    }
+                  }
+                } catch (e) {
+                  debugPrint("Error fallback automatico: $e");
+                }
+              });
             }
           }
         },
