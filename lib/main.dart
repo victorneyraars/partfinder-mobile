@@ -1203,8 +1203,13 @@ class OldFormatter {
 // ============================================================================
 class PrtVerificationScreen extends StatefulWidget {
   final String targetPlate;
+  final Function(Map<String, dynamic>)? onVehicleSaved;
 
-  const PrtVerificationScreen({super.key, required this.targetPlate});
+  const PrtVerificationScreen({
+    super.key,
+    required this.targetPlate,
+    this.onVehicleSaved,
+  });
 
   @override
   State<PrtVerificationScreen> createState() => _PrtVerificationScreenState();
@@ -1227,6 +1232,9 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             try {
               final jsonStr = message.message.substring(5);
               final map = jsonDecode(jsonStr) as Map<String, dynamic>;
+              if (widget.onVehicleSaved != null) {
+                widget.onVehicleSaved!(map);
+              }
               if (mounted) {
                 Navigator.of(context).pop(map);
               }
