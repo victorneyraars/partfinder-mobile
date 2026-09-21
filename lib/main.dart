@@ -1058,7 +1058,7 @@ _vehicleData = v;
     String fmt(dynamic n) {
       if (n == null) return "N/D";
       final s = n.toString();
-      return "$" + s.replaceAllMapped(RegExp(r"(\d{1,3})(?=(\d{3})+(?!\d))"), (m) => "${m[1]}.");
+      return r"$" + s.replaceAllMapped(RegExp(r"(\d{1,3})(?=(\d{3})+(?!\d))"), (m) => "${m[1]}.");
     }
 
     final tasacionStr = (tMin != null && tMax != null && tMin != tMax) ? "${fmt(tMin)} - ${fmt(tMax)}" : fmt(tMin ?? tMax);
