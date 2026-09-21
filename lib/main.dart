@@ -1248,7 +1248,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(
                   backgroundColor: Colors.redAccent.shade700,
-                  content: Text('La patente ' + widget.targetPlate + ' no figura en la PRT.'),
+                  content: Text('La patente ' + widget.targetPlate + ' no figura en el portal PRT.'),
                 ),
               );
             }
@@ -1261,42 +1261,41 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             if (mounted) {
               setState(() => _pageLoaded = true);
             }
-            _injectSafeBridge();
+            _injectStableBridge();
           },
         ),
       )
       ..loadRequest(Uri.parse('https://www.prt.cl/Paginas/RevisionTecnica.aspx'));
   }
 
-  void _injectSafeBridge() {
+  void _injectStableBridge() {
     final plate = widget.targetPlate.trim().toUpperCase();
     final js = r"""
       (function(targetPlate) {
-        // 1. Relleno garantizado de la patente
-        function doFill() {
-          var el = document.getElementById('ContentPlaceHolder1_patenteInput') || 
-                   document.querySelector('input[name*="patenteInput"]');
-          if (el && el.value !== targetPlate) {
-            el.value = targetPlate;
-            el.dispatchEvent(new Event('input', { bubbles: true }));
-            el.dispatchEvent(new Event('change', { bubbles: true }));
+        // 1. Inyección directa idéntica a la versión que funcionó
+        function setPlate() {
+          var inp = document.getElementById('ContentPlaceHolder1_patenteInput') || 
+                    document.querySelector('input[name*="patenteInput"]');
+          if (inp && inp.value !== targetPlate) {
+            inp.value = targetPlate;
+            inp.dispatchEvent(new Event('input', { bubbles: true }));
+            inp.dispatchEvent(new Event('change', { bubbles: true }));
           }
         }
-        doFill();
-        var fTimer = setInterval(doFill, 400);
-        setTimeout(function() { clearInterval(fTimer); }, 6000);
+        setPlate();
+        var fillTimer = setInterval(setPlate, 500);
+        setTimeout(function() { clearInterval(fillTimer); }, 8000);
 
-        // 2. Monitoreo pasivo
-        if (!window.__prtSafeActive) {
-          window.__prtSafeActive = true;
-          var rtAttempted = false;
-          var rtAttemptTime = 0;
-
-          var pollTimer = setInterval(function() {
+        // 2. Extractor pasivo sin alterar el DOM ni forzar clics
+        if (!window.__prtWatcherActive) {
+          window.__prtWatcherActive = true;
+          var pollInterval = setInterval(function() {
             var bodyText = document.body.innerText || '';
             if (bodyText.includes('La placa ingresada no existe') || bodyText.includes('no existe registro')) {
-              clearInterval(pollTimer);
-              if (window.PrtBridge) window.PrtBridge.postMessage('ERROR:NOT_FOUND');
+              clearInterval(pollInterval);
+              if (window.PrtBridge) {
+                window.PrtBridge.postMessage('ERROR:NOT_FOUND');
+              }
               return;
             }
 
@@ -1309,9 +1308,11 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
 
             var map = {};
             for (var i = 0; i < labels.length; i++) {
-              var k = labels[i].innerText.replace(':', '').replace('.', '').trim().toLowerCase();
-              var v = spans[i] ? spans[i].innerText.trim() : '';
-              if (k) map[k] = v;
+              var key = labels[i].innerText.replace(':', '').replace('.', '').trim().toLowerCase();
+              var val = spans[i] ? spans[i].innerText.trim() : '';
+              if (key) {
+                map[key] = val;
+              }
             }
 
             var marca = map['marca'] || '';
@@ -1319,27 +1320,13 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             var motor = map['n° motor'] || map['n motor'] || map['motor'] || '';
             var chasis = map['n° chasis'] || map['n chasis'] || map['chasis'] || '';
 
-            // Si ya cargaron los datos del vehiculo
             if (marca !== '' || modelo !== '' || motor !== '' || chasis !== '') {
-              // Si no hemos intentado desplegar la RT, lo intentamos
-              if (!rtAttempted) {
-                rtAttempted = true;
-                rtAttemptTime = Date.now();
-                var h2s = Array.from(document.querySelectorAll('h2')).filter(function(h) {
-                  return h.innerText.toLowerCase().includes('revisión técnica');
-                });
-                if (h2s.length > 0) {
-                  h2s[0].click();
-                }
-              }
-
-              // Intentar leer la tabla si está disponible
+              // Buscar si la tabla de RT ya está en el DOM
               var rtTable = Array.from(document.querySelectorAll('table')).find(function(t) {
                 return t.innerText.includes('Fecha') && t.innerText.includes('Nro.Certificado');
               });
 
               var rtData = { fecha: '', planta: '', certificado: '', vencimiento: '', estado: '' };
-
               if (rtTable) {
                 var row = rtTable.querySelector('tr:nth-child(2)');
                 if (row) {
@@ -1347,38 +1334,34 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
                   if (tds.length >= 6) {
                     rtData.fecha = tds[0];
                     rtData.planta = tds[2];
-                    rtData.certificado = tds[3].split('
-')[0].trim();
+                    rtData.certificado = tds[3].split('\n')[0].trim();
                     rtData.vencimiento = tds[4];
                     rtData.estado = tds[5];
                   }
                 }
               }
 
-              // Finalizar si ya tenemos vencimiento o si pasaron 2 segundos del intento de click
-              if (rtData.vencimiento !== '' || (Date.now() - rtAttemptTime > 2000)) {
-                clearInterval(pollTimer);
-                var payload = {
-                  patente: targetPlate,
-                  tipo: map['tipo'] || '',
-                  marca: marca,
-                  modelo: modelo,
-                  anio: map['año fab'] || map['año de fabricacion'] || map['año'] || '',
-                  nro_motor: motor,
-                  chasis: chasis,
-                  vin: map['n° vin'] || map['n vin'] || map['vin'] || '',
-                  sello: map['tipo sello'] || map['sello'] || '',
-                  rt_fecha: rtData.fecha,
-                  rt_vencimiento: rtData.vencimiento,
-                  rt_planta: rtData.planta,
-                  rt_certificado: rtData.certificado,
-                  rt_estado: rtData.estado,
-                  fuente: 'PRT Oficial'
-                };
+              clearInterval(pollInterval);
+              var payload = {
+                patente: targetPlate,
+                tipo: map['tipo'] || '',
+                marca: marca,
+                modelo: modelo,
+                anio: map['año fab'] || map['año de fabricacion'] || map['año'] || '',
+                nro_motor: motor,
+                chasis: chasis,
+                vin: map['n° vin'] || map['n vin'] || map['vin'] || '',
+                sello: map['tipo sello'] || map['sello'] || '',
+                rt_fecha: rtData.fecha,
+                rt_vencimiento: rtData.vencimiento,
+                rt_planta: rtData.planta,
+                rt_certificado: rtData.certificado,
+                rt_estado: rtData.estado,
+                fuente: 'PRT Oficial'
+              };
 
-                if (window.PrtBridge) {
-                  window.PrtBridge.postMessage('DATA:' + JSON.stringify(payload));
-                }
+              if (window.PrtBridge) {
+                window.PrtBridge.postMessage('DATA:' + JSON.stringify(payload));
               }
             }
           }, 300);
