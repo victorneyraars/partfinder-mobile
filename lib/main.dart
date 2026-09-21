@@ -1203,206 +1203,111 @@ class OldFormatter {
 // ============================================================================
 class PrtVerificationScreen extends StatefulWidget {
   final String targetPlate;
-  final Function(Map<String, dynamic>) onVehicleSaved;
 
-  const PrtVerificationScreen({
-    super.key,
-    required this.targetPlate,
-    required this.onVehicleSaved,
-  });
+  const PrtVerificationScreen({super.key, required this.targetPlate});
 
   @override
   State<PrtVerificationScreen> createState() => _PrtVerificationScreenState();
 }
 
 class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
-  
-
-  bool _isReady = false;
-  String _statusMessage = 'Preparando verificación...';
   late final WebViewController _controller;
+  bool _pageLoaded = false;
 
   @override
   void initState() {
     super.initState();
-    SystemChannels.textInput.invokeMethod('TextInput.hide');
-
     _controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
-      ..setBackgroundColor(const Color(0xFF0F172A))
       ..setUserAgent("Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36")
       ..addJavaScriptChannel(
         'PrtBridge',
         onMessageReceived: (JavaScriptMessage message) {
-          if (message.message == 'CAPTCHA_READY') {
-            if (mounted && !_isReady) {
-              setState(() {
-                _isReady = true;
-                _statusMessage = 'Toca la casilla para verificar';
-              });
+          if (message.message.startsWith('DATA:')) {
+            try {
+              final jsonStr = message.message.substring(5);
+              final map = jsonDecode(jsonStr) as Map<String, dynamic>;
+              if (mounted) {
+                Navigator.of(context).pop(map);
+              }
+            } catch (e) {
+              debugPrint('Error parsing PRT payload: $e');
             }
           }
         },
       )
       ..setNavigationDelegate(
         NavigationDelegate(
-          onPageStarted: (_) {
-            if (mounted) setState(() => _isReady = false);
-          },
-          onPageFinished: (_) {
-            SystemChannels.textInput.invokeMethod('TextInput.hide');
-            _injectZeroFlickerEngine();
+          onPageFinished: (url) {
+            if (mounted) {
+              setState(() => _pageLoaded = true);
+            }
+            _injectAutoFillAndScraper();
           },
         ),
       )
       ..loadRequest(Uri.parse('https://www.prt.cl/Paginas/RevisionTecnica.aspx'));
   }
 
-  void _injectZeroFlickerEngine() {
+  void _injectAutoFillAndScraper() {
     final js = """
       (function() {
-        var m = document.querySelector('meta[name="viewport"]');
-        if (!m) {
-          m = document.createElement('meta');
-          m.name = 'viewport';
-          document.head.appendChild(m);
-        }
-        m.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no';
-
-        // 1. Rellenar patente en el input subyacente
-        document.querySelectorAll('input[type="text"]').forEach(function(inp) {
-          if (inp.id.toLowerCase().includes('patente') || inp.name.toLowerCase().includes('patente')) {
-            if (inp.value !== '${widget.targetPlate}') {
+        // 1. Rellenar patente en el input oficial si está vacío
+        var inputs = document.querySelectorAll('input[type="text"]');
+        for (var i = 0; i < inputs.length; i++) {
+          var inp = inputs[i];
+          if ((inp.id && inp.id.toLowerCase().includes('patente')) || 
+              (inp.name && inp.name.toLowerCase().includes('patente')) || 
+              (inp.parentElement && inp.parentElement.id === 'patenteContainer')) {
+            if (!inp.value || inp.value.trim() === '') {
               inp.value = '${widget.targetPlate}';
               inp.dispatchEvent(new Event('input', { bubbles: true }));
               inp.dispatchEvent(new Event('change', { bubbles: true }));
             }
           }
-        });
-
-        // 2. CSS con aislamiento visual seguro
-        var s = document.getElementById('pf-clean-captcha-style') || document.createElement('style');
-        s.id = 'pf-clean-captcha-style';
-        s.innerHTML = `
-          html, body {
-            background-color: #0F172A !important;
-            margin: 0 !important;
-            padding: 0 !important;
-            width: 100vw !important;
-            height: 100vh !important;
-            overflow: hidden !important;
-          }
-          /* Ocultar banners, menus y decorados pero NO el formulario */
-          header, nav, footer, #suiteBarLeft, #suiteBarRight, #s4-ribbonrow,
-          .banner, img[src*="logo"], img[src*="Banner"], a[href*="Home"],
-          div.ms-dialogHidden, #sideNavBox {
-            display: none !important;
-          }
-          body {
-            background-color: #0F172A !important;
-            color: #FFFFFF !important;
-          }
-          /* Ocultar elementos irrelevantes de SharePoint */
-          #s4-workspace {
-            background: #0F172A !important;
-          }
-          /* Posicionamiento del widget sin mover su nodo en el DOM */
-          .pf-captcha-container {
-            position: fixed !important;
-            left: 50% !important;
-            top: 45% !important;
-            width: 304px !important;
-            height: 78px !important;
-            transform: translate(-50%, -50%) !important;
-            -webkit-transform: translate(-50%, -50%) !important;
-            z-index: 10000 !important;
-            border-radius: 4px !important;
-            box-shadow: 0 4px 18px rgba(0,0,0,0.5) !important;
-            background: transparent !important;
-          }
-          /* Desafio fotografico centrado */
-          div:has(iframe[src*="bframe"]),
-          div:has(iframe[title*="challenge"]),
-          div:has(iframe[title*="desafío"]),
-          .pf-bframe-centered {
-            position: fixed !important;
-            left: 50% !important;
-            top: 50% !important;
-            transform: translate(-50%, -50%) scale(var(--pf-scale, 0.90)) !important;
-            -webkit-transform: translate(-50%, -50%) scale(var(--pf-scale, 0.90)) !important;
-            transform-origin: center center !important;
-            z-index: 2147483647 !important;
-            pointer-events: auto !important;
-          }
-        `;
-        document.head.appendChild(s);
-
-        var __pfSubmitted = false;
-
-        function mountCaptcha() {
-          var anchor = document.querySelector('iframe[src*="anchor"]');
-          if (anchor) {
-            var box = anchor.closest('div.g-recaptcha') || anchor.parentElement;
-            if (box && !box.classList.contains('pf-captcha-container')) {
-              box.classList.add('pf-captcha-container');
-            }
-            if (window.PrtBridge && !window.__pfNotifiedReady) {
-              window.__pfNotifiedReady = true;
-              window.PrtBridge.postMessage('CAPTCHA_READY');
-            }
-          }
-
-          // Vigilante de resolución de token
-          if (!__pfSubmitted) {
-            var tokenArea = document.querySelector('textarea[name="g-recaptcha-response"], textarea#g-recaptcha-response');
-            if (tokenArea && tokenArea.value && tokenArea.value.trim().length > 30) {
-              __pfSubmitted = true;
-              if (window.PrtBridge) window.PrtBridge.postMessage('SEARCHING');
-
-              // Buscar el elemento de la lupa (input type image o imagen con link)
-              var btn = document.querySelector('input[type="image"], input[id*="Buscar" i], input[id*="Consultar" i], input[id*="ImageButton" i]');
-              if (!btn) {
-                var img = document.querySelector('img[src*="lupa" i], img[src*="search" i]');
-                if (img) btn = img.closest('a, button, input');
-              }
-              if (!btn) {
-                btn = document.querySelector('input[type="submit"], button[type="submit"]');
-              }
-
-              if (btn) {
-                btn.click();
-              } else if (typeof WebForm_DoPostBackWithOptions === 'function') {
-                try { WebForm_DoPostBackWithOptions(new WebForm_PostBackOptions('', '', true, '', '', false, false)); } catch(e) {}
-              } else if (document.forms.length > 0) {
-                document.forms[0].submit();
-              }
-            }
-          }
         }
-        mountCaptcha();
 
-        setInterval(function() {
-          mountCaptcha();
+        // 2. Escuchar pasivamente cuando aparezca la tabla oficial #vehiculox
+        if (!window.__pfScraperStarted) {
+          window.__pfScraperStarted = true;
+          var checkTimer = setInterval(function() {
+            var box = document.getElementById('vehiculox') || document.getElementById('ContentPlaceHolder1_accordionContent');
+            if (box && box.innerText && box.innerText.toLowerCase().includes('marca')) {
+              var txt = box.innerText;
+              var lines = txt.split('\n').map(function(l) { return l.trim(); }).filter(Boolean);
 
-          var bframe = document.querySelector('iframe[src*="bframe"]');
-          if (bframe) {
-            var c = bframe;
-            while (c.parentElement && c.parentElement !== document.body && c.parentElement.tagName !== 'HTML') {
-              c = c.parentElement;
-            }
-            if (c && c !== document.body && c.tagName !== 'FORM') {
-              var winW = window.innerWidth || document.documentElement.clientWidth;
-              var winH = window.innerHeight || document.documentElement.clientHeight;
-              var scale = Math.min((winW - 16) / 400, (winH - 80) / 580);
-              if (scale > 1.0) scale = 1.0;
-              if (scale < 0.70) scale = 0.70;
-              document.documentElement.style.setProperty('--pf-scale', scale.toFixed(3));
-              if (!c.classList.contains('pf-bframe-centered')) {
-                c.classList.add('pf-bframe-centered');
+              function getVal(lbl) {
+                for (var i = 0; i < lines.length; i++) {
+                  var clean = lines[i].toLowerCase().replace(':', '').replace('.', '').trim();
+                  if (clean === lbl.toLowerCase().replace(':', '').replace('.', '').trim()) {
+                    if (i + 1 < lines.length) return lines[i + 1].trim();
+                  }
+                }
+                return '';
+              }
+
+              var data = {
+                patente: '${widget.targetPlate}',
+                tipo: getVal('Tipo'),
+                marca: getVal('Marca'),
+                modelo: getVal('Modelo'),
+                anio: getVal('Año Fab') || getVal('Año'),
+                nro_motor: getVal('N° Motor') || getVal('Motor'),
+                chasis: getVal('N° Chasis') || getVal('Chasis'),
+                vin: getVal('N° Vin') || getVal('VIN'),
+                sello: getVal('Tipo Sello') || getVal('Sello'),
+                fuente: 'PRT Oficial'
+              };
+
+              if (data.marca || data.modelo || data.nro_motor || data.chasis) {
+                clearInterval(checkTimer);
+                if (window.PrtBridge) {
+                  window.PrtBridge.postMessage('DATA:' + JSON.stringify(data));
+                }
               }
             }
-          }
-        }, 100);
+          }, 400);
+        }
       })();
     """;
     _controller.runJavaScript(js);
@@ -1413,84 +1318,46 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
     return Scaffold(
       backgroundColor: const Color(0xFF0F172A),
       appBar: AppBar(
-        backgroundColor: const Color(0xFF0F172A),
-        elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.close, color: Colors.white),
-          onPressed: () => Navigator.pop(context),
-        ),
+        backgroundColor: const Color(0xFF1E293B),
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
-              'Verificación Oficial PRT',
-              style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+              'Consulta Técnica PRT',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white),
             ),
             Text(
               'Patente: ${widget.targetPlate}',
-              style: const TextStyle(color: Color(0xFF10B981), fontSize: 12, fontWeight: FontWeight.bold),
+              style: const TextStyle(fontSize: 12, color: Color(0xFF38BDF8)),
             ),
           ],
         ),
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(28),
-          child: Container(
-            color: const Color(0xFF1E293B),
-            padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 16),
-            alignment: Alignment.centerLeft,
-            child: Row(
-              children: [
-                if (!_isReady)
-                  const SizedBox(
-                    width: 14,
-                    height: 14,
-                    child: CircularProgressIndicator(color: Color(0xFF38BDF8), strokeWidth: 2),
-                  )
-                else
-                  const Icon(Icons.touch_app_rounded, color: Color(0xFF38BDF8), size: 16),
-                const SizedBox(width: 8),
-                Text(
-                  _statusMessage,
-                  style: const TextStyle(
-                    color: Color(0xFF38BDF8),
-                    fontSize: 12,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ],
-            ),
-          ),
+        leading: IconButton(
+          icon: const Icon(Icons.close, color: Colors.white),
+          onPressed: () => Navigator.of(context).pop(),
         ),
       ),
-      body: SafeArea(
-        child: Stack(
-          children: [
-            // WebView siempre renderizando en fondo oscuro nativo
-            AnimatedOpacity(
-              opacity: _isReady ? 1.0 : 0.0,
-              duration: const Duration(milliseconds: 220),
-              child: WebViewWidget(controller: _controller),
-            ),
-            // Pantalla de carga nativa sin parpadeos mientras monta el captcha
-            if (!_isReady)
-              Container(
-                color: const Color(0xFF0F172A),
-                width: double.infinity,
-                height: double.infinity,
+      body: Stack(
+        children: [
+          WebViewWidget(controller: _controller),
+          if (!_pageLoaded)
+            Container(
+              color: const Color(0xFF0F172A),
+              child: const Center(
                 child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: const [
-                    CircularProgressIndicator(color: Color(0xFF38BDF8), strokeWidth: 2.5),
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    CircularProgressIndicator(color: Color(0xFF38BDF8)),
                     SizedBox(height: 16),
                     Text(
-                      'Conectando con portal PRT...',
-                      style: TextStyle(color: Color(0xFF94A3B8), fontSize: 13, fontWeight: FontWeight.w600),
+                      'Cargando portal PRT...',
+                      style: TextStyle(color: Colors.white70, fontSize: 14),
                     ),
                   ],
                 ),
               ),
-          ],
-        ),
+            ),
+        ],
       ),
     );
   }
