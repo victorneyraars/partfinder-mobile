@@ -1250,64 +1250,49 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             if (mounted) {
               setState(() => _pageLoaded = true);
             }
-            _injectAutoFillAndScraper();
+            _injectExactBridge();
           },
         ),
       )
       ..loadRequest(Uri.parse('https://www.prt.cl/Paginas/RevisionTecnica.aspx'));
   }
 
-  void _injectAutoFillAndScraper() {
+  void _injectExactBridge() {
     final js = """
       (function() {
-        // 1. Inyectar patente en todos los campos de texto candidatos
-        function fillPlate() {
-          var inputs = document.querySelectorAll('input[type="text"], input:not([type])');
-          for (var i = 0; i < inputs.length; i++) {
-            var el = inputs[i];
-            var id = (el.id || '').toLowerCase();
-            var name = (el.name || '').toLowerCase();
-            if (id.includes('patente') || name.includes('patente') || el.maxLength === 6 || el.maxLength === 8) {
-              if (el.value !== '${widget.targetPlate}') {
-                el.value = '${widget.targetPlate}';
-                el.dispatchEvent(new Event('input', { bubbles: true }));
-                el.dispatchEvent(new Event('change', { bubbles: true }));
-              }
-            }
+        // 1. Relleno automático en el input oficial ContentPlaceHolder1_patenteInput
+        function setPlateValue() {
+          var inp = document.getElementById('ContentPlaceHolder1_patenteInput') || 
+                    document.querySelector('input[name="ctl00\\$ContentPlaceHolder1\\$patenteInput"]');
+          if (inp && inp.value !== '${widget.targetPlate}') {
+            inp.value = '${widget.targetPlate}';
+            inp.dispatchEvent(new Event('input', { bubbles: true }));
+            inp.dispatchEvent(new Event('change', { bubbles: true }));
+            inp.focus();
           }
         }
-        fillPlate();
-        var fillInterval = setInterval(fillPlate, 800);
-        setTimeout(function() { clearInterval(fillInterval); }, 5000);
+        setPlateValue();
+        var fillTimer = setInterval(setPlateValue, 600);
+        setTimeout(function() { clearInterval(fillTimer); }, 6000);
 
-        // 2. Extraer datos directamente desde span#ContentPlaceHolder1_lblDatosVehiculo
-        if (!window.__pfScraperWatcher) {
-          window.__pfScraperWatcher = true;
-          var pollTimer = setInterval(function() {
-            var container = document.getElementById('ContentPlaceHolder1_lblDatosVehiculo') || 
-                            document.querySelector('#vehiculox .dataPS') ||
-                            document.getElementById('vehiculox');
-
+        // 2. Extractor reactivo sobre ContentPlaceHolder1_lblDatosVehiculo
+        if (!window.__prtWatcherActive) {
+          window.__prtWatcherActive = true;
+          var pollInterval = setInterval(function() {
+            var container = document.getElementById('ContentPlaceHolder1_lblDatosVehiculo');
             if (!container) return;
 
-            var labels = container.querySelectorAll('label');
-            var values = container.querySelectorAll('span');
+            var labels = Array.from(container.querySelectorAll('label'));
+            var spans = Array.from(container.querySelectorAll('span'));
+
+            if (labels.length === 0 && spans.length === 0) return;
 
             var map = {};
-            if (labels.length > 0 && values.length > 0) {
-              for (var i = 0; i < labels.length; i++) {
-                var k = labels[i].innerText.replace(':', '').replace('.', '').trim().toLowerCase();
-                var v = values[i] ? values[i].innerText.trim() : '';
-                if (k) map[k] = v;
-              }
-            } else {
-              // Fallback basado en texto plano
-              var lines = container.innerText.split('\n').map(function(s) { return s.trim(); }).filter(Boolean);
-              for (var j = 0; j < lines.length; j++) {
-                var clean = lines[j].replace(':', '').replace('.', '').trim().toLowerCase();
-                if (j + 1 < lines.length) {
-                  map[clean] = lines[j + 1];
-                }
+            for (var i = 0; i < labels.length; i++) {
+              var key = labels[i].innerText.replace(':', '').replace('.', '').trim().toLowerCase();
+              var val = spans[i] ? spans[i].innerText.trim() : '';
+              if (key) {
+                map[key] = val;
               }
             }
 
@@ -1316,9 +1301,9 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             var motor = map['n° motor'] || map['n motor'] || map['motor'] || '';
             var chasis = map['n° chasis'] || map['n chasis'] || map['chasis'] || '';
 
-            if (marca || modelo || motor || chasis) {
-              clearInterval(pollTimer);
-              var data = {
+            if (marca !== '' || modelo !== '' || motor !== '' || chasis !== '') {
+              clearInterval(pollInterval);
+              var payload = {
                 patente: '${widget.targetPlate}',
                 tipo: map['tipo'] || '',
                 marca: marca,
@@ -1332,10 +1317,10 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
               };
 
               if (window.PrtBridge) {
-                window.PrtBridge.postMessage('DATA:' + JSON.stringify(data));
+                window.PrtBridge.postMessage('DATA:' + JSON.stringify(payload));
               }
             }
-          }, 350);
+          }, 300);
         }
       })();
     """;
