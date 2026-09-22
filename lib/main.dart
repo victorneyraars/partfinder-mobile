@@ -1679,7 +1679,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
     if (_debugSent) return;
     _debugSent = true;
 
-    const String collectJs = '''
+    const String collectJs = r'''
       (function() {
         function safe(fn) { try { return fn(); } catch (e) { return null; } }
         var iframes = [];
@@ -1705,15 +1705,37 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
         });
         var url = '';
         safe(function() { url = window.location.href || ''; });
-        // Leer el valor vivo del input de patente (propiedad .value, no atributo).
+
+        // Lectura robusta del input de patente: por #id, por name exacto
+        // (con doble escape de $ imposible; aquí el $ es literal al ser raw),
+        // y finalmente por filtrado del texto visible. Lee la property .value.
         var plateInput = null;
         safe(function() {
-          var el = document.getElementById('ContentPlaceHolder1_patenteInput') ||
-                   document.querySelector('input[name="ctl00$ContentPlaceHolder1$patenteInput"]');
+          var el = null;
+          try { el = document.getElementById('ContentPlaceHolder1_patenteInput'); } catch (e) {}
+          if (!el) {
+            try {
+              var all = document.querySelectorAll('input');
+              for (var i = 0; i < all.length; i++) {
+                var nm = (all[i].name || '');
+                var id = (all[i].id || '');
+                if (all[i].type === 'text' &&
+                    (nm.indexOf('patenteInput') !== -1 || id.indexOf('patenteInput') !== -1 || id.indexOf('ContentPlaceHolder1_patenteInput') !== -1)) {
+                  el = all[i];
+                  break;
+                }
+              }
+            } catch (e) {}
+          }
           if (el) {
             plateInput = {
-              id: el.id || '', name: el.name || '', type: el.type || '',
-              value: el.value || '', visible: !!(el.offsetWidth || el.offsetHeight)
+              id: el.id || '',
+              name: el.name || '',
+              type: el.type || '',
+              value: el.value || '',
+              valueAttr: el.getAttribute('value') || '',
+              visible: !!(el.offsetWidth || el.offsetHeight),
+              maxlength: el.maxLength > 0 ? el.maxLength : (el.getAttribute('maxlength') || '')
             };
           }
         });
