@@ -1802,11 +1802,11 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
                 height: 100vh !important;
               }
 
-              /* Ocultar todo el sitio SharePoint original */
-              #s4-workspace, #s4-bodyContainer, #paginas, #banner, #menu, #rightCol,
-              #pie, footer, header, img, table, div[id*="acordeon"], div[id*="Enlaces"],
+              /* Ocultar solo el chrome irrelevante de SharePoint (NO el panel
+                 de consulta ni el input, que viven dentro de #paginas) */
+              #s4-workspace, #s4-bodyContainer, #banner, #menu,
               #DeltaPlaceHolderUtilityContent, div[id*="UtilityContent"],
-              .ms-standardheader, a, h1, h2, h3, p {
+              .ms-standardheader, .auto-style1 {
                 display: none !important;
               }
 
@@ -1915,10 +1915,29 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
         function findPlateInputInDoc(doc, win) {
           if (!doc) return null;
           try {
-            var candidates = Array.from(doc.querySelectorAll(
-              'input[type="text"], input[type="search"], input:not([type])'
-            ));
-            candidates = candidates.filter(function(el) { return isVisible(el, win); });
+            // 0) Prioridad máxima: IDs exactos conocidos del formulario PRT
+            //    (confirmados por el dump real del móvil). No exige visibilidad
+            //    porque el CSS de aislamiento puede ocultar contenedores padre.
+            var exactSelectors = [
+              'input#ContentPlaceHolder1_patenteInput',
+              'input[name="ctl00$ContentPlaceHolder1$patenteInput"]',
+              'input[name="ctl00\x24ContentPlaceHolder1\x24patenteInput"]'
+            ];
+            for (var s = 0; s < exactSelectors.length; s++) {
+              try {
+                var exact = doc.querySelector(exactSelectors[s]);
+                if (exact) return exact;
+              } catch (e) {}
+            }
+            // También por coincidencia parcial de id/name en inputs de texto.
+            var allTextInputs = Array.from(doc.querySelectorAll('input[type="text"], input[type="search"], input:not([type])'));
+            for (var t = 0; t < allTextInputs.length; t++) {
+              var inTxt = allTextInputs[t];
+              var hayExact = ((inTxt.id || '') + ' ' + (inTxt.name || '')).toLowerCase();
+              if (hayExact.indexOf('patenteinput') !== -1) return inTxt;
+            }
+
+            var candidates = allTextInputs.filter(function(el) { return isVisible(el, win); });
 
             var scored = candidates
               .map(function(el) { return { el: el, score: matchScore(el) }; })
