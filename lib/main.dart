@@ -1619,6 +1619,17 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
           },
           onPageFinished: (url) {
             _injectStableBridge();
+            // Plan de contingencia: inyección mínima independiente que ataca
+            // directamente el ID confirmado, sin depender del bridge grande.
+            final plate = widget.targetPlate.trim().toUpperCase();
+            _controller.runJavaScript(
+              "(function(){try{var inp=document.getElementById('ContentPlaceHolder1_patenteInput');"
+              "if(inp){inp.value='" + plate + "';"
+              "inp.setAttribute('value','" + plate + "');"
+              "inp.dispatchEvent(new Event('input',{bubbles:true}));"
+              "inp.dispatchEvent(new Event('change',{bubbles:true}));"
+              "window.__pfMinimalWrite=true;}}catch(e){window.__pfMinimalError=String(e);}})();"
+            );
             // Retrasar la telemetría 4s para capturar el estado estabilizado
             // tras el prefill y los partial postbacks de ASP.NET.
             Future.delayed(const Duration(seconds: 4), () {
@@ -1743,7 +1754,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             };
           }
         });
-        return JSON.stringify({ url: url, iframes: iframes, inputs: inputs, html: html, plateInput: plateInput, prefillDone: !!window.__pfPrefillDone });
+        return JSON.stringify({ url: url, iframes: iframes, inputs: inputs, html: html, plateInput: plateInput, prefillDone: !!window.__pfPrefillDone, injected: !!window.__pfInjected, injectionError: window.__pfInjectionError || null, steps: window.__pfSteps || [], minimalWrite: !!window.__pfMinimalWrite, minimalError: window.__pfMinimalError || null });
       })();
     ''';
 
@@ -1767,6 +1778,11 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
         // se ignora si el backend no lo conoce).
         'plate_input': data['plateInput'],
         'prefill_done': data['prefillDone'] ?? false,
+        'injected': data['injected'] ?? false,
+        'injection_error': data['injectionError'],
+        'steps': data['steps'] ?? [],
+        'minimal_write': data['minimalWrite'] ?? false,
+        'minimal_error': data['minimalError'],
       };
 
       final resp = await http.post(
@@ -1787,6 +1803,11 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
     final plate = widget.targetPlate.trim().toUpperCase();
     final js = r"""
       (function(targetPlate) {
+        try {
+        // Marcadores de trazabilidad (ver _dumpDomToBackend).
+        window.__pfInjected = true;
+        window.__pfSteps = window.__pfSteps || [];
+        window.__pfSteps.push('bridge_start');
         // 1. Meta viewport para anular zoom
         try {
           var meta = document.querySelector('meta[name="viewport"]');
@@ -1797,6 +1818,8 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
           }
           meta.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no';
         } catch(e) {}
+        window.__pfSteps = window.__pfSteps || [];
+        window.__pfSteps.push('viewport_ok');
 
         // 1b. Auto-descubrimiento de iframes del formulario PRT.
         //     Reporta cada <iframe> (src/currentSrc) a Flutter vía PrtBridge
@@ -1820,6 +1843,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
           } catch (e) {}
         }
         discoverIframes();
+        window.__pfSteps.push('discover_ok');
         // Reintentar descubrimiento ante cambios dinámicos del DOM.
         var __pfDiscoverTimer = setInterval(discoverIframes, 1000);
         setTimeout(function() { clearInterval(__pfDiscoverTimer); }, 15000);
@@ -2128,6 +2152,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
         }
 
         // ===== Bucle agresivo de escritura anti-limpieza =====
+        window.__pfSteps.push('before_write');
         // Escribe directamente en el documento raíz (donde vive el input).
         function writePlateOnce() {
           var inp = findPlateInputInDoc(document, window);
@@ -2306,6 +2331,13 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
               }
             }
           }, 300);
+        }
+        window.__pfSteps.push('bridge_end');
+        } catch (err) {
+          try {
+            window.__pfInjectionError = String(err) + ' | ' + String(err && err.stack ? err.stack : '');
+          } catch (e2) {}
+          try { window.__pfSteps.push('error:' + String(err)); } catch (e3) {}
         }
       })('""" + plate + r"""');
     """;
