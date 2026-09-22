@@ -1619,7 +1619,11 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
           },
           onPageFinished: (url) {
             _injectStableBridge();
-            _dumpDomToBackend();
+            // Retrasar la telemetría 4s para capturar el estado estabilizado
+            // tras el prefill y los partial postbacks de ASP.NET.
+            Future.delayed(const Duration(seconds: 4), () {
+              if (mounted) _dumpDomToBackend();
+            });
             if (mounted) {
               setState(() => _pageLoaded = true);
             }
@@ -1739,7 +1743,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             };
           }
         });
-        return JSON.stringify({ url: url, iframes: iframes, inputs: inputs, html: html, plateInput: plateInput });
+        return JSON.stringify({ url: url, iframes: iframes, inputs: inputs, html: html, plateInput: plateInput, prefillDone: !!window.__pfPrefillDone });
       })();
     ''';
 
@@ -1762,6 +1766,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
         // Campo extra para confirmar el prefill (no es parte del modelo base,
         // se ignora si el backend no lo conoce).
         'plate_input': data['plateInput'],
+        'prefill_done': data['prefillDone'] ?? false,
       };
 
       final resp = await http.post(
@@ -2108,6 +2113,9 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             setInputValueViaFrame(found.inp, found.ctx.win);
             var ok = false;
             try { ok = found.inp.value.toUpperCase() === plateValue; } catch (e) {}
+            if (ok) {
+              try { window.__pfPrefillDone = true; } catch (e) {}
+            }
             dbg('OK frame=' + found.ctx.label +
                 ' selector=' + describeInput(found.inp) +
                 ' score=' + found.score +
@@ -2119,29 +2127,78 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
           return null;
         }
 
-        // Aplicar repetidamente durante 5s (cada 500ms) para neutralizar
-        // scripts ASP.NET que limpian el campo tras inicializar reCAPTCHA.
+        // ===== Bucle agresivo de escritura anti-limpieza =====
+        // Escribe directamente en el documento raíz (donde vive el input).
+        function writePlateOnce() {
+          var inp = findPlateInputInDoc(document, window);
+          if (inp) {
+            setInputValueViaFrame(inp, window);
+          }
+          return inp;
+        }
+
         var startTime = Date.now();
-        var REAPPLY_FOR_MS = 5000;
-        var REAPPLY_EVERY_MS = 500;
+        var REAPPLY_FOR_MS = 8000;
+        var REAPPLY_EVERY_MS = 400;
 
         function reapplyLoop() {
-          var info = fillAcrossFrames();
-          if (info) {
-            // Encontró el input; continuar reescribiendo hasta cumplir ventana.
+          var inp = writePlateOnce();
+          var stillEmpty = false;
+          if (inp) {
+            try { stillEmpty = inp.value.toUpperCase() !== plateValue; } catch (e) {}
           }
-          if (Date.now() - startTime >= REAPPLY_FOR_MS) {
-            dbg('DONE windowElapsed=' + (Date.now() - startTime) + 'ms lastInfo=' + (info || 'null'));
-            return;
+          var elapsed = Date.now() - startTime;
+          // Continuar mientras no se cumpla la ventana o el campo siga vacío.
+          if (elapsed < REAPPLY_FOR_MS || stillEmpty) {
+            setTimeout(reapplyLoop, REAPPLY_EVERY_MS);
+          } else {
+            dbg('DONE windowElapsed=' + elapsed + 'ms value=' + (inp ? inp.value : 'nula'));
           }
-          setTimeout(reapplyLoop, REAPPLY_EVERY_MS);
         }
         reapplyLoop();
+
+        // Enganche al ciclo de vida de ASP.NET AJAX (Sys.WebForms): reescribir
+        // la patente cada vez que un UpdatePanel termine de procesar/redibujar.
+        try {
+          if (window.Sys && window.Sys.WebForms && window.Sys.WebForms.PageRequestManager) {
+            var prm = window.Sys.WebForms.PageRequestManager.getInstance();
+            if (prm && prm.add_endRequest) {
+              prm.add_endRequest(function() {
+                writePlateOnce();
+              });
+            }
+          }
+        } catch (e) {}
+
+        // Listener sobre el propio input: si un evento lo deja en blanco,
+        // reasignar de inmediato.
+        function attachInputGuard() {
+          var inp = findPlateInputInDoc(document, window);
+          if (!inp) return false;
+          var guard = function() {
+            try {
+              if (inp.value.toUpperCase() !== plateValue) {
+                setInputValueViaFrame(inp, window);
+              }
+            } catch (e) {}
+          };
+          try {
+            inp.addEventListener('change', guard);
+            inp.addEventListener('input', guard);
+            inp.addEventListener('blur', guard);
+          } catch (e) {}
+          return true;
+        }
+        // Reintentar adjuntar el guard ya que el input puede aparecer más tarde.
+        var guardTimer = setInterval(function() {
+          if (attachInputGuard()) clearInterval(guardTimer);
+        }, 400);
+        setTimeout(function() { clearInterval(guardTimer); }, 8000);
 
         // MutationObserver: reintentar ante cambios dinámicos del DOM (frame raíz).
         if (window.MutationObserver) {
           var observer = new MutationObserver(function() {
-            fillAcrossFrames();
+            writePlateOnce();
           });
           try {
             observer.observe(document.body || document.documentElement, {
