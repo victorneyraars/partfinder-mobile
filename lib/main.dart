@@ -1567,6 +1567,10 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
           } else if (msg.startsWith('DEBUG:')) {
             // Reporte de depuración desde el JS inyectado (cross-frame prefill).
             debugPrint('[PRT-PREFILL] ${msg.substring(6)}');
+          } else if (msg.startsWith('LOG:')) {
+            // Consola remota en vivo: reenviar al backend para `docker logs -f`.
+            debugPrint('[PRT-LOG] ${msg.substring(4)}');
+            _sendRemoteLog(msg.substring(4));
           } else if (msg.startsWith('DISCOVER_IFRAME:')) {
             // Auto-descubrimiento de iframes del formulario PRT.
             final iframeUrl = msg.substring('DISCOVER_IFRAME:'.length).trim();
@@ -1630,6 +1634,18 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
               "inp.dispatchEvent(new Event('change',{bubbles:true}));"
               "window.__pfMinimalWrite=true;}}catch(e){window.__pfMinimalError=String(e);}})();"
             );
+            // Inyección dinámica desde el servidor (script editable sin rebuild).
+            _fetchAndInjectDynamicScript();
+            // Hook de consola: forward console.log/error/warn/info al backend.
+            _controller.runJavaScript(
+              "(function(){if(!window.__pfConsoleHooked){window.__pfConsoleHooked=true;"
+              "['log','error','warn','info'].forEach(function(m){"
+              "var orig=console[m];"
+              "console[m]=function(){try{orig.apply(console,arguments);}catch(e){}"
+              "try{var s=Array.prototype.map.call(arguments,function(a){return String(a);}).join(' ');"
+              "if(window.PrtBridge)window.PrtBridge.postMessage('LOG:[console.'+m+'] '+s);}catch(e){}};"
+              "});}})();"
+            );
             // Retrasar la telemetría 4s para capturar el estado estabilizado
             // tras el prefill y los partial postbacks de ASP.NET.
             Future.delayed(const Duration(seconds: 4), () {
@@ -1685,6 +1701,55 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
         _autoNavigatedToIframe = false;
       }
     }
+  }
+
+  /// Envía un mensaje a la consola remota del backend (/api/debug/log).
+  Future<void> _sendRemoteLog(String message) async {
+    try {
+      await http.post(
+        Uri.parse('http://91.99.145.70:8000/api/debug/log'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'message': message}),
+      ).timeout(const Duration(seconds: 4));
+    } catch (e) {
+      debugPrint('[PRT-LOG] error enviando: $e');
+    }
+  }
+
+  /// Descarga el script de inyección dinámica del backend, reemplaza
+  /// {{PLATE}} por la patente y lo ejecuta en el WebView. Si falla la red,
+  /// usa un fallback mínimo de emergencia.
+  Future<void> _fetchAndInjectDynamicScript() async {
+    try {
+      final resp = await http
+          .get(Uri.parse('http://91.99.145.70:8000/api/debug/prt-script.js'))
+          .timeout(const Duration(seconds: 6));
+      if (resp.statusCode == 200) {
+        final script = utf8.decode(resp.bodyBytes);
+        final plate = widget.targetPlate.trim().toUpperCase();
+        final filled = script.replaceAll('{{PLATE}}', plate);
+        await _controller.runJavaScript(filled);
+        debugPrint('[PRT-DYN] script inyectado (${filled.length} chars)');
+      } else {
+        debugPrint('[PRT-DYN] backend respondió ${resp.statusCode}, usando fallback');
+        _runEmergencyFallback();
+      }
+    } catch (e) {
+      debugPrint('[PRT-DYN] error descargando script: $e — usando fallback');
+      _runEmergencyFallback();
+    }
+  }
+
+  /// Fallback mínimo de emergencia si no se puede descargar el script dinámico.
+  void _runEmergencyFallback() {
+    final plate = widget.targetPlate.trim().toUpperCase();
+    _controller.runJavaScript(
+      "(function(){try{var inp=document.getElementById('ContentPlaceHolder1_patenteInput');"
+      "if(inp){inp.value='$plate';inp.setAttribute('value','$plate');"
+      "inp.dispatchEvent(new Event('input',{bubbles:true}));"
+      "inp.dispatchEvent(new Event('change',{bubbles:true}));}"
+      "}catch(e){}})();",
+    );
   }
 
   /// Volca el DOM actual del WebView (URL, iframes, inputs y un preview del
