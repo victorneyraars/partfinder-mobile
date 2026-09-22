@@ -1560,6 +1560,9 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             } catch (e) {
               debugPrint('Error parsing PRT payload: $e');
             }
+          } else if (msg.startsWith('DEBUG:')) {
+            // Reporte de depuración desde el JS inyectado (cross-frame prefill).
+            debugPrint('[PRT-PREFILL] ${msg.substring(6)}');
           } else if (msg == 'ERROR:NOT_FOUND') {
             if (mounted) {
               Navigator.of(context).pop();
@@ -1713,17 +1716,29 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
         var shieldInterval = setInterval(applyCardIsolation, 150);
         setTimeout(function() { clearInterval(shieldInterval); }, 20000);
 
-        // 3. Rellenar la patente de forma 100% dinámica y resiliente.
-        //    Detección heurística del input (sin IDs rígidos que puedan romperse).
+        // 3. Rellenar la patente de forma 100% dinámica y resiliente,
+        //    atravesando marcos (iframe) de forma recursiva.
         var KEYWORDS = ['patente', 'plate', 'ppr', 'placa', 'ppu', 'valor'];
+        var plateValue = targetPlate.toUpperCase();
 
-        function isVisible(el) {
+        function dbg(txt) {
+          try {
+            if (window.PrtBridge && window.PrtBridge.postMessage) {
+              window.PrtBridge.postMessage('DEBUG:' + txt);
+            }
+          } catch (e) {}
+        }
+
+        function isVisible(el, win) {
           if (!el) return false;
-          var rect = el.getBoundingClientRect();
-          if (rect.width === 0 && rect.height === 0) return false;
-          var style = window.getComputedStyle(el);
-          if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
-          return true;
+          var w = win || window;
+          try {
+            var rect = el.getBoundingClientRect();
+            if (rect.width === 0 && rect.height === 0) return false;
+            var style = w.getComputedStyle(el);
+            if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+            return true;
+          } catch (e) { return false; }
         }
 
         function tokenize(attrs) {
@@ -1731,7 +1746,6 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
         }
 
         function matchScore(input) {
-          // Score heurístico: cuántas pistas apuntan a que es el campo de patente.
           var id = input.id || '';
           var name = input.name || '';
           var placeholder = input.placeholder || '';
@@ -1745,153 +1759,192 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
           return score;
         }
 
-        function findPlateInput() {
-          var candidates = Array.from(document.querySelectorAll(
-            'input[type="text"], input[type="search"], input:not([type])'
-          ));
+        // Describe un input para los logs de depuración.
+        function describeInput(el) {
+          try {
+            return (
+              (el.tagName ? el.tagName.toLowerCase() : 'input') +
+              '[id=' + (el.id || '') +
+              ',name=' + (el.name || '') +
+              ',placeholder=' + (el.placeholder || '') +
+              ',aria=' + (el.getAttribute('aria-label') || '') +
+              ',class=' + (el.className ? String(el.className).slice(0, 40) : '') +
+              ']'
+            );
+          } catch (e) { return 'input?'; }
+        }
 
-          // 1) Filtrar solo inputs visibles.
-          candidates = candidates.filter(isVisible);
+        function findPlateInputInDoc(doc, win) {
+          if (!doc) return null;
+          try {
+            var candidates = Array.from(doc.querySelectorAll(
+              'input[type="text"], input[type="search"], input:not([type])'
+            ));
+            candidates = candidates.filter(function(el) { return isVisible(el, win); });
 
-          // 2) Buscar coincidencia por palabras clave en atributos.
-          var scored = candidates
-            .map(function(el) { return { el: el, score: matchScore(el) }; })
-            .filter(function(x) { return x.score > 0; })
-            .sort(function(a, b) { return b.score - a.score; });
+            var scored = candidates
+              .map(function(el) { return { el: el, score: matchScore(el) }; })
+              .filter(function(x) { return x.score > 0; })
+              .sort(function(a, b) { return b.score - a.score; });
 
-          if (scored.length > 0) return scored[0].el;
+            if (scored.length > 0) return scored[0].el;
 
-          // 3) Fallback: primer input de texto visible dentro de un <form>.
-          var forms = Array.from(document.querySelectorAll('form'));
-          for (var f = 0; f < forms.length; f++) {
-            var ins = Array.from(forms[f].querySelectorAll('input[type="text"], input[type="search"], input:not([type])'));
-            for (var i = 0; i < ins.length; i++) {
-              if (isVisible(ins[i])) return ins[i];
+            var forms = Array.from(doc.querySelectorAll('form'));
+            for (var f = 0; f < forms.length; f++) {
+              var ins = Array.from(forms[f].querySelectorAll('input[type="text"], input[type="search"], input:not([type])'));
+              for (var i = 0; i < ins.length; i++) {
+                if (isVisible(ins[i], win)) return ins[i];
+              }
+            }
+            return candidates[0] || null;
+          } catch (e) { return null; }
+        }
+
+        // Contextos de búsqueda: documento raíz + todos los iframes (recursivo).
+        function collectContexts() {
+          var contexts = [{ doc: document, win: window, label: 'root' }];
+          var seen = new Set();
+          try { seen.add(window); } catch (e) {}
+
+          function addFrameContext(win, label) {
+            if (!win) return;
+            try {
+              if (seen.has(win)) return;
+              seen.add(win);
+            } catch (e) {}
+            var doc = null;
+            try { doc = win.document; } catch (e) { return; } // cross-origin / acceso denegado
+            if (!doc) return;
+            contexts.push({ doc: doc, win: win, label: label || 'iframe' });
+            // Recurrir en sub-frames.
+            try {
+              for (var i = 0; i < win.frames.length; i++) {
+                addFrameContext(win.frames[i], (label || 'iframe') + '>' + i);
+              }
+            } catch (e) {}
+          }
+
+          // 1) window.frames
+          try {
+            for (var f = 0; f < window.frames.length; f++) {
+              addFrameContext(window.frames[f], 'frame[' + f + ']');
+            }
+          } catch (e) {}
+          // 2) iframes del documento
+          try {
+            var iframes = Array.from(document.querySelectorAll('iframe'));
+            for (var j = 0; j < iframes.length; j++) {
+              try {
+                var cw = iframes[j].contentWindow;
+                if (cw) addFrameContext(cw, 'iframe#' + (iframes[j].id || iframes[j].src || j));
+              } catch (e) {}
+            }
+          } catch (e) {}
+
+          return contexts;
+        }
+
+        function setInputValueViaFrame(inp, win) {
+          // Usar el setter de prototipo del HTMLInputElement del contexto de ese
+          // frame (React/SPA), con fallback a asignación directa.
+          try {
+            var proto = (win && win.HTMLInputElement) ? win.HTMLInputElement.prototype : window.HTMLInputElement.prototype;
+            var protoSetter = Object.getOwnPropertyDescriptor(proto, 'value').set;
+            protoSetter.call(inp, plateValue);
+          } catch (e) {
+            try { inp.value = plateValue; } catch (e2) {}
+          }
+          try {
+            inp.dispatchEvent(new Event('input', { bubbles: true }));
+            inp.dispatchEvent(new Event('change', { bubbles: true }));
+            var evBlur = new Event('blur', { bubbles: true });
+            inp.dispatchEvent(evBlur);
+          } catch (e) {}
+          try { inp.setAttribute('data-pf-prefilled', '1'); } catch (e) {}
+        }
+
+        // Recorre TODOS los contextos y aplica el valor. Devuelve info de debug.
+        function fillAcrossFrames() {
+          var contexts = collectContexts();
+          var found = null;
+          var bestScore = -1;
+
+          for (var c = 0; c < contexts.length; c++) {
+            var ctx = contexts[c];
+            var inp = findPlateInputInDoc(ctx.doc, ctx.win);
+            if (inp) {
+              var sc = matchScore(inp);
+              if (sc > bestScore) {
+                bestScore = sc;
+                found = { inp: inp, ctx: ctx, score: sc };
+              }
             }
           }
 
-          // 4) Último recurso: primer input de texto visible de la página.
-          return candidates[0] || null;
-        }
-
-        function setInputValueViaPrototype(el, value) {
-          try {
-            var protoSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
-            protoSetter.call(el, value);
-          } catch (e) {
-            // Fallback nativo si el setter de prototipo no está disponible.
-            el.value = value;
+          if (found) {
+            setInputValueViaFrame(found.inp, found.ctx.win);
+            var ok = false;
+            try { ok = found.inp.value.toUpperCase() === plateValue; } catch (e) {}
+            dbg('OK frame=' + found.ctx.label +
+                ' selector=' + describeInput(found.inp) +
+                ' score=' + found.score +
+                ' valueSet=' + ok);
+            return found.ctx.label + ' | ' + describeInput(found.inp);
           }
-          // Dispachar el ciclo de vida para marcos reactivos (React/Vue/Angular).
-          el.dispatchEvent(new Event('input', { bubbles: true }));
-          el.dispatchEvent(new Event('change', { bubbles: true }));
-          try { el.dispatchEvent(new Event('blur', { bubbles: true })); } catch (e2) {}
-        }
 
-        var plateValue = targetPlate.toUpperCase();
-
-        function setPlate() {
-          var inp = findPlateInput();
-          if (inp && inp.value.toUpperCase() !== plateValue) {
-            setInputValueViaPrototype(inp, plateValue);
-            // Foco en el input solo si aún no hay captcha listo.
-            try { inp.focus({ preventScroll: false }); } catch (e) {}
-            // Notificar éxito de prefill (marca en el DOM para evitar re-despacho).
-            inp.setAttribute('data-pf-prefilled', '1');
-          }
-          return inp;
-        }
-
-        // 4. Detección dinámica del botón de consulta/búsqueda.
-        function findSubmitButton() {
-          var buttons = Array.from(document.querySelectorAll(
-            'button, input[type="submit"], input[type="button"], a, [role="button"]'
-          ));
-          var filtered = buttons.filter(isVisible);
-
-          // a) Por texto "consultar"/"buscar".
-          for (var i = 0; i < filtered.length; i++) {
-            var txt = (filtered[i].innerText || filtered[i].value || filtered[i].getAttribute('aria-label') || '').toLowerCase();
-            if (txt.indexOf('consultar') !== -1 || txt.indexOf('buscar') !== -1) return filtered[i];
-          }
-          // b) Por tipo submit dentro de un form.
-          for (var j = 0; j < filtered.length; j++) {
-            if (filtered[j].tagName === 'INPUT' && (filtered[j].type || '').toLowerCase() === 'submit') return filtered[j];
-          }
-          // c) Icono de lupa (clases aria o data comunes).
-          for (var k = 0; k < filtered.length; k++) {
-            var c = (filtered[k].className || '') + ' ' + (filtered[k].getAttribute('aria-label') || '');
-            if (c.indexOf('search') !== -1 || c.indexOf('lupa') !== -1 || c.indexOf('buscar') !== -1) return filtered[k];
-          }
+          dbg('NOT_FOUND contexts=' + contexts.length);
           return null;
         }
 
-        // 5. Scroll automático suave hacia el reCAPTCHA si ya está renderizado.
-        function scrollToCaptchaIfReady() {
-          var cap = document.querySelector(
-            '.g-recaptcha, iframe[src*="recaptcha"], [id*="captcha"], #ContentPlaceHolder1_divcaptcha'
-          );
-          if (cap && isVisible(cap)) {
-            try {
-              cap.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            } catch (e) {
-              try { cap.scrollIntoView(); } catch (e2) {}
-            }
-            return true;
+        // Aplicar repetidamente durante 5s (cada 500ms) para neutralizar
+        // scripts ASP.NET que limpian el campo tras inicializar reCAPTCHA.
+        var startTime = Date.now();
+        var REAPPLY_FOR_MS = 5000;
+        var REAPPLY_EVERY_MS = 500;
+
+        function reapplyLoop() {
+          var info = fillAcrossFrames();
+          if (info) {
+            // Encontró el input; continuar reescribiendo hasta cumplir ventana.
           }
-          return false;
+          if (Date.now() - startTime >= REAPPLY_FOR_MS) {
+            dbg('DONE windowElapsed=' + (Date.now() - startTime) + 'ms lastInfo=' + (info || 'null'));
+            return;
+          }
+          setTimeout(reapplyLoop, REAPPLY_EVERY_MS);
         }
+        reapplyLoop();
 
-        // Aplicación inicial + polling resiliente hasta encontrar el input,
-        // apoyado por MutationObserver para detectar inserción dinámica.
-        var attempts = 0;
-        var MAX_ATTEMPTS = 40;
-
-        function attemptFill() {
-          var inp = setPlate();
-          if (inp) {
-            scrollToCaptchaIfReady();
-            return true;
-          }
-          return false;
-        }
-
-        attemptFill();
-
-        var prefillTimer = setInterval(function() {
-          attempts++;
-          if (attemptFill()) {
-            clearInterval(prefillTimer);
-          } else if (attempts >= MAX_ATTEMPTS) {
-            clearInterval(prefillTimer);
-          }
-        }, 300);
-
-        // MutationObserver: reintenta si el DOM cambia (elementos dinámicos).
+        // MutationObserver: reintentar ante cambios dinámicos del DOM (frame raíz).
         if (window.MutationObserver) {
           var observer = new MutationObserver(function() {
-            if (!window.__pfPrefillDone) {
-              attemptFill();
-            }
+            fillAcrossFrames();
           });
-          observer.observe(document.body || document.documentElement, {
-            childList: true,
-            subtree: true,
-          });
-          // Desconectar el observer cuando ya se precargó el input.
-          var obsInterval = setInterval(function() {
-            var inp = findPlateInput();
-            if (inp && inp.getAttribute('data-pf-prefilled') === '1') {
-              window.__pfPrefillDone = true;
-              observer.disconnect();
-              clearInterval(obsInterval);
-            }
-          }, 500);
-          setTimeout(function() {
-            observer.disconnect();
-            clearInterval(obsInterval);
-          }, 20000);
+          try {
+            observer.observe(document.body || document.documentElement, {
+              childList: true,
+              subtree: true,
+            });
+          } catch (e) {}
+          setTimeout(function() { try { observer.disconnect(); } catch (e) {} }, 12000);
         }
+
+        // Scroll automático suave hacia el reCAPTCHA si ya está renderizado.
+        function scrollToCaptchaIfReady() {
+          var cap = null;
+          try {
+            cap = document.querySelector(
+              '.g-recaptcha, iframe[src*="recaptcha"], [id*="captcha"], #ContentPlaceHolder1_divcaptcha'
+            );
+          } catch (e) {}
+          if (cap && isVisible(cap)) {
+            try { cap.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+            catch (e) { try { cap.scrollIntoView(); } catch (e2) {} }
+            return true;
+          }
+          return false;
+        }
+        scrollToCaptchaIfReady();
 
         // 4. Polling extractor de datos de Revisión Técnica
         if (!window.__prtWatcherActive) {
