@@ -1705,7 +1705,19 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
         });
         var url = '';
         safe(function() { url = window.location.href || ''; });
-        return JSON.stringify({ url: url, iframes: iframes, inputs: inputs, html: html });
+        // Leer el valor vivo del input de patente (propiedad .value, no atributo).
+        var plateInput = null;
+        safe(function() {
+          var el = document.getElementById('ContentPlaceHolder1_patenteInput') ||
+                   document.querySelector('input[name="ctl00$ContentPlaceHolder1$patenteInput"]');
+          if (el) {
+            plateInput = {
+              id: el.id || '', name: el.name || '', type: el.type || '',
+              value: el.value || '', visible: !!(el.offsetWidth || el.offsetHeight)
+            };
+          }
+        });
+        return JSON.stringify({ url: url, iframes: iframes, inputs: inputs, html: html, plateInput: plateInput });
       })();
     ''';
 
@@ -1725,6 +1737,9 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
         'iframes': data['iframes'] ?? [],
         'inputs': data['inputs'] ?? [],
         'html': data['html'] ?? '',
+        // Campo extra para confirmar el prefill (no es parte del modelo base,
+        // se ignora si el backend no lo conoce).
+        'plate_input': data['plateInput'],
       };
 
       final resp = await http.post(
