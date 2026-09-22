@@ -1535,6 +1535,9 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
   bool _autoNavigatedToIframe = false;
   // Evita enviar el dump de diagnóstico más de una vez por pantalla.
   bool _debugSent = false;
+  // Overlay nativo: mientras false se muestra el indicador de carga.
+  bool _isReady = false;
+  Timer? _readyFallbackTimer;
 
   @override
   void initState() {
@@ -1542,6 +1545,13 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
     Future.delayed(const Duration(milliseconds: 2500), () {
       if (mounted && !_pageLoaded) {
         setState(() => _pageLoaded = true);
+      }
+    });
+    // Timeout de seguridad: si no llega 'READY' en 6s, revelar igualmente
+    // para no dejar al usuario bloqueado en la pantalla de carga.
+    _readyFallbackTimer = Timer(const Duration(seconds: 6), () {
+      if (mounted && !_isReady) {
+        setState(() => _isReady = true);
       }
     });
     _controller = WebViewController()
@@ -1571,6 +1581,11 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             // Consola remota en vivo: reenviar al backend para `docker logs -f`.
             debugPrint('[PRT-LOG] ${msg.substring(4)}');
             _sendRemoteLog(msg.substring(4));
+          } else if (msg == 'READY') {
+            // El script dinámico terminó de escribir + encuadrar: revelar el WebView.
+            if (!_isReady && mounted) {
+              setState(() => _isReady = true);
+            }
           } else if (msg.startsWith('DISCOVER_IFRAME:')) {
             // Auto-descubrimiento de iframes del formulario PRT.
             final iframeUrl = msg.substring('DISCOVER_IFRAME:'.length).trim();
@@ -2410,6 +2425,12 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
   }
 
   @override
+  void dispose() {
+    _readyFallbackTimer?.cancel();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFF0F172A),
@@ -2435,8 +2456,12 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
       ),
       body: Stack(
         children: [
-          WebViewWidget(controller: _controller),
-          if (!_pageLoaded)
+          // WebView oculto hasta que el script confirme 'READY' (o timeout).
+          Opacity(
+            opacity: _isReady ? 1.0 : 0.0,
+            child: WebViewWidget(controller: _controller),
+          ),
+          if (!_isReady)
             Container(
               color: const Color(0xFF0F172A),
               child: const Center(
@@ -2446,7 +2471,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
                     CircularProgressIndicator(color: Color(0xFF38BDF8)),
                     SizedBox(height: 16),
                     Text(
-                      'Cargando portal PRT...',
+                      'Preparando consulta técnica...',
                       style: TextStyle(color: Colors.white70, fontSize: 14),
                     ),
                   ],
