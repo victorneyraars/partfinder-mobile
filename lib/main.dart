@@ -1533,6 +1533,8 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
   bool _pageLoaded = false;
   // Evita navegar repetidamente al mismo iframe detectado (anti-loop).
   bool _autoNavigatedToIframe = false;
+  // Evita enviar el dump de diagnóstico más de una vez por pantalla.
+  bool _debugSent = false;
 
   @override
   void initState() {
@@ -1617,6 +1619,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
           },
           onPageFinished: (url) {
             _injectStableBridge();
+            _dumpDomToBackend();
             if (mounted) {
               setState(() => _pageLoaded = true);
             }
@@ -1666,6 +1669,75 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
         debugPrint('[PRT-DISCOVER] Error navegando: $e');
         _autoNavigatedToIframe = false;
       }
+    }
+  }
+
+  /// Volca el DOM actual del WebView (URL, iframes, inputs y un preview del
+  /// HTML) al backend de diagnóstico para su inspección remota.
+  Future<void> _dumpDomToBackend() async {
+    // Guarda anti-doble-reporte: una vez por pantalla.
+    if (_debugSent) return;
+    _debugSent = true;
+
+    const String collectJs = '''
+      (function() {
+        function safe(fn) { try { return fn(); } catch (e) { return null; } }
+        var iframes = [];
+        safe(function() {
+          document.querySelectorAll('iframe').forEach(function(f) {
+            iframes.push({ src: f.currentSrc || f.src || '', id: f.id || '', name: f.name || '' });
+          });
+        });
+        var inputs = [];
+        safe(function() {
+          document.querySelectorAll('input').forEach(function(i) {
+            inputs.push({
+              id: i.id || '', name: i.name || '', type: i.type || '',
+              className: (i.className && typeof i.className === 'string') ? i.className : '',
+              placeholder: i.placeholder || ''
+            });
+          });
+        });
+        var html = '';
+        safe(function() {
+          html = document.documentElement ? document.documentElement.outerHTML : '';
+          if (html.length > 50000) html = html.substring(0, 50000);
+        });
+        var url = '';
+        safe(function() { url = window.location.href || ''; });
+        return JSON.stringify({ url: url, iframes: iframes, inputs: inputs, html: html });
+      })();
+    ''';
+
+    try {
+      final result = await _controller.runJavaScriptReturningResult(collectJs);
+      final String raw = result.toString();
+      // El resultado viene como string JSON; si llega con comillas envolventes, limpiar.
+      String decoded = raw;
+      if (decoded.length >= 2 && decoded.startsWith('"') && decoded.endsWith('"')) {
+        try { decoded = jsonDecode(decoded) as String; } catch (_) {}
+      }
+      final Map<String, dynamic> data = jsonDecode(decoded) as Map<String, dynamic>;
+
+      final payload = {
+        'tag': 'prt-dom-${widget.targetPlate}',
+        'url': data['url'] ?? '',
+        'iframes': data['iframes'] ?? [],
+        'inputs': data['inputs'] ?? [],
+        'html': data['html'] ?? '',
+      };
+
+      final resp = await http.post(
+        Uri.parse('http://91.99.145.70:8000/api/debug/dump'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode(payload),
+      ).timeout(const Duration(seconds: 8));
+      debugPrint('[PRT-DUMP] backend status=${resp.statusCode} '
+          'iframes=${(data['iframes'] as List?)?.length ?? 0} '
+          'inputs=${(data['inputs'] as List?)?.length ?? 0} '
+          'htmlLen=${(data['html'] as String?)?.length ?? 0}');
+    } catch (e) {
+      debugPrint('[PRT-DUMP] error: $e');
     }
   }
 
