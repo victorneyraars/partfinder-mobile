@@ -1531,6 +1531,8 @@ class PrtVerificationScreen extends StatefulWidget {
 class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
   late final WebViewController _controller;
   bool _pageLoaded = false;
+  // Evita navegar repetidamente al mismo iframe detectado (anti-loop).
+  bool _autoNavigatedToIframe = false;
 
   @override
   void initState() {
@@ -1563,6 +1565,11 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
           } else if (msg.startsWith('DEBUG:')) {
             // Reporte de depuración desde el JS inyectado (cross-frame prefill).
             debugPrint('[PRT-PREFILL] ${msg.substring(6)}');
+          } else if (msg.startsWith('DISCOVER_IFRAME:')) {
+            // Auto-descubrimiento de iframes del formulario PRT.
+            final iframeUrl = msg.substring('DISCOVER_IFRAME:'.length).trim();
+            debugPrint('[PRT-DISCOVER] $iframeUrl');
+            _handleDiscoveredIframe(iframeUrl);
           } else if (msg == 'ERROR:NOT_FOUND') {
             if (mounted) {
               Navigator.of(context).pop();
@@ -1629,6 +1636,39 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
       ..loadRequest(Uri.parse('https://www.prt.cl/Paginas/RevisionTecnica.aspx'));
   }
 
+  /// Maneja una URL de iframe descubierta desde el JS inyectado.
+  ///
+  /// Si la URL apunta al formulario real (contiene términos como 'consulta',
+  /// 'revision', 'mtt', 'aspx', 'prt', etc.), navega el WebView directamente a
+  /// ese iframe para que el formulario sea el documento raíz y elimine la
+  /// restricción cross-origin. Se controla con [_autoNavigatedToIframe] para
+  /// no volver a navegar si ya se redirigió una vez.
+  void _handleDiscoveredIframe(String iframeUrl) {
+    if (_autoNavigatedToIframe) return;
+    if (iframeUrl.isEmpty) return;
+
+    final lower = iframeUrl.toLowerCase();
+    final keywords = ['consulta', 'revision', 'revisiontecnica', 'mtt', 'aspx', 'prt', 'patente', 'ppu', 'form'];
+    final isFormUrl = keywords.any((k) => lower.contains(k));
+
+    // Descarta explícitamente iframes que no son el formulario (recaptcha, ads, etc.).
+    final isNoise = lower.contains('recaptcha') || lower.contains('google') || lower.contains('bframe');
+
+    if (isFormUrl && !isNoise) {
+      _autoNavigatedToIframe = true;
+      debugPrint('[PRT-DISCOVER] Navegando a formulario directo: $iframeUrl');
+      try {
+        final uri = Uri.parse(iframeUrl);
+        if (uri.hasScheme) {
+          _controller.loadRequest(uri);
+        }
+      } catch (e) {
+        debugPrint('[PRT-DISCOVER] Error navegando: $e');
+        _autoNavigatedToIframe = false;
+      }
+    }
+  }
+
   void _injectStableBridge() {
     final plate = widget.targetPlate.trim().toUpperCase();
     final js = r"""
@@ -1643,6 +1683,32 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
           }
           meta.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no';
         } catch(e) {}
+
+        // 1b. Auto-descubrimiento de iframes del formulario PRT.
+        //     Reporta cada <iframe> (src/currentSrc) a Flutter vía PrtBridge
+        //     para que el WebView navegue directo al formulario si aplica.
+        var __pfReportedIframes = {};
+        function discoverIframes() {
+          try {
+            var iframes = Array.from(document.querySelectorAll('iframe'));
+            for (var i = 0; i < iframes.length; i++) {
+              var src = '';
+              try { src = iframes[i].currentSrc || iframes[i].src || ''; } catch (e) {}
+              if (!src) continue;
+              // Normalizar URLs relativas a absolutas.
+              try { src = new URL(src, document.baseURI).href; } catch (e) {}
+              if (!src || __pfReportedIframes[src]) continue;
+              __pfReportedIframes[src] = true;
+              if (window.PrtBridge && window.PrtBridge.postMessage) {
+                window.PrtBridge.postMessage('DISCOVER_IFRAME:' + src);
+              }
+            }
+          } catch (e) {}
+        }
+        discoverIframes();
+        // Reintentar descubrimiento ante cambios dinámicos del DOM.
+        var __pfDiscoverTimer = setInterval(discoverIframes, 1000);
+        setTimeout(function() { clearInterval(__pfDiscoverTimer); }, 15000);
 
         // 2. Función de limpieza y centrado indestructible (resistente a recargas de SharePoint)
         function applyCardIsolation() {
