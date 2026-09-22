@@ -2017,21 +2017,50 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
         }
 
         function setInputValueViaFrame(inp, win) {
-          // Usar el setter de prototipo del HTMLInputElement del contexto de ese
-          // frame (React/SPA), con fallback a asignación directa.
+          // Escritura a bajo nivel y robusta para ASP.NET/jQuery.
+          // 1) Asignar la propiedad .value (vía setter de prototipo del frame).
           try {
             var proto = (win && win.HTMLInputElement) ? win.HTMLInputElement.prototype : window.HTMLInputElement.prototype;
             var protoSetter = Object.getOwnPropertyDescriptor(proto, 'value').set;
-            protoSetter.call(inp, plateValue);
+            if (protoSetter) {
+              protoSetter.call(inp, plateValue);
+            } else {
+              inp.value = plateValue;
+            }
           } catch (e) {
             try { inp.value = plateValue; } catch (e2) {}
           }
+
+          // 2) Asignar también el atributo HTML value (reflejo en el markup).
+          try { inp.setAttribute('value', plateValue); } catch (e) {}
+
+          // 3) Disparar la secuencia completa de eventos de teclado nativos,
+          //    para que cualquier listener (jQuery/ASP.NET) valide el campo.
+          function fire(type) {
+            try {
+              var ev = document.createEvent('Event');
+              ev.initEvent(type, true, true);
+              inp.dispatchEvent(ev);
+            } catch (e) {}
+          }
+          fire('focus');
+          fire('keydown');
+          fire('keypress');
+          fire('input');
+          fire('keyup');
+          fire('change');
+          fire('blur');
+
+          // 4) Compatibilidad jQuery: forzar valor y evento change.
           try {
-            inp.dispatchEvent(new Event('input', { bubbles: true }));
-            inp.dispatchEvent(new Event('change', { bubbles: true }));
-            var evBlur = new Event('blur', { bubbles: true });
-            inp.dispatchEvent(evBlur);
+            if (window.jQuery && window.jQuery.fn && window.jQuery.fn.val) {
+              window.jQuery(inp).val(plateValue).trigger('change');
+            }
           } catch (e) {}
+
+          // 5) Foco directo y selección (confirma visualmente el valor).
+          try { inp.focus(); inp.select(); } catch (e) {}
+
           try { inp.setAttribute('data-pf-prefilled', '1'); } catch (e) {}
         }
 
