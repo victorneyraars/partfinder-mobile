@@ -207,13 +207,27 @@ _vehicleData = v;
           _showSnack('No se encontraron especificaciones para $rawPlate');
         }
       } else if (response.statusCode == 404) {
+        // Contrato formal frontend-backend: el backend responde con
+        //   { detail: { error: "not_cached", message: ..., require_prt_solve: true } }
+        // para indicar que la patente NO está cacheada y debe resolverse P2P
+        // desde el navegador del móvil (IP residencial), no desde el backend.
+        bool requirePrtSolve = false;
         try {
           final dynamic errJson = jsonDecode(body);
-          if (errJson is Map && (errJson['require_prt_solve'] == true || (errJson['detail'] is Map && errJson['detail']['require_prt_solve'] == true))) {
-            _openPrtVerificationScreen(rawPlate);
-            return;
+          if (errJson is Map) {
+            final detail = errJson['detail'];
+            requirePrtSolve =
+                errJson['require_prt_solve'] == true ||
+                (detail is Map && detail['require_prt_solve'] == true);
           }
         } catch (_) {}
+
+        // Abrir el resolver P2P si el motor es PRT o si el backend lo solicita
+        // explícitamente (require_prt_solve), independientemente del switch.
+        if (requirePrtSolve || _selectedEngine == 'prt') {
+          _openPrtVerificationScreen(rawPlate);
+          return;
+        }
         _showSnack('Patente no encontrada en el registro oficial');
       } else {
         _showSnack('Error del servidor (${response.statusCode})');
@@ -247,10 +261,10 @@ _vehicleData = v;
               _vehicleData = scraped;
             });
 
-            // 1. Guardar en PostgreSQL via backend
+            // 1. Guardar en PostgreSQL via backend (endpoint de ingesta directa)
             final plateClean = _plateController.text.trim().toUpperCase();
             try {
-              final cacheUri = Uri.parse("http://91.99.145.70:8000/api/patente/cache");
+              final cacheUri = Uri.parse("http://91.99.145.70:8000/api/vehicle/cache");
               final res = await http.post(
                 cacheUri,
                 headers: {"Content-Type": "application/json"},
@@ -1699,19 +1713,185 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
         var shieldInterval = setInterval(applyCardIsolation, 150);
         setTimeout(function() { clearInterval(shieldInterval); }, 20000);
 
-        // 3. Rellenar la patente de forma continua
-        function setPlate() {
-          var inp = document.getElementById('ContentPlaceHolder1_patenteInput') ||
-                    document.querySelector('input[name*="patenteInput"]');
-          if (inp && inp.value !== targetPlate) {
-            inp.value = targetPlate;
-            inp.dispatchEvent(new Event('input', { bubbles: true }));
-            inp.dispatchEvent(new Event('change', { bubbles: true }));
-          }
+        // 3. Rellenar la patente de forma 100% dinámica y resiliente.
+        //    Detección heurística del input (sin IDs rígidos que puedan romperse).
+        var KEYWORDS = ['patente', 'plate', 'ppr', 'placa', 'ppu', 'valor'];
+
+        function isVisible(el) {
+          if (!el) return false;
+          var rect = el.getBoundingClientRect();
+          if (rect.width === 0 && rect.height === 0) return false;
+          var style = window.getComputedStyle(el);
+          if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+          return true;
         }
-        setPlate();
-        var fillTimer = setInterval(setPlate, 300);
-        setTimeout(function() { clearInterval(fillTimer); }, 10000);
+
+        function tokenize(attrs) {
+          return (attrs || '').toLowerCase();
+        }
+
+        function matchScore(input) {
+          // Score heurístico: cuántas pistas apuntan a que es el campo de patente.
+          var id = input.id || '';
+          var name = input.name || '';
+          var placeholder = input.placeholder || '';
+          var aria = input.getAttribute('aria-label') || '';
+          var cls = input.className || '';
+          var haystack = tokenize(id + ' ' + name + ' ' + placeholder + ' ' + aria + ' ' + cls);
+          var score = 0;
+          for (var i = 0; i < KEYWORDS.length; i++) {
+            if (haystack.indexOf(KEYWORDS[i]) !== -1) score += 2;
+          }
+          return score;
+        }
+
+        function findPlateInput() {
+          var candidates = Array.from(document.querySelectorAll(
+            'input[type="text"], input[type="search"], input:not([type])'
+          ));
+
+          // 1) Filtrar solo inputs visibles.
+          candidates = candidates.filter(isVisible);
+
+          // 2) Buscar coincidencia por palabras clave en atributos.
+          var scored = candidates
+            .map(function(el) { return { el: el, score: matchScore(el) }; })
+            .filter(function(x) { return x.score > 0; })
+            .sort(function(a, b) { return b.score - a.score; });
+
+          if (scored.length > 0) return scored[0].el;
+
+          // 3) Fallback: primer input de texto visible dentro de un <form>.
+          var forms = Array.from(document.querySelectorAll('form'));
+          for (var f = 0; f < forms.length; f++) {
+            var ins = Array.from(forms[f].querySelectorAll('input[type="text"], input[type="search"], input:not([type])'));
+            for (var i = 0; i < ins.length; i++) {
+              if (isVisible(ins[i])) return ins[i];
+            }
+          }
+
+          // 4) Último recurso: primer input de texto visible de la página.
+          return candidates[0] || null;
+        }
+
+        function setInputValueViaPrototype(el, value) {
+          try {
+            var protoSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+            protoSetter.call(el, value);
+          } catch (e) {
+            // Fallback nativo si el setter de prototipo no está disponible.
+            el.value = value;
+          }
+          // Dispachar el ciclo de vida para marcos reactivos (React/Vue/Angular).
+          el.dispatchEvent(new Event('input', { bubbles: true }));
+          el.dispatchEvent(new Event('change', { bubbles: true }));
+          try { el.dispatchEvent(new Event('blur', { bubbles: true })); } catch (e2) {}
+        }
+
+        var plateValue = targetPlate.toUpperCase();
+
+        function setPlate() {
+          var inp = findPlateInput();
+          if (inp && inp.value.toUpperCase() !== plateValue) {
+            setInputValueViaPrototype(inp, plateValue);
+            // Foco en el input solo si aún no hay captcha listo.
+            try { inp.focus({ preventScroll: false }); } catch (e) {}
+            // Notificar éxito de prefill (marca en el DOM para evitar re-despacho).
+            inp.setAttribute('data-pf-prefilled', '1');
+          }
+          return inp;
+        }
+
+        // 4. Detección dinámica del botón de consulta/búsqueda.
+        function findSubmitButton() {
+          var buttons = Array.from(document.querySelectorAll(
+            'button, input[type="submit"], input[type="button"], a, [role="button"]'
+          ));
+          var filtered = buttons.filter(isVisible);
+
+          // a) Por texto "consultar"/"buscar".
+          for (var i = 0; i < filtered.length; i++) {
+            var txt = (filtered[i].innerText || filtered[i].value || filtered[i].getAttribute('aria-label') || '').toLowerCase();
+            if (txt.indexOf('consultar') !== -1 || txt.indexOf('buscar') !== -1) return filtered[i];
+          }
+          // b) Por tipo submit dentro de un form.
+          for (var j = 0; j < filtered.length; j++) {
+            if (filtered[j].tagName === 'INPUT' && (filtered[j].type || '').toLowerCase() === 'submit') return filtered[j];
+          }
+          // c) Icono de lupa (clases aria o data comunes).
+          for (var k = 0; k < filtered.length; k++) {
+            var c = (filtered[k].className || '') + ' ' + (filtered[k].getAttribute('aria-label') || '');
+            if (c.indexOf('search') !== -1 || c.indexOf('lupa') !== -1 || c.indexOf('buscar') !== -1) return filtered[k];
+          }
+          return null;
+        }
+
+        // 5. Scroll automático suave hacia el reCAPTCHA si ya está renderizado.
+        function scrollToCaptchaIfReady() {
+          var cap = document.querySelector(
+            '.g-recaptcha, iframe[src*="recaptcha"], [id*="captcha"], #ContentPlaceHolder1_divcaptcha'
+          );
+          if (cap && isVisible(cap)) {
+            try {
+              cap.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            } catch (e) {
+              try { cap.scrollIntoView(); } catch (e2) {}
+            }
+            return true;
+          }
+          return false;
+        }
+
+        // Aplicación inicial + polling resiliente hasta encontrar el input,
+        // apoyado por MutationObserver para detectar inserción dinámica.
+        var attempts = 0;
+        var MAX_ATTEMPTS = 40;
+
+        function attemptFill() {
+          var inp = setPlate();
+          if (inp) {
+            scrollToCaptchaIfReady();
+            return true;
+          }
+          return false;
+        }
+
+        attemptFill();
+
+        var prefillTimer = setInterval(function() {
+          attempts++;
+          if (attemptFill()) {
+            clearInterval(prefillTimer);
+          } else if (attempts >= MAX_ATTEMPTS) {
+            clearInterval(prefillTimer);
+          }
+        }, 300);
+
+        // MutationObserver: reintenta si el DOM cambia (elementos dinámicos).
+        if (window.MutationObserver) {
+          var observer = new MutationObserver(function() {
+            if (!window.__pfPrefillDone) {
+              attemptFill();
+            }
+          });
+          observer.observe(document.body || document.documentElement, {
+            childList: true,
+            subtree: true,
+          });
+          // Desconectar el observer cuando ya se precargó el input.
+          var obsInterval = setInterval(function() {
+            var inp = findPlateInput();
+            if (inp && inp.getAttribute('data-pf-prefilled') === '1') {
+              window.__pfPrefillDone = true;
+              observer.disconnect();
+              clearInterval(obsInterval);
+            }
+          }, 500);
+          setTimeout(function() {
+            observer.disconnect();
+            clearInterval(obsInterval);
+          }, 20000);
+        }
 
         // 4. Polling extractor de datos de Revisión Técnica
         if (!window.__prtWatcherActive) {
