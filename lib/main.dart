@@ -2453,6 +2453,23 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
     super.dispose();
   }
 
+  /// Construye los params de creación del WebViewWidget con composición
+  /// híbrida clásica (displayWithHybridComposition=true) para evitar el fallo
+  /// de buffer SurfaceTexture/TextureLayer en Android.
+  PlatformWebViewWidgetCreationParams _hybridCompositionParams() {
+    PlatformWebViewWidgetCreationParams params = PlatformWebViewWidgetCreationParams(
+      controller: _controller.platform,
+      layoutDirection: TextDirection.ltr,
+    );
+    if (WebViewPlatform.instance is AndroidWebViewPlatform) {
+      params = AndroidWebViewWidgetCreationParams.fromPlatformWebViewWidgetCreationParams(
+        params,
+        displayWithHybridComposition: true,
+      );
+    }
+    return params;
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -2482,12 +2499,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
           // WebView nativo con composición híbrida clásica (evita el lienzo en
           // blanco del SurfaceTexture/TextureLayer). SIEMPRE al 100% de fondo.
           WebViewWidget.fromPlatformCreationParams(
-            controller: _controller,
-            params: PlatformWebViewWidgetCreationParams(
-              android: AndroidWebViewWidgetCreationParams(
-                displayWithHybridComposition: true,
-              ),
-            ),
+            params: _hybridCompositionParams(),
           ),
 
           // Overlay sólido nativo que desaparece limpiamente al estar READY.
