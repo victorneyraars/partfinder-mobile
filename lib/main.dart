@@ -2610,14 +2610,21 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
         children: [
           // WebView nativo con composición híbrida clásica (evita el lienzo en
           // blanco del SurfaceTexture/TextureLayer). SIEMPRE al 100% de fondo.
-          // IgnorePointer: durante el postback se desactiva TODA interacción
-          // con el PlatformView (toques y foco nativo del WebView).
-          IgnorePointer(
-            ignoring: _isProcessingPostback,
-            child: WebViewWidget.fromPlatformCreationParams(
+          //
+          // BLINDAJE DEFINITIVO DEL TECLADO: apenas _isProcessingPostback es
+          // true, el WebViewWidget se retira del árbol (SizedBox.shrink). El
+          // WebView nativo NO se destruye (es propiedad del WebViewController:
+          // el dispose del PlatformView es no-op en webview_flutter_android
+          // 3.15.0, y el postback/navegación continúa en la instancia
+          // desacoplada), pero su View desaparece del árbol de Android y el
+          // InputMethodManager mata la sesión del IME de forma inmediata e
+          // inapelable. En pantalla queda únicamente la telemetría ejecutiva.
+          if (_isProcessingPostback)
+            const SizedBox.shrink()
+          else
+            WebViewWidget.fromPlatformCreationParams(
               params: _hybridCompositionParams(),
             ),
-          ),
 
           // Overlay sólido nativo que desaparece limpiamente al estar READY.
           if (!_isReady)
