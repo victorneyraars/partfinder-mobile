@@ -1568,6 +1568,13 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
   // respuesta (DATA/ERROR), cierra el modal. La app jamás queda congelada.
   Timer? _postbackSafetyTimer;
   Timer? _readyFallbackTimer;
+  // Watchdog de 6s para 'READY': si el script dinámico no completa el
+  // aislamiento (CSS anti-flicker + isolateForm) y despacha 'READY', se
+  // reintenta inyección/recarga automáticamente (máx. 2); si todo falla,
+  // se muestra el botón nativo de reintentar. La pantalla de carga JAMÁS
+  // se apaga sin el READY explícito del script.
+  Timer? _readyWatchdog;
+  int _readyReloads = 0;
   // Tras 15s sin READY, muestra botón de reintentar (no expone pantalla en blanco).
   bool _showRetryButton = false;
 
@@ -1648,7 +1655,10 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             debugPrint('[PRT-LOG] ${msg.substring(4)}');
             _sendRemoteLog(msg.substring(4));
           } else if (msg == 'READY') {
-            // El script dinámico terminó de escribir + encuadrar: revelar el WebView.
+            // CONTRATO DE REVELADO: 'Preparando consulta técnica...' solo se
+            // apaga aquí, con el READY explícito del script dinámico (CSS
+            // anti-flicker inyectado + formulario aislado + patente escrita).
+            _readyWatchdog?.cancel();
             if (!_isReady && mounted) {
               setState(() => _isReady = true);
             }
@@ -1743,6 +1753,11 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             // Sólo se inyecta la versión dinámica (prt_injection.js).
             // _injectStableBridge();
 
+            // IMPORTANTE (contrato anti-flicker): aquí NO se revela el
+            // WebView. El overlay nativo solo se apaga con el mensaje
+            // explícito 'READY' de PrtBridge, emitido por el script tras
+            // inyectar el CSS anti-flicker y completar isolateForm().
+
             // Inyección dinámica desde el servidor (script editable sin rebuild).
             _fetchAndInjectDynamicScript();
             // Hook de consola: forward console.log/error/warn/info al backend.
@@ -1787,6 +1802,8 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
 
     // Limpieza preventiva de caché/cookies y carga inicial.
     _clearAndLoad();
+    // Armado del watchdog de 6s para 'READY' (nunca revelar la web cruda).
+    _armReadyWatchdog();
   }
 
   Future<void> _clearAndLoad() async {
@@ -1876,8 +1893,11 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
   }
 
   /// Fallback mínimo de emergencia si no se puede descargar el script dinámico.
-  /// Escribe la patente, hace scroll (SharePoint #s4-workspace) y CIERRA el
-  /// overlay enviando 'READY' (forzando repintado con un evento resize).
+  /// Escribe la patente y hace scroll (SharePoint #s4-workspace), pero NUNCA
+  /// envía 'READY': sin el CSS anti-flicker + isolateForm del script dinámico
+  /// está prohibido revelar el WebView (quedaría expuesta la web cruda de PRT).
+  /// El watchdog de 6s reintentará la inyección/recarga; si todo falla, se
+  /// muestra el botón nativo de reintentar.
   void _runEmergencyFallback() {
     final plate = widget.targetPlate.trim().toUpperCase();
     _controller.runJavaScript(
@@ -1897,13 +1917,9 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
       "var ws=document.getElementById('s4-workspace');"
       "var t=document.getElementById('ContentPlaceHolder1_patenteInput');"
       "if(ws&&t){ws.scrollTop=Math.max(0,t.getBoundingClientRect().top+ws.scrollTop-80);}}catch(e){}"
-      // 3) Forzar repintado + liberar overlay nativo.
+      // 3) Forzar repintado (SIN liberar el overlay nativo).
       "try{window.dispatchEvent(new Event('resize'));}catch(e){}"
-      "try{if(window.PrtBridge&&window.PrtBridge.postMessage){window.PrtBridge.postMessage('READY');}}catch(e){}"
-      "}catch(e){"
-      "try{window.dispatchEvent(new Event('resize'));}catch(e2){}"
-      "try{if(window.PrtBridge&&window.PrtBridge.postMessage){window.PrtBridge.postMessage('READY');}}catch(e3){}"
-      "}})();",
+      "})();",
     );
   }
 
@@ -2567,6 +2583,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
   @override
   void dispose() {
     _readyFallbackTimer?.cancel();
+    _readyWatchdog?.cancel();
     _postbackSafetyTimer?.cancel();
     super.dispose();
   }
@@ -2682,6 +2699,9 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
       _showRetryButton = false;
       _isReady = false;
     });
+    // Reiniciar contadores del watchdog de READY.
+    _readyReloads = 0;
+    _armReadyWatchdog();
     // Recargar la página PRT y reiniciar la inyección.
     try {
       _controller.loadRequest(Uri.parse('https://www.prt.cl/Paginas/RevisionTecnica.aspx'));
@@ -2692,6 +2712,27 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
     _readyFallbackTimer?.cancel();
     _readyFallbackTimer = Timer(const Duration(seconds: 15), () {
       if (mounted && !_isReady) {
+        setState(() => _showRetryButton = true);
+      }
+    });
+  }
+
+  /// Watchdog de 6 segundos para 'READY': si el script dinámico no ha
+  /// completado el aislamiento (CSS anti-flicker + isolateForm) y despachado
+  /// 'READY', se reintenta la inyección y se recarga la página. La pantalla
+  /// nativa de carga JAMÁS se apaga sin el READY explícito del script.
+  void _armReadyWatchdog() {
+    _readyWatchdog?.cancel();
+    _readyWatchdog = Timer(const Duration(seconds: 6), () {
+      if (!mounted || _isReady) return;
+      debugPrint('[PRT] 6s sin READY: reintento ${_readyReloads + 1}/2');
+      if (_readyReloads < 2) {
+        _readyReloads++;
+        // Reinyectar el script y recargar para partir de un estado limpio.
+        _fetchAndInjectDynamicScript();
+        _controller.loadRequest(Uri.parse('https://www.prt.cl/Paginas/RevisionTecnica.aspx'));
+        _armReadyWatchdog();
+      } else {
         setState(() => _showRetryButton = true);
       }
     });
