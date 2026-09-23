@@ -1,5 +1,6 @@
 import 'dart:math';
 import 'package:webview_flutter/webview_flutter.dart';
+import 'package:webview_flutter_android/webview_flutter_android.dart';
 import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
 import 'dart:async';
@@ -1554,6 +1555,8 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
         setState(() => _isReady = true);
       }
     });
+    // Crear el WebView con el modo de composición híbrido clásico forzado más
+    // abajo (en el widget), que evita el lienzo en blanco del SurfaceTexture.
     _controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..setUserAgent("Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36")
@@ -2476,9 +2479,16 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
       ),
       body: Stack(
         children: [
-          // WebView nativo SIEMPRE activo y al 100% en el fondo, SIN Opacity
-          // envolvente (evita el fallo de buffer GPU/PlatformView de Android).
-          WebViewWidget(controller: _controller),
+          // WebView nativo con composición híbrida clásica (evita el lienzo en
+          // blanco del SurfaceTexture/TextureLayer). SIEMPRE al 100% de fondo.
+          WebViewWidget.fromPlatformCreationParams(
+            controller: _controller,
+            params: PlatformWebViewWidgetCreationParams(
+              android: AndroidWebViewWidgetCreationParams(
+                displayWithHybridComposition: true,
+              ),
+            ),
+          ),
 
           // Overlay sólido nativo que desaparece limpiamente al estar READY.
           if (!_isReady)

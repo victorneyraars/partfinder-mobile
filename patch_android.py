@@ -42,4 +42,11 @@ if os.path.exists(manifest_path):
         m = m.replace('<application', f'{perms}\n    {queries}\n    <application android:usesCleartextTraffic="true"')
         with open(manifest_path, 'w') as f:
             f.write(m)
-    print(">>> AndroidManifest.xml configurado con queries y permisos.")
+
+    # Forzar aceleración por hardware (evita fallos de composición del WebView).
+    if 'android:hardwareAccelerated="true"' not in m:
+        m = m.replace('<application', '<application android:hardwareAccelerated="true"', 1)
+        with open(manifest_path, 'w') as f:
+            f.write(m)
+
+    print(">>> AndroidManifest.xml configurado con queries, permisos y hardwareAccelerated.")
