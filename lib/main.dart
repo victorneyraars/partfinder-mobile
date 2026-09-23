@@ -1621,6 +1621,13 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
                 } catch (e) {
                   debugPrint('FocusManager unfocus error: $e');
                 }
+                // Trío completo: mover el foco a un FocusNode vacío para que
+                // Android oculte el IME a nivel de ventana.
+                try {
+                  FocusScope.of(context).requestFocus(FocusNode());
+                } catch (e) {
+                  debugPrint('requestFocus error: $e');
+                }
               }
               final jsonStr = msg.substring(5);
               final map = jsonDecode(jsonStr) as Map<String, dynamic>;
@@ -2586,6 +2593,9 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFF0F172A),
+      // La pantalla de verificación NUNCA redimensiona su viewport ante la
+      // presencia del teclado: el IME no puede desplazar ni invadir el layout.
+      resizeToAvoidBottomInset: false,
       appBar: AppBar(
         backgroundColor: const Color(0xFF1E293B),
         title: Column(
@@ -2611,20 +2621,17 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
           // WebView nativo con composición híbrida clásica (evita el lienzo en
           // blanco del SurfaceTexture/TextureLayer). SIEMPRE al 100% de fondo.
           //
-          // BLINDAJE DEFINITIVO DEL TECLADO: apenas _isProcessingPostback es
-          // true, el WebViewWidget se retira del árbol (SizedBox.shrink). El
-          // WebView nativo NO se destruye (es propiedad del WebViewController:
-          // el dispose del PlatformView es no-op en webview_flutter_android
-          // 3.15.0, y el postback/navegación continúa en la instancia
-          // desacoplada), pero su View desaparece del árbol de Android y el
-          // InputMethodManager mata la sesión del IME de forma inmediata e
-          // inapelable. En pantalla queda únicamente la telemetría ejecutiva.
-          if (_isProcessingPostback)
-            const SizedBox.shrink()
-          else
-            WebViewWidget.fromPlatformCreationParams(
+          // ESTABILIDAD DEL PLATFORMVIEW: el WebViewWidget permanece MONTADO
+          // de forma continua (Offstage en vez de desmontar) para no
+          // desestabilizar el hilo nativo ni dejar sesiones de IME huérfanas.
+          // Durante el postback queda fuera de escena (no pinta ni recibe
+          // interacción) y el overlay de telemetría lo cubre por completo.
+          Offstage(
+            offstage: _isProcessingPostback,
+            child: WebViewWidget.fromPlatformCreationParams(
               params: _hybridCompositionParams(),
             ),
+          ),
 
           // Overlay sólido nativo que desaparece limpiamente al estar READY.
           if (!_isReady)
