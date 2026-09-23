@@ -2652,8 +2652,23 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
           onPressed: () => Navigator.of(context).pop(),
         ),
       ),
-      body: Stack(
-        children: [
+      body: AnimatedCrossFade(
+        duration: const Duration(milliseconds: 350),
+        crossFadeState: _isReady
+            ? CrossFadeState.showSecond
+            : CrossFadeState.showFirst,
+        // Telemetría inicial: mismo lenguaje visual premium (anillos, logo,
+        // 'Estableciendo enlace seguro PRT...') y botón de reintentar.
+        firstChild: _ExecutiveTelemetryOverlay(
+          states: const ['Estableciendo enlace seguro PRT...'],
+          rotateStates: false,
+          showRetry: _showRetryButton,
+          onRetry: _retryLoad,
+        ),
+        // Pantalla del reCAPTCHA: aparece con fundido suave de 350ms al
+        // recibir READY (sin saltos ni parpadeos).
+        secondChild: Stack(
+          children: [
           // Fondo nativo del modal.
           const ColoredBox(color: Color(0xFF0B132B)),
 
@@ -2667,8 +2682,9 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
           ),
 
           // Banner nativo superior (tras READY): instrucción + patente en
-          // grande con ancho generoso y márgenes laterales de 24px.
-          if (_isReady && !_isProcessingPostback)
+          // grande con ancho generoso y márgenes laterales de 24px. Se oculta
+          // durante el desafío de imágenes para no colisionar con el popup.
+          if (_isReady && !_isProcessingPostback && !_challengeOpen)
             Positioned(
               top: 0,
               left: 0,
@@ -2759,38 +2775,6 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
               ),
             ),
 
-          // Overlay sólido nativo que desaparece limpiamente al estar READY.
-          if (!_isReady)
-            Container(
-              color: const Color(0xFF1E293B),
-              width: double.infinity,
-              height: double.infinity,
-              child: Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    if (_showRetryButton)
-                      const Icon(Icons.error_outline, color: Colors.white70, size: 40)
-                    else
-                      const CircularProgressIndicator(),
-                    const SizedBox(height: 16),
-                    const Text(
-                      'Preparando consulta técnica...',
-                      style: TextStyle(color: Colors.white, fontSize: 16),
-                    ),
-                    if (_showRetryButton) ...[
-                      const SizedBox(height: 20),
-                      ElevatedButton.icon(
-                        onPressed: _retryLoad,
-                        icon: const Icon(Icons.refresh),
-                        label: const Text('Reintentar'),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-            ),
-
           // Blindaje nativo anti-parpadeo: cubre absolutamente todo el
           // WebView (por encima de él) mientras ASP.NET hace el postback y
           // la recarga completa de página. Hace físicamente imposible ver
@@ -2798,7 +2782,8 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
           // la telemetría ejecutiva premium (pulso cian/verde + estados).
           if (_isProcessingPostback)
             const _ExecutiveTelemetryOverlay(),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -2852,7 +2837,32 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
 /// postback de PRT: isotipo con halo de pulso cian/verde, título corporativo,
 /// rotación de estados técnicos con fade y barra de progreso con gradiente.
 class _ExecutiveTelemetryOverlay extends StatefulWidget {
-  const _ExecutiveTelemetryOverlay();
+  const _ExecutiveTelemetryOverlay({
+    this.title = 'PARTFINDER 360 INTELLIGENCE',
+    this.states = const [
+      'Estableciendo enlace seguro PRT...',
+      'Decodificando historial y ficha técnica...',
+      'Sincronizando especificaciones del vehículo...',
+    ],
+    this.rotateStates = true,
+    this.showRetry = false,
+    this.onRetry,
+  });
+
+  /// Título corporativo mostrado bajo el isotipo.
+  final String title;
+
+  /// Estados técnicos rotativos del subtítulo.
+  final List<String> states;
+
+  /// Si false, el subtítulo queda fijo en [states].first.
+  final bool rotateStates;
+
+  /// Muestra el botón nativo de reintentar (pantalla de carga inicial).
+  final bool showRetry;
+
+  /// Acción del botón de reintentar.
+  final VoidCallback? onRetry;
 
   @override
   State<_ExecutiveTelemetryOverlay> createState() =>
@@ -2862,11 +2872,6 @@ class _ExecutiveTelemetryOverlay extends StatefulWidget {
 class _ExecutiveTelemetryOverlayState extends State<_ExecutiveTelemetryOverlay>
     with SingleTickerProviderStateMixin {
   late final AnimationController _pulseController;
-  final List<String> _technicalStates = const [
-    'Estableciendo enlace seguro PRT...',
-    'Decodificando historial y ficha técnica...',
-    'Sincronizando especificaciones del vehículo...',
-  ];
   int _stateIndex = 0;
   Timer? _stateTimer;
 
@@ -2877,13 +2882,13 @@ class _ExecutiveTelemetryOverlayState extends State<_ExecutiveTelemetryOverlay>
       vsync: this,
       duration: const Duration(milliseconds: 1800),
     )..repeat();
-    _stateTimer = Timer.periodic(const Duration(milliseconds: 2300), (_) {
-      if (mounted) {
-        setState(
-          () => _stateIndex = (_stateIndex + 1) % _technicalStates.length,
-        );
-      }
-    });
+    if (widget.rotateStates && widget.states.length > 1) {
+      _stateTimer = Timer.periodic(const Duration(milliseconds: 2300), (_) {
+        if (mounted) {
+          setState(() => _stateIndex = (_stateIndex + 1) % widget.states.length);
+        }
+      });
+    }
   }
 
   @override
@@ -2961,10 +2966,10 @@ class _ExecutiveTelemetryOverlayState extends State<_ExecutiveTelemetryOverlay>
             ),
             const SizedBox(height: 22),
             // Título corporativo en negrita.
-            const Text(
-              'PARTFINDER 360 INTELLIGENCE',
+            Text(
+              widget.title,
               textAlign: TextAlign.center,
-              style: TextStyle(
+              style: const TextStyle(
                 color: Colors.white,
                 fontSize: 16,
                 fontWeight: FontWeight.w800,
@@ -2981,7 +2986,7 @@ class _ExecutiveTelemetryOverlayState extends State<_ExecutiveTelemetryOverlay>
                   transitionBuilder: (child, animation) =>
                       FadeTransition(opacity: animation, child: child),
                   child: Text(
-                    _technicalStates[_stateIndex],
+                    widget.states[_stateIndex],
                     key: ValueKey<int>(_stateIndex),
                     textAlign: TextAlign.center,
                     style: const TextStyle(
@@ -3016,6 +3021,15 @@ class _ExecutiveTelemetryOverlayState extends State<_ExecutiveTelemetryOverlay>
                 ),
               ),
             ),
+            // Botón nativo de reintentar (solo en la pantalla de carga).
+            if (widget.showRetry) ...[
+              const SizedBox(height: 22),
+              ElevatedButton.icon(
+                onPressed: widget.onRetry,
+                icon: const Icon(Icons.refresh),
+                label: const Text('Reintentar'),
+              ),
+            ],
           ],
         ),
       ),
