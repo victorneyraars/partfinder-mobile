@@ -252,6 +252,12 @@ _vehicleData = v;
   // MODAL INTERACTIVO PRT (HUMAN-IN-THE-LOOP)
   // ==========================================
   void _openPrtVerificationScreen(String targetPlate) {
+    // Cerrar el teclado ANTES de abrir el modal: al retornar (éxito o cierre)
+    // no debe quedar foco residual en el TextField que reabra el IME.
+    try { _focusNode.unfocus(); } catch (e) {}
+    try {
+      SystemChannels.textInput.invokeMethod<void>('TextInput.hide');
+    } catch (e) {}
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -869,6 +875,7 @@ _vehicleData = v;
               child: TextField(
                 controller: _plateController,
                 focusNode: _focusNode,
+                autofocus: false,
                 textAlign: TextAlign.center,
                 maxLength: 6,
                 textCapitalization: TextCapitalization.characters,
@@ -1564,6 +1571,10 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
   // activa con POSTBACK_START (justo antes del clic) y permanece hasta que
   // llegan los datos o el error, tapando la recarga completa de ASP.NET.
   bool _isProcessingPostback = false;
+  // Modo desafío: mientras el popup de imágenes de Google está abierto, el
+  // WebView se expande a pantalla completa (el JS lo avisa con
+  // CHALLENGE_OPEN / CHALLENGE_CLOSE y aplica su CSS scoped solo entonces).
+  bool _challengeOpen = false;
   // Temporizador de seguridad: si pasan 12s desde POSTBACK_START sin
   // respuesta (DATA/ERROR), cierra el modal. La app jamás queda congelada.
   Timer? _postbackSafetyTimer;
@@ -1656,11 +1667,22 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             _sendRemoteLog(msg.substring(4));
           } else if (msg == 'READY') {
             // CONTRATO DE REVELADO: 'Preparando consulta técnica...' solo se
-            // apaga aquí, con el READY explícito del script dinámico (CSS
-            // anti-flicker inyectado + formulario aislado + patente escrita).
+            // apaga aquí, con el READY explícito del script dinámico (patente
+            // escrita + checkbox de Google centrado en la ventana de clip).
             _readyWatchdog?.cancel();
             if (!_isReady && mounted) {
               setState(() => _isReady = true);
+            }
+          } else if (msg == 'CHALLENGE_OPEN') {
+            // Popup de imágenes de Google abierto: expandir el WebView a
+            // pantalla completa (el JS aplica su CSS scoped mientras dure).
+            if (mounted && !_challengeOpen) {
+              setState(() => _challengeOpen = true);
+            }
+          } else if (msg == 'CHALLENGE_CLOSE') {
+            // Desafío cerrado: volver a la ventana de 310x140 del checkbox.
+            if (mounted && _challengeOpen) {
+              setState(() => _challengeOpen = false);
             }
           } else if (msg.startsWith('DISCOVER_IFRAME:')) {
             // Auto-descubrimiento de iframes del formulario PRT.
@@ -1671,8 +1693,11 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             // El JS está a punto de hacer clic en Buscar: activar de inmediato
             // el contenedor nativo opaco que cubre el WebView durante todo el
             // postback + recarga completa (cero parpadeo de la web de PRT).
-            if (mounted && !_isProcessingPostback) {
-              setState(() => _isProcessingPostback = true);
+            if (mounted) {
+              setState(() {
+                _isProcessingPostback = true;
+                _challengeOpen = false;
+              });
             }
             // Forzar a Android a cerrar el teclado virtual POR COMPLETO en
             // esta misma llamada (no dejar que asome sobre el overlay).
@@ -2635,20 +2660,87 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
       ),
       body: Stack(
         children: [
-          // WebView nativo con composición híbrida clásica (evita el lienzo en
-          // blanco del SurfaceTexture/TextureLayer). SIEMPRE al 100% de fondo.
-          //
-          // ESTABILIDAD DEL PLATFORMVIEW: el WebViewWidget permanece MONTADO
-          // de forma continua (Offstage en vez de desmontar) para no
-          // desestabilizar el hilo nativo ni dejar sesiones de IME huérfanas.
-          // Durante el postback queda fuera de escena (no pinta ni recibe
-          // interacción) y el overlay de telemetría lo cubre por completo.
-          Offstage(
-            offstage: _isProcessingPostback,
-            child: WebViewWidget.fromPlatformCreationParams(
-              params: _hybridCompositionParams(),
+          // Fondo nativo del modal.
+          const ColoredBox(color: Color(0xFF0B132B)),
+
+          // UI NATIVA de verificación (tras READY): instrucción + patente en
+          // grande + ventana de clip 310x140 que muestra SOLO el checkbox de
+          // Google. El resto de la página SharePoint queda FÍSICAMENTE fuera
+          // del clip: nunca se ve (sin CSS cosmético en el DOM).
+          if (_isReady && !_challengeOpen && !_isProcessingPostback)
+            Center(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.symmetric(vertical: 24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Text(
+                      'Confirma la verificación para consultar',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: Color(0xFF94A3B8),
+                        fontSize: 15,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    // Contenedor nativo con la patente en grande.
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 30,
+                        vertical: 16,
+                      ),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF1E293B),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(
+                          color: const Color(0xFF38BDF8).withOpacity(0.45),
+                          width: 1.2,
+                        ),
+                        boxShadow: [
+                          BoxShadow(
+                            color: const Color(0xFF38BDF8).withOpacity(0.18),
+                            blurRadius: 20,
+                            spreadRadius: 1,
+                          ),
+                        ],
+                      ),
+                      child: Text(
+                        widget.targetPlate,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 38,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: 6,
+                          fontFamily: 'monospace',
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 22),
+                    // Ventana EXACTA del reCAPTCHA (checkbox de Google).
+                    SizedBox(
+                      width: 310,
+                      height: 140,
+                      child: ClipRect(
+                        child: WebViewWidget.fromPlatformCreationParams(
+                          params: _hybridCompositionParams(),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             ),
-          ),
+
+          // Desafío de Google abierto: el WebView se expande a pantalla
+          // completa (el JS aplica su CSS scoped y fija el popup sobre
+          // fondo #0b132b mientras dure).
+          if (_isReady && _challengeOpen && !_isProcessingPostback)
+            Positioned.fill(
+              child: WebViewWidget.fromPlatformCreationParams(
+                params: _hybridCompositionParams(),
+              ),
+            ),
 
           // Overlay sólido nativo que desaparece limpiamente al estar READY.
           if (!_isReady)
