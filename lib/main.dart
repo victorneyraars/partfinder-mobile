@@ -1571,10 +1571,6 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
   // activa con POSTBACK_START (justo antes del clic) y permanece hasta que
   // llegan los datos o el error, tapando la recarga completa de ASP.NET.
   bool _isProcessingPostback = false;
-  // Modo desafío: mientras el popup de imágenes de Google está abierto, el
-  // WebView se expande a pantalla completa (el JS lo avisa con
-  // CHALLENGE_OPEN / CHALLENGE_CLOSE y aplica su CSS scoped solo entonces).
-  bool _challengeOpen = false;
   // Temporizador de seguridad: si pasan 12s desde POSTBACK_START sin
   // respuesta (DATA/ERROR), cierra el modal. La app jamás queda congelada.
   Timer? _postbackSafetyTimer;
@@ -1668,21 +1664,10 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
           } else if (msg == 'READY') {
             // CONTRATO DE REVELADO: 'Preparando consulta técnica...' solo se
             // apaga aquí, con el READY explícito del script dinámico (patente
-            // escrita + checkbox de Google centrado en la ventana de clip).
+            // escrita + contenedor del captcha extraído a body y visible).
             _readyWatchdog?.cancel();
             if (!_isReady && mounted) {
               setState(() => _isReady = true);
-            }
-          } else if (msg == 'CHALLENGE_OPEN') {
-            // Popup de imágenes de Google abierto: expandir el WebView a
-            // pantalla completa (el JS aplica su CSS scoped mientras dure).
-            if (mounted && !_challengeOpen) {
-              setState(() => _challengeOpen = true);
-            }
-          } else if (msg == 'CHALLENGE_CLOSE') {
-            // Desafío cerrado: volver a la ventana de 310x140 del checkbox.
-            if (mounted && _challengeOpen) {
-              setState(() => _challengeOpen = false);
             }
           } else if (msg.startsWith('DISCOVER_IFRAME:')) {
             // Auto-descubrimiento de iframes del formulario PRT.
@@ -1694,10 +1679,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             // el contenedor nativo opaco que cubre el WebView durante todo el
             // postback + recarga completa (cero parpadeo de la web de PRT).
             if (mounted) {
-              setState(() {
-                _isProcessingPostback = true;
-                _challengeOpen = false;
-              });
+              setState(() => _isProcessingPostback = true);
             }
             // Forzar a Android a cerrar el teclado virtual POR COMPLETO en
             // esta misma llamada (no dejar que asome sobre el overlay).
@@ -2663,82 +2645,73 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
           // Fondo nativo del modal.
           const ColoredBox(color: Color(0xFF0B132B)),
 
-          // UI NATIVA de verificación (tras READY): instrucción + patente en
-          // grande + ventana de clip 310x140 que muestra SOLO el checkbox de
-          // Google. El resto de la página SharePoint queda FÍSICAMENTE fuera
-          // del clip: nunca se ve (sin CSS cosmético en el DOM).
-          if (_isReady && !_challengeOpen && !_isProcessingPostback)
-            Center(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.symmetric(vertical: 24),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Text(
-                      'Confirma la verificación para consultar',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        color: Color(0xFF94A3B8),
-                        fontSize: 15,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    // Contenedor nativo con la patente en grande.
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 30,
-                        vertical: 16,
-                      ),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF1E293B),
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(
-                          color: const Color(0xFF38BDF8).withOpacity(0.45),
-                          width: 1.2,
-                        ),
-                        boxShadow: [
-                          BoxShadow(
-                            color: const Color(0xFF38BDF8).withOpacity(0.18),
-                            blurRadius: 20,
-                            spreadRadius: 1,
-                          ),
-                        ],
-                      ),
-                      child: Text(
-                        widget.targetPlate,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 38,
-                          fontWeight: FontWeight.w900,
-                          letterSpacing: 6,
-                          fontFamily: 'monospace',
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 22),
-                    // Ventana EXACTA del reCAPTCHA (checkbox de Google).
-                    SizedBox(
-                      width: 310,
-                      height: 140,
-                      child: ClipRect(
-                        child: WebViewWidget.fromPlatformCreationParams(
-                          params: _hybridCompositionParams(),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
+          // WebView a PANTALLA COMPLETA (sin recuadros ni clips): el JS hace
+          // la extracción estándar de nodos (mueve el contenedor del
+          // reCAPTCHA a body y oculta el resto de SharePoint con
+          // display:none). El desafío de imágenes de Google flota libre,
+          // sin recorte.
+          WebViewWidget.fromPlatformCreationParams(
+            params: _hybridCompositionParams(),
+          ),
 
-          // Desafío de Google abierto: el WebView se expande a pantalla
-          // completa (el JS aplica su CSS scoped y fija el popup sobre
-          // fondo #0b132b mientras dure).
-          if (_isReady && _challengeOpen && !_isProcessingPostback)
-            Positioned.fill(
-              child: WebViewWidget.fromPlatformCreationParams(
-                params: _hybridCompositionParams(),
+          // Banner nativo superior (tras READY): instrucción + patente en
+          // grande. Es solo visual; el captcha queda centrado debajo (54%).
+          if (_isReady && !_isProcessingPostback)
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              child: SafeArea(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Text(
+                        'Confirma la verificación para consultar',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: Color(0xFF94A3B8),
+                          fontSize: 15,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      // Contenedor nativo con la patente en grande.
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 30,
+                          vertical: 12,
+                        ),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF1E293B),
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(
+                            color: const Color(0xFF38BDF8).withOpacity(0.45),
+                            width: 1.2,
+                          ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: const Color(0xFF38BDF8).withOpacity(0.18),
+                              blurRadius: 20,
+                              spreadRadius: 1,
+                            ),
+                          ],
+                        ),
+                        child: Text(
+                          widget.targetPlate,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 32,
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: 5,
+                            fontFamily: 'monospace',
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               ),
             ),
 
