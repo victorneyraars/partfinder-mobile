@@ -2652,31 +2652,15 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
           onPressed: () => Navigator.of(context).pop(),
         ),
       ),
-      body: AnimatedCrossFade(
-        duration: const Duration(milliseconds: 350),
-        crossFadeState: _isReady
-            ? CrossFadeState.showSecond
-            : CrossFadeState.showFirst,
-        // Telemetría inicial: mismo lenguaje visual premium (anillos, logo,
-        // 'Estableciendo enlace seguro PRT...') y botón de reintentar.
-        firstChild: _ExecutiveTelemetryOverlay(
-          states: const ['Estableciendo enlace seguro PRT...'],
-          rotateStates: false,
-          showRetry: _showRetryButton,
-          onRetry: _retryLoad,
-        ),
-        // Pantalla del reCAPTCHA: aparece con fundido suave de 350ms al
-        // recibir READY (sin saltos ni parpadeos).
-        secondChild: Stack(
-          children: [
+      body: Stack(
+        children: [
           // Fondo nativo del modal.
           const ColoredBox(color: Color(0xFF0B132B)),
 
-          // WebView a PANTALLA COMPLETA (sin recuadros ni clips): el JS hace
-          // la extracción estándar de nodos (mueve el contenedor del
-          // reCAPTCHA a body y oculta el resto de SharePoint con
-          // display:none). El desafío de imágenes de Google flota libre,
-          // sin recorte.
+          // WebView a PANTALLA COMPLETA y SIEMPRE a tamaño real: nunca debe
+          // maquetarse a 0x0 (si se oculta dentro de un crossfade, Chromium
+          // renderiza el iframe de Google en un viewport nulo → caja negra
+          // vacía). La capa de carga se desvanece POR ENCIMA, no al revés.
           WebViewWidget.fromPlatformCreationParams(
             params: _hybridCompositionParams(),
           ),
@@ -2782,8 +2766,26 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
           // la telemetría ejecutiva premium (pulso cian/verde + estados).
           if (_isProcessingPostback)
             const _ExecutiveTelemetryOverlay(),
-          ],
-        ),
+
+          // Capa de carga inicial (telemetría premium) que se DESVANECE por
+          // encima del WebView al recibir READY: fundido suave de 350ms sin
+          // saltos, mientras el WebView mantiene siempre su tamaño real.
+          Positioned.fill(
+            child: IgnorePointer(
+              ignoring: _isReady,
+              child: AnimatedOpacity(
+                opacity: _isReady ? 0.0 : 1.0,
+                duration: const Duration(milliseconds: 350),
+                child: _ExecutiveTelemetryOverlay(
+                  states: const ['Estableciendo enlace seguro PRT...'],
+                  rotateStates: false,
+                  showRetry: _showRetryButton,
+                  onRetry: _retryLoad,
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
