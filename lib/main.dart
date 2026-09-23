@@ -1690,6 +1690,17 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
         ),
       )
       ..loadRequest(Uri.parse('https://www.prt.cl/Paginas/RevisionTecnica.aspx'));
+
+    // Forzar dibujado del documento completo en el WebView de Android para
+    // mitigar congelamientos de renderizado del primer fotograma.
+    try {
+      final platform = _controller.platform;
+      if (platform is AndroidWebViewController) {
+        platform.enableSlowWholeDocumentDraw();
+      }
+    } catch (e) {
+      debugPrint('enableSlowWholeDocumentDraw error: $e');
+    }
   }
 
   /// Maneja una URL de iframe descubierta desde el JS inyectado.
@@ -2457,9 +2468,10 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
     super.dispose();
   }
 
-  /// Construye los params de creación del WebViewWidget con composición
-  /// híbrida clásica (displayWithHybridComposition=true) para evitar el fallo
-  /// de buffer SurfaceTexture/TextureLayer en Android.
+  /// Construye los params de creación del WebViewWidget usando la composición
+  /// virtual de textura nativa por defecto de Flutter (displayWithHybridComposition
+  /// = false), para evitar el freeze de renderizado del compositor en algunos
+  /// dispositivos Android.
   PlatformWebViewWidgetCreationParams _hybridCompositionParams() {
     PlatformWebViewWidgetCreationParams params = PlatformWebViewWidgetCreationParams(
       controller: _controller.platform,
@@ -2468,7 +2480,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
     if (WebViewPlatform.instance is AndroidWebViewPlatform) {
       params = AndroidWebViewWidgetCreationParams.fromPlatformWebViewWidgetCreationParams(
         params,
-        displayWithHybridComposition: true,
+        displayWithHybridComposition: false,
       );
     }
     return params;
