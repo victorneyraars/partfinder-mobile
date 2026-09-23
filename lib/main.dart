@@ -1674,7 +1674,9 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             // Sin inyección de estilos/opacidad: dejar que la página pinte naturalmente.
           },
           onWebResourceError: (error) {
-            final desc = 'errorCode=${error.errorCode} desc=${error.description} mainFrame=${error.isForMainFrame} failingUrl=${error.failingUrl ?? ""}';
+            // Uso de toString() para ser robusto ante diferencias de versión
+            // del tipo WebResourceError (evita getters que pueden no existir).
+            final desc = 'WEBRESOURCE_ERROR ${error.toString()}';
             debugPrint('[PRT-NET-ERROR] $desc');
             _sendRemoteLog('[PRT-NET-ERROR] $desc');
             if (mounted) {
@@ -1682,7 +1684,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             }
           },
           onHttpError: (error) {
-            final desc = 'statusCode=${error.statusCode} url=${error.url ?? ""}';
+            final desc = 'HTTP_ERROR ${error.toString()}';
             debugPrint('[PRT-HTTP-ERROR] $desc');
             _sendRemoteLog('[PRT-HTTP-ERROR] $desc');
           },
