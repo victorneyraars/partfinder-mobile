@@ -1557,6 +1557,11 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
   bool _debugSent = false;
   // Overlay nativo: mientras false se muestra el indicador de carga.
   bool _isReady = false;
+  // Blindaje nativo anti-parpadeo: mientras true, un contenedor Flutter
+  // 100% opaco (Color(0xFF0B132B) + spinner) cubre TODO el WebView. Se
+  // activa con POSTBACK_START (justo antes del clic) y permanece hasta que
+  // llegan los datos o el error, tapando la recarga completa de ASP.NET.
+  bool _isProcessingPostback = false;
   Timer? _readyFallbackTimer;
   // Tras 15s sin READY, muestra botón de reintentar (no expone pantalla en blanco).
   bool _showRetryButton = false;
@@ -1617,6 +1622,13 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             final iframeUrl = msg.substring('DISCOVER_IFRAME:'.length).trim();
             debugPrint('[PRT-DISCOVER] $iframeUrl');
             _handleDiscoveredIframe(iframeUrl);
+          } else if (msg == 'POSTBACK_START') {
+            // El JS está a punto de hacer clic en Buscar: activar de inmediato
+            // el contenedor nativo opaco que cubre el WebView durante todo el
+            // postback + recarga completa (cero parpadeo de la web de PRT).
+            if (mounted && !_isProcessingPostback) {
+              setState(() => _isProcessingPostback = true);
+            }
           } else if (msg == 'ERROR:NOT_FOUND') {
             // Patente no existe en PRT: volver de inmediato a la pantalla
             // principal, avisar al usuario y devolver el foco al input.
@@ -2548,6 +2560,20 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
                     ],
                   ],
                 ),
+              ),
+            ),
+
+          // Blindaje nativo anti-parpadeo: cubre absolutamente todo el
+          // WebView (por encima de él) mientras ASP.NET hace el postback y
+          // la recarga completa de página. Hace físicamente imposible ver
+          // la web de PRT o el teclado durante la transición.
+          if (_isProcessingPostback)
+            Container(
+              color: const Color(0xFF0B132B),
+              width: double.infinity,
+              height: double.infinity,
+              child: const Center(
+                child: CircularProgressIndicator(color: Color(0xFF38BDF8)),
               ),
             ),
         ],
