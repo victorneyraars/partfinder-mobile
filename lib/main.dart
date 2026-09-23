@@ -257,6 +257,23 @@ _vehicleData = v;
       MaterialPageRoute(
         builder: (context) => PrtVerificationScreen(
           targetPlate: targetPlate,
+          onErrorNotFound: () {
+            // Devolver el foco al campo de patente de la pantalla principal.
+            try { _focusNode.requestFocus(); } catch (e) {}
+            // Aviso estilizado (fondo oscuro, texto claro).
+            if (mounted) {
+              ScaffoldMessenger.of(this.context).showSnackBar(
+                const SnackBar(
+                  backgroundColor: Color(0xFF1E293B),
+                  content: Text(
+                    'Patente no encontrada en PRT. Verifica e intenta nuevamente',
+                    style: TextStyle(color: Colors.white, fontSize: 14),
+                  ),
+                  duration: Duration(seconds: 4),
+                ),
+              );
+            }
+          },
           onVehicleSaved: (scraped) async {
             setState(() {
               _vehicleData = scraped;
@@ -1518,11 +1535,13 @@ class OldFormatter {
 class PrtVerificationScreen extends StatefulWidget {
   final String targetPlate;
   final Function(Map<String, dynamic>)? onVehicleSaved;
+  final VoidCallback? onErrorNotFound;
 
   const PrtVerificationScreen({
     super.key,
     required this.targetPlate,
     this.onVehicleSaved,
+    this.onErrorNotFound,
   });
 
   @override
@@ -1599,39 +1618,13 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             debugPrint('[PRT-DISCOVER] $iframeUrl');
             _handleDiscoveredIframe(iframeUrl);
           } else if (msg == 'ERROR:NOT_FOUND') {
+            // Patente no existe en PRT: volver de inmediato a la pantalla
+            // principal, avisar al usuario y devolver el foco al input.
             if (mounted) {
+              if (widget.onErrorNotFound != null) {
+                widget.onErrorNotFound!();
+              }
               Navigator.of(context).pop();
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  backgroundColor: Color(0xFF0F2B48),
-                  content: Row(
-                    children: [
-                      SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.cyanAccent)),
-                      SizedBox(width: 12),
-                      Expanded(child: Text("Vehículo sin registro PRT. Consultando padrón...", style: TextStyle(color: Colors.white, fontSize: 13))),
-                    ],
-                  ),
-                  duration: Duration(seconds: 4),
-                ),
-              );
-              Future.microtask(() async {
-                try {
-                  final resp = await http.post(
-                    Uri.parse("https://api.partfinder360.com/api/patente/fallback-boostr"),
-                    headers: {"Content-Type": "application/json"},
-                    body: jsonEncode({"patente": widget.targetPlate}),
-                  );
-                  if (resp.statusCode == 200) {
-                    final dataRes = jsonDecode(resp.body) as Map<String, dynamic>;
-                    final vData = dataRes["data"] as Map<String, dynamic>?;
-                    if (vData != null && widget.onVehicleSaved != null) {
-                      widget.onVehicleSaved!(vData);
-                    }
-                  }
-                } catch (e) {
-                  debugPrint("Error fallback automatico: $e");
-                }
-              });
             }
           }
         },
