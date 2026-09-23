@@ -275,6 +275,8 @@ _vehicleData = v;
             }
           },
           onVehicleSaved: (scraped) async {
+            // Consulta EXITOSA: NUNCA pedir foco al input de patente en esta
+            // rama. Solo onErrorNotFound refocaliza (para reintentar).
             setState(() {
               _vehicleData = scraped;
             });
@@ -1598,6 +1600,22 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
           if (msg.startsWith('DATA:')) {
             try {
               _postbackSafetyTimer?.cancel();
+              // Cierre OBLIGATORIO del teclado del SO antes de cerrar el
+              // modal: el autofocus nativo de PRT puede levantar el teclado
+              // al aterrizar la página de resultados; esto lo apaga al
+              // instante en la misma llamada.
+              if (mounted) {
+                try {
+                  FocusScope.of(context).unfocus();
+                } catch (e) {
+                  debugPrint('unfocus error: $e');
+                }
+                try {
+                  SystemChannels.textInput.invokeMethod<void>('TextInput.hide');
+                } catch (e) {
+                  debugPrint('TextInput.hide error: $e');
+                }
+              }
               final jsonStr = msg.substring(5);
               final map = jsonDecode(jsonStr) as Map<String, dynamic>;
               if (widget.onVehicleSaved != null) {
