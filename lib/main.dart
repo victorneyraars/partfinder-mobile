@@ -1671,18 +1671,42 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             }
           },
           onPageStarted: (url) {
-            _controller.runJavaScript(
-              'var s=document.createElement("style");s.id="pf-init";s.innerHTML="html,body{background:#0F172A!important;opacity:0!important;}";document.head.appendChild(s);'
-            );
+            // Sin inyección de estilos/opacidad: dejar que la página pinte naturalmente.
           },
           onWebResourceError: (error) {
+            final desc = 'errorCode=${error.errorCode} desc=${error.description} mainFrame=${error.isForMainFrame} failingUrl=${error.failingUrl ?? ""}';
+            debugPrint('[PRT-NET-ERROR] $desc');
+            _sendRemoteLog('[PRT-NET-ERROR] $desc');
             if (mounted) {
               setState(() => _pageLoaded = true);
             }
           },
+          onHttpError: (error) {
+            final desc = 'statusCode=${error.statusCode} url=${error.url ?? ""}';
+            debugPrint('[PRT-HTTP-ERROR] $desc');
+            _sendRemoteLog('[PRT-HTTP-ERROR] $desc');
+          },
         ),
-      )
-      ..loadRequest(Uri.parse('https://www.prt.cl/Paginas/RevisionTecnica.aspx'));
+      );
+
+    // Limpieza preventiva de caché/cookies y carga inicial.
+    _clearAndLoad();
+  }
+
+  Future<void> _clearAndLoad() async {
+    try {
+      await _controller.clearCache();
+      await _controller.clearLocalStorage();
+      await WebViewCookieManager().clearCookies();
+    } catch (e) {
+      debugPrint('clearCache/cookies error: $e');
+    }
+    try {
+      await _controller.loadRequest(Uri.parse('https://www.prt.cl/Paginas/RevisionTecnica.aspx'));
+    } catch (e) {
+      debugPrint('loadRequest error: $e');
+      _sendRemoteLog('[PRT-LOAD-ERROR] $e');
+    }
   }
 
   /// Maneja una URL de iframe descubierta desde el JS inyectado.
