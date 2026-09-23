@@ -1548,9 +1548,9 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
         setState(() => _pageLoaded = true);
       }
     });
-    // Timeout de seguridad: si no llega 'READY' en 6s, revelar igualmente
+    // Timeout de seguridad: si no llega 'READY' en 10s, revelar igualmente
     // para no dejar al usuario bloqueado en la pantalla de carga.
-    _readyFallbackTimer = Timer(const Duration(seconds: 6), () {
+    _readyFallbackTimer = Timer(const Duration(seconds: 10), () {
       if (mounted && !_isReady) {
         setState(() => _isReady = true);
       }
@@ -1560,6 +1560,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
     _controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..setUserAgent("Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36")
+      ..enableZoom(false)
       ..addJavaScriptChannel(
         'PrtBridge',
         onMessageReceived: (JavaScriptMessage message) {
