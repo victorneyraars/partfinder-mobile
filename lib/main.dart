@@ -1756,7 +1756,8 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
   }
 
   /// Fallback mínimo de emergencia si no se puede descargar el script dinámico.
-  /// Escribe la patente, hace scroll y CIERRA el overlay enviando 'READY'.
+  /// Escribe la patente, hace scroll (SharePoint #s4-workspace) y CIERRA el
+  /// overlay enviando 'READY' (forzando repintado con un evento resize).
   void _runEmergencyFallback() {
     final plate = widget.targetPlate.trim().toUpperCase();
     _controller.runJavaScript(
@@ -1769,14 +1770,19 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
       "inp.setAttribute('value','$plate');"
       "inp.dispatchEvent(new Event('input',{bubbles:true}));"
       "inp.dispatchEvent(new Event('change',{bubbles:true}));"
-      // 2) Centrar con scroll.
-      "try{if(inp.scrollIntoView){inp.scrollIntoView({behavior:'smooth',block:'center'});}}catch(e){}"
       "try{inp.focus();}catch(e){}"
       "}"
-      // 3) Liberar overlay nativo de inmediato.
+      // 2) Scroll solo en #s4-workspace (sin scrollIntoView).
+      "try{window.scrollTo(0,0);document.documentElement.scrollTop=0;document.body.scrollTop=0;"
+      "var ws=document.getElementById('s4-workspace');"
+      "var t=document.getElementById('ContentPlaceHolder1_patenteInput');"
+      "if(ws&&t){ws.scrollTop=Math.max(0,t.getBoundingClientRect().top+ws.scrollTop-80);}}catch(e){}"
+      // 3) Forzar repintado + liberar overlay nativo.
+      "try{window.dispatchEvent(new Event('resize'));}catch(e){}"
       "try{if(window.PrtBridge&&window.PrtBridge.postMessage){window.PrtBridge.postMessage('READY');}}catch(e){}"
       "}catch(e){"
-      "try{if(window.PrtBridge&&window.PrtBridge.postMessage){window.PrtBridge.postMessage('READY');}}catch(e2){}"
+      "try{window.dispatchEvent(new Event('resize'));}catch(e2){}"
+      "try{if(window.PrtBridge&&window.PrtBridge.postMessage){window.PrtBridge.postMessage('READY');}}catch(e3){}"
       "}})();",
     );
   }
@@ -2470,23 +2476,25 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
       ),
       body: Stack(
         children: [
-          // WebView oculto hasta que el script confirme 'READY' (o timeout).
-          Opacity(
-            opacity: _isReady ? 1.0 : 0.0,
-            child: WebViewWidget(controller: _controller),
-          ),
+          // WebView nativo SIEMPRE activo y al 100% en el fondo, SIN Opacity
+          // envolvente (evita el fallo de buffer GPU/PlatformView de Android).
+          WebViewWidget(controller: _controller),
+
+          // Overlay sólido nativo que desaparece limpiamente al estar READY.
           if (!_isReady)
             Container(
-              color: const Color(0xFF0F172A),
+              color: const Color(0xFF1E293B),
+              width: double.infinity,
+              height: double.infinity,
               child: const Center(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    CircularProgressIndicator(color: Color(0xFF38BDF8)),
+                    CircularProgressIndicator(),
                     SizedBox(height: 16),
                     Text(
                       'Preparando consulta técnica...',
-                      style: TextStyle(color: Colors.white70, fontSize: 14),
+                      style: TextStyle(color: Colors.white, fontSize: 16),
                     ),
                   ],
                 ),
