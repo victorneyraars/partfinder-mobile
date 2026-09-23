@@ -1644,18 +1644,11 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             }
           },
           onPageFinished: (url) {
-            _injectStableBridge();
-            // Plan de contingencia: inyección mínima independiente que ataca
-            // directamente el ID confirmado, sin depender del bridge grande.
-            final plate = widget.targetPlate.trim().toUpperCase();
-            _controller.runJavaScript(
-              "(function(){try{var inp=document.getElementById('ContentPlaceHolder1_patenteInput');"
-              "if(inp){inp.value='" + plate + "';"
-              "inp.setAttribute('value','" + plate + "');"
-              "inp.dispatchEvent(new Event('input',{bubbles:true}));"
-              "inp.dispatchEvent(new Event('change',{bubbles:true}));"
-              "window.__pfMinimalWrite=true;}}catch(e){window.__pfMinimalError=String(e);}})();"
-            );
+            // Doble inyección DESACTIVADA: el bridge y la escritura mínima
+            // hardcodeadas competían con el script dinámico del servidor.
+            // Sólo se inyecta la versión dinámica (prt_injection.js).
+            // _injectStableBridge();
+
             // Inyección dinámica desde el servidor (script editable sin rebuild).
             _fetchAndInjectDynamicScript();
             // Hook de consola: forward console.log/error/warn/info al backend.
