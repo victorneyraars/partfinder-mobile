@@ -1615,6 +1615,12 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
                 } catch (e) {
                   debugPrint('TextInput.hide error: $e');
                 }
+                // Soltar también el foco nativo del PlatformView/WebView.
+                try {
+                  FocusManager.instance.primaryFocus?.unfocus();
+                } catch (e) {
+                  debugPrint('FocusManager unfocus error: $e');
+                }
               }
               final jsonStr = msg.substring(5);
               final map = jsonDecode(jsonStr) as Map<String, dynamic>;
@@ -1664,6 +1670,18 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
               } catch (e) {
                 debugPrint('TextInput.hide error: $e');
               }
+              // Soltar el foco nativo del PlatformView (el teclado que abrió
+              // el WebView no responde a TextInput.hide de Flutter).
+              try {
+                FocusManager.instance.primaryFocus?.unfocus();
+              } catch (e) {
+                debugPrint('FocusManager unfocus error: $e');
+              }
+              try {
+                FocusScope.of(context).requestFocus(FocusNode());
+              } catch (e) {
+                debugPrint('requestFocus error: $e');
+              }
             }
             // Temporizador de seguridad: si en 12s no llega DATA/ERROR,
             // cerrar el modal (nunca quedar congelado en la animación).
@@ -1682,6 +1700,24 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
               if (widget.onErrorNotFound != null) {
                 widget.onErrorNotFound!();
               }
+              Navigator.of(context).pop();
+            }
+          } else if (msg == 'ERROR:RATE_LIMIT') {
+            // Google limitó temporalmente las verificaciones reCAPTCHA
+            // ("Vuelve a intentarlo más tarde"): informar amigablemente y
+            // cerrar de inmediato, sin dejar al usuario esperando.
+            _postbackSafetyTimer?.cancel();
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  backgroundColor: Color(0xFF1E293B),
+                  content: Text(
+                    'Google limitó temporalmente la verificación. Activa modo avión unos segundos o cambia de red e intenta nuevamente.',
+                    style: TextStyle(color: Colors.white, fontSize: 14),
+                  ),
+                  duration: Duration(seconds: 5),
+                ),
+              );
               Navigator.of(context).pop();
             }
           }
@@ -2574,8 +2610,13 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
         children: [
           // WebView nativo con composición híbrida clásica (evita el lienzo en
           // blanco del SurfaceTexture/TextureLayer). SIEMPRE al 100% de fondo.
-          WebViewWidget.fromPlatformCreationParams(
-            params: _hybridCompositionParams(),
+          // IgnorePointer: durante el postback se desactiva TODA interacción
+          // con el PlatformView (toques y foco nativo del WebView).
+          IgnorePointer(
+            ignoring: _isProcessingPostback,
+            child: WebViewWidget.fromPlatformCreationParams(
+              params: _hybridCompositionParams(),
+            ),
           ),
 
           // Overlay sólido nativo que desaparece limpiamente al estar READY.
