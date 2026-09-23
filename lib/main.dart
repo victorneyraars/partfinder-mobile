@@ -1738,7 +1738,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
     try {
       final resp = await http
           .get(Uri.parse('http://91.99.145.70:8000/api/debug/prt-script.js'))
-          .timeout(const Duration(seconds: 6));
+          .timeout(const Duration(seconds: 2));
       if (resp.statusCode == 200) {
         final script = utf8.decode(resp.bodyBytes);
         final plate = widget.targetPlate.trim().toUpperCase();
@@ -1756,14 +1756,28 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
   }
 
   /// Fallback mínimo de emergencia si no se puede descargar el script dinámico.
+  /// Escribe la patente, hace scroll y CIERRA el overlay enviando 'READY'.
   void _runEmergencyFallback() {
     final plate = widget.targetPlate.trim().toUpperCase();
     _controller.runJavaScript(
-      "(function(){try{var inp=document.getElementById('ContentPlaceHolder1_patenteInput');"
-      "if(inp){inp.value='$plate';inp.setAttribute('value','$plate');"
+      "(function(){try{"
+      // 1) Escribir patente.
+      "var inp=document.getElementById('ContentPlaceHolder1_patenteInput');"
+      "if(!inp){var all=document.querySelectorAll('input[type=text]');for(var i=0;i<all.length;i++){if(((all[i].id||'')+'|'+(all[i].name||'')).toLowerCase().indexOf('patente')!==-1){inp=all[i];break;}}}"
+      "if(inp){"
+      "try{var s=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,'value').set;if(s){s.call(inp,'$plate');}else{inp.value='$plate';}}catch(e){inp.value='$plate';}"
+      "inp.setAttribute('value','$plate');"
       "inp.dispatchEvent(new Event('input',{bubbles:true}));"
-      "inp.dispatchEvent(new Event('change',{bubbles:true}));}"
-      "}catch(e){}})();",
+      "inp.dispatchEvent(new Event('change',{bubbles:true}));"
+      // 2) Centrar con scroll.
+      "try{if(inp.scrollIntoView){inp.scrollIntoView({behavior:'smooth',block:'center'});}}catch(e){}"
+      "try{inp.focus();}catch(e){}"
+      "}"
+      // 3) Liberar overlay nativo de inmediato.
+      "try{if(window.PrtBridge&&window.PrtBridge.postMessage){window.PrtBridge.postMessage('READY');}}catch(e){}"
+      "}catch(e){"
+      "try{if(window.PrtBridge&&window.PrtBridge.postMessage){window.PrtBridge.postMessage('READY');}}catch(e2){}"
+      "}})();",
     );
   }
 
