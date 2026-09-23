@@ -1571,9 +1571,6 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
   // activa con POSTBACK_START (justo antes del clic) y permanece hasta que
   // llegan los datos o el error, tapando la recarga completa de ASP.NET.
   bool _isProcessingPostback = false;
-  // Popup de imágenes de Google abierto (aviso del JS): se usa SOLO para
-  // ocultar el marco decorativo nativo del checkbox; sin recortes ni CSS.
-  bool _challengeOpen = false;
   // Temporizador de seguridad: si pasan 12s desde POSTBACK_START sin
   // respuesta (DATA/ERROR), cierra el modal. La app jamás queda congelada.
   Timer? _postbackSafetyTimer;
@@ -1671,15 +1668,6 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             _readyWatchdog?.cancel();
             if (!_isReady && mounted) {
               setState(() => _isReady = true);
-            }
-          } else if (msg == 'CHALLENGE_OPEN') {
-            // Solo oculta el marco decorativo del checkbox (nada más).
-            if (mounted && !_challengeOpen) {
-              setState(() => _challengeOpen = true);
-            }
-          } else if (msg == 'CHALLENGE_CLOSE') {
-            if (mounted && _challengeOpen) {
-              setState(() => _challengeOpen = false);
             }
           } else if (msg.startsWith('DISCOVER_IFRAME:')) {
             // Auto-descubrimiento de iframes del formulario PRT.
@@ -2657,25 +2645,17 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
           // Fondo nativo del modal.
           const ColoredBox(color: Color(0xFF0B132B)),
 
-          // WebView a PANTALLA COMPLETA y SIEMPRE a tamaño real: nunca debe
-          // maquetarse a 0x0 (si se oculta dentro de un crossfade, Chromium
-          // renderiza el iframe de Google en un viewport nulo → caja negra
-          // vacía). La capa de carga se desvanece POR ENCIMA, no al revés.
-          WebViewWidget.fromPlatformCreationParams(
-            params: _hybridCompositionParams(),
-          ),
-
-          // Banner nativo superior (tras READY): instrucción + patente en
-          // grande con ancho generoso y márgenes laterales de 24px. Se oculta
-          // durante el desafío de imágenes para no colisionar con el popup.
-          if (_isReady && !_isProcessingPostback && !_challengeOpen)
-            Positioned(
-              top: 0,
-              left: 0,
-              right: 0,
-              child: SafeArea(
+          // Columna limpia: banner nativo arriba + WebView ocupando TODO el
+          // resto del espacio de forma transparente. Sin marcos decorativos
+          // ni lucha geométrica entre capas: Flutter solo muestra la patente
+          // nativa; el WebView centra el reCAPTCHA orgánicamente (JS flex).
+          Column(
+            children: [
+              // Banner nativo: instrucción + placa patente estilizada.
+              SafeArea(
+                bottom: false,
                 child: Padding(
-                  padding: const EdgeInsets.fromLTRB(24, 14, 24, 0),
+                  padding: const EdgeInsets.fromLTRB(24, 14, 24, 6),
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
@@ -2724,40 +2704,15 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
                   ),
                 ),
               ),
-            ),
-
-          // Marco decorativo premium alrededor del checkbox de Google
-          // (304x78 fijo): tarjeta centrada, radio 14, sombra sutil y
-          // centrado óptico coincidente con el widget (50%, 54%).
-          // IgnorePointer: no intercepta toques; se oculta durante el popup
-          // de imágenes para no obstruir el desafío.
-          if (_isReady && !_isProcessingPostback && !_challengeOpen)
-            Positioned.fill(
-              child: IgnorePointer(
-                child: Align(
-                  alignment: const Alignment(0, 0.08),
-                  child: Container(
-                    width: 332,
-                    height: 106,
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(14),
-                      border: Border.all(
-                        color: const Color(0xFF38BDF8).withOpacity(0.35),
-                        width: 1.2,
-                      ),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withOpacity(0.35),
-                          blurRadius: 18,
-                          spreadRadius: 2,
-                          offset: const Offset(0, 6),
-                        ),
-                      ],
-                    ),
-                  ),
+              // WebView siempre a tamaño real (nunca 0x0), ocupando el
+              // espacio restante bajo la placa.
+              Expanded(
+                child: WebViewWidget.fromPlatformCreationParams(
+                  params: _hybridCompositionParams(),
                 ),
               ),
-            ),
+            ],
+          ),
 
           // Blindaje nativo anti-parpadeo: cubre absolutamente todo el
           // WebView (por encima de él) mientras ASP.NET hace el postback y
