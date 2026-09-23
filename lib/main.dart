@@ -2566,16 +2566,10 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
           // Blindaje nativo anti-parpadeo: cubre absolutamente todo el
           // WebView (por encima de él) mientras ASP.NET hace el postback y
           // la recarga completa de página. Hace físicamente imposible ver
-          // la web de PRT o el teclado durante la transición.
+          // la web de PRT o el teclado durante la transición. El interior es
+          // la telemetría ejecutiva premium (pulso cian/verde + estados).
           if (_isProcessingPostback)
-            Container(
-              color: const Color(0xFF0B132B),
-              width: double.infinity,
-              height: double.infinity,
-              child: const Center(
-                child: CircularProgressIndicator(color: Color(0xFF38BDF8)),
-              ),
-            ),
+            const _ExecutiveTelemetryOverlay(),
         ],
       ),
     );
@@ -2599,5 +2593,180 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
         setState(() => _showRetryButton = true);
       }
     });
+  }
+}
+
+/// Telemetría ejecutiva premium mostrada sobre el WebView durante el
+/// postback de PRT: isotipo con halo de pulso cian/verde, título corporativo,
+/// rotación de estados técnicos con fade y barra de progreso con gradiente.
+class _ExecutiveTelemetryOverlay extends StatefulWidget {
+  const _ExecutiveTelemetryOverlay();
+
+  @override
+  State<_ExecutiveTelemetryOverlay> createState() =>
+      _ExecutiveTelemetryOverlayState();
+}
+
+class _ExecutiveTelemetryOverlayState extends State<_ExecutiveTelemetryOverlay>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _pulseController;
+  final List<String> _technicalStates = const [
+    'Estableciendo enlace seguro PRT...',
+    'Decodificando historial y ficha técnica...',
+    'Sincronizando especificaciones del vehículo...',
+  ];
+  int _stateIndex = 0;
+  Timer? _stateTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    _pulseController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1800),
+    )..repeat();
+    _stateTimer = Timer.periodic(const Duration(milliseconds: 2300), (_) {
+      if (mounted) {
+        setState(
+          () => _stateIndex = (_stateIndex + 1) % _technicalStates.length,
+        );
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _pulseController.dispose();
+    _stateTimer?.cancel();
+    super.dispose();
+  }
+
+  /// Anillo expansivo del halo de pulso. [phase] intercala las ondas:
+  /// 0.0 para el cian, 0.5 para el verde (desfasadas medio período).
+  Widget _pulseRing(Color color, double phase) {
+    return AnimatedBuilder(
+      animation: _pulseController,
+      builder: (context, _) {
+        final t = (_pulseController.value + phase) % 1.0;
+        final scale = 1.0 + t * 1.9;
+        final opacity = (1.0 - t) * 0.45;
+        return Transform.scale(
+          scale: scale,
+          child: Container(
+            width: 74,
+            height: 74,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              border: Border.all(color: color.withOpacity(opacity), width: 2),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      color: const Color(0xFF0B132B),
+      width: double.infinity,
+      height: double.infinity,
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Isotipo con halo de pulso cian + verde intercalados.
+            SizedBox(
+              width: 140,
+              height: 140,
+              child: Stack(
+                alignment: Alignment.center,
+                children: [
+                  _pulseRing(const Color(0xFF38BDF8), 0.0),
+                  _pulseRing(const Color(0xFF10B981), 0.5),
+                  Container(
+                    width: 74,
+                    height: 74,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      gradient: const LinearGradient(
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        colors: [Color(0xFF38BDF8), Color(0xFF10B981)],
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: const Color(0xFF38BDF8).withOpacity(0.45),
+                          blurRadius: 30,
+                          spreadRadius: 2,
+                        ),
+                      ],
+                    ),
+                    child: const Icon(Icons.speed, color: Colors.white, size: 36),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 22),
+            // Título corporativo en negrita.
+            const Text(
+              'PARTFINDER 360 INTELLIGENCE',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 16,
+                fontWeight: FontWeight.w800,
+                letterSpacing: 1.2,
+              ),
+            ),
+            const SizedBox(height: 14),
+            // Subtítulo rotativo con fade entre estados técnicos.
+            SizedBox(
+              height: 44,
+              child: Center(
+                child: AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 350),
+                  transitionBuilder: (child, animation) =>
+                      FadeTransition(opacity: animation, child: child),
+                  child: Text(
+                    _technicalStates[_stateIndex],
+                    key: ValueKey<int>(_stateIndex),
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      color: Color(0xFF94A3B8),
+                      fontSize: 13,
+                      letterSpacing: 0.2,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 22),
+            // Barra de progreso lineal delgada, bordes redondeados y
+            // gradiente cian/azul (ShaderMask sobre LinearProgressIndicator).
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 48),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(4),
+                child: SizedBox(
+                  height: 3,
+                  child: ShaderMask(
+                    shaderCallback: (rect) => const LinearGradient(
+                      colors: [Color(0xFF38BDF8), Color(0xFF2563EB)],
+                    ).createShader(rect),
+                    blendMode: BlendMode.srcIn,
+                    child: const LinearProgressIndicator(
+                      minHeight: 3,
+                      backgroundColor: Colors.white12,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
