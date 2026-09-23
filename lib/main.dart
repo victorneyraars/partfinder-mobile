@@ -1539,6 +1539,8 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
   // Overlay nativo: mientras false se muestra el indicador de carga.
   bool _isReady = false;
   Timer? _readyFallbackTimer;
+  // Tras 15s sin READY, muestra botón de reintentar (no expone pantalla en blanco).
+  bool _showRetryButton = false;
 
   @override
   void initState() {
@@ -1548,11 +1550,11 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
         setState(() => _pageLoaded = true);
       }
     });
-    // Timeout de seguridad: si no llega 'READY' en 10s, revelar igualmente
-    // para no dejar al usuario bloqueado en la pantalla de carga.
-    _readyFallbackTimer = Timer(const Duration(seconds: 10), () {
+    // Si tras 15s no llega 'READY', mostrar un botón nativo de reintentar;
+    // el overlay SÍ se mantiene cubriendo (no se expone la pantalla en blanco).
+    _readyFallbackTimer = Timer(const Duration(seconds: 15), () {
       if (mounted && !_isReady) {
-        setState(() => _isReady = true);
+        setState(() => _showRetryButton = true);
       }
     });
     // Crear el WebView con el modo de composición híbrido clásico forzado más
@@ -2510,16 +2512,27 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
               color: const Color(0xFF1E293B),
               width: double.infinity,
               height: double.infinity,
-              child: const Center(
+              child: Center(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    CircularProgressIndicator(),
-                    SizedBox(height: 16),
-                    Text(
+                    if (_showRetryButton)
+                      const Icon(Icons.error_outline, color: Colors.white70, size: 40)
+                    else
+                      const CircularProgressIndicator(),
+                    const SizedBox(height: 16),
+                    const Text(
                       'Preparando consulta técnica...',
                       style: TextStyle(color: Colors.white, fontSize: 16),
                     ),
+                    if (_showRetryButton) ...[
+                      const SizedBox(height: 20),
+                      ElevatedButton.icon(
+                        onPressed: _retryLoad,
+                        icon: const Icon(Icons.refresh),
+                        label: const Text('Reintentar'),
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -2527,5 +2540,25 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
         ],
       ),
     );
+  }
+
+  void _retryLoad() {
+    setState(() {
+      _showRetryButton = false;
+      _isReady = false;
+    });
+    // Recargar la página PRT y reiniciar la inyección.
+    try {
+      _controller.loadRequest(Uri.parse('https://www.prt.cl/Paginas/RevisionTecnica.aspx'));
+    } catch (e) {
+      debugPrint('Error reintentando: $e');
+    }
+    // Reiniciar el temporizador de reintento.
+    _readyFallbackTimer?.cancel();
+    _readyFallbackTimer = Timer(const Duration(seconds: 15), () {
+      if (mounted && !_isReady) {
+        setState(() => _showRetryButton = true);
+      }
+    });
   }
 }
