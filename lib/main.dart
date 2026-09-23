@@ -1690,17 +1690,6 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
         ),
       )
       ..loadRequest(Uri.parse('https://www.prt.cl/Paginas/RevisionTecnica.aspx'));
-
-    // Forzar dibujado del documento completo en el WebView de Android para
-    // mitigar congelamientos de renderizado del primer fotograma.
-    try {
-      final platform = _controller.platform;
-      if (platform is AndroidWebViewController) {
-        platform.enableSlowWholeDocumentDraw();
-      }
-    } catch (e) {
-      debugPrint('enableSlowWholeDocumentDraw error: $e');
-    }
   }
 
   /// Maneja una URL de iframe descubierta desde el JS inyectado.
