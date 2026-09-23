@@ -1728,13 +1728,6 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
     _clearAndLoad();
   }
 
-  @override
-  void dispose() {
-    _readyFallbackTimer?.cancel();
-    _postbackSafetyTimer?.cancel();
-    super.dispose();
-  }
-
   Future<void> _clearAndLoad() async {
     try {
       await _controller.clearCache();
@@ -2513,6 +2506,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
   @override
   void dispose() {
     _readyFallbackTimer?.cancel();
+    _postbackSafetyTimer?.cancel();
     super.dispose();
   }
 
