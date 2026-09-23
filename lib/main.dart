@@ -1562,6 +1562,9 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
   // activa con POSTBACK_START (justo antes del clic) y permanece hasta que
   // llegan los datos o el error, tapando la recarga completa de ASP.NET.
   bool _isProcessingPostback = false;
+  // Temporizador de seguridad: si pasan 12s desde POSTBACK_START sin
+  // respuesta (DATA/ERROR), cierra el modal. La app jamás queda congelada.
+  Timer? _postbackSafetyTimer;
   Timer? _readyFallbackTimer;
   // Tras 15s sin READY, muestra botón de reintentar (no expone pantalla en blanco).
   bool _showRetryButton = false;
@@ -1594,6 +1597,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
           final msg = message.message;
           if (msg.startsWith('DATA:')) {
             try {
+              _postbackSafetyTimer?.cancel();
               final jsonStr = msg.substring(5);
               final map = jsonDecode(jsonStr) as Map<String, dynamic>;
               if (widget.onVehicleSaved != null) {
@@ -1629,9 +1633,33 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             if (mounted && !_isProcessingPostback) {
               setState(() => _isProcessingPostback = true);
             }
+            // Forzar a Android a cerrar el teclado virtual POR COMPLETO en
+            // esta misma llamada (no dejar que asome sobre el overlay).
+            if (mounted) {
+              try {
+                FocusScope.of(context).unfocus();
+              } catch (e) {
+                debugPrint('unfocus error: $e');
+              }
+              try {
+                SystemChannels.textInput.invokeMethod<void>('TextInput.hide');
+              } catch (e) {
+                debugPrint('TextInput.hide error: $e');
+              }
+            }
+            // Temporizador de seguridad: si en 12s no llega DATA/ERROR,
+            // cerrar el modal (nunca quedar congelado en la animación).
+            _postbackSafetyTimer?.cancel();
+            _postbackSafetyTimer = Timer(const Duration(seconds: 12), () {
+              if (mounted) {
+                debugPrint('[PRT] timeout de seguridad del postback: cerrando modal');
+                Navigator.of(context).pop();
+              }
+            });
           } else if (msg == 'ERROR:NOT_FOUND') {
             // Patente no existe en PRT: volver de inmediato a la pantalla
             // principal, avisar al usuario y devolver el foco al input.
+            _postbackSafetyTimer?.cancel();
             if (mounted) {
               if (widget.onErrorNotFound != null) {
                 widget.onErrorNotFound!();
@@ -1698,6 +1726,13 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
 
     // Limpieza preventiva de caché/cookies y carga inicial.
     _clearAndLoad();
+  }
+
+  @override
+  void dispose() {
+    _readyFallbackTimer?.cancel();
+    _postbackSafetyTimer?.cancel();
+    super.dispose();
   }
 
   Future<void> _clearAndLoad() async {
