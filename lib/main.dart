@@ -81,7 +81,7 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
   Future<void> _fetchBoostrTelemetry() async {
     try {
       final res = await http.get(
-        Uri.parse('http://91.99.145.70:8000/api/boostr/status'),
+        Uri.parse('https://api.studiodigital360.com/api/boostr/status'),
       ).timeout(const Duration(seconds: 4));
       if (res.statusCode == 200) {
         setState(() {
@@ -143,7 +143,7 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
     final anioClean = RegExp(r'(\d{4})').firstMatch(anioStr)?.group(1) ?? anioStr;
     setState(() => _isLoadingSii = true);
     try {
-      final uri = Uri.parse('http://91.99.145.70:8000/api/tasacion?marca=${Uri.encodeComponent(marca)}&modelo=${Uri.encodeComponent(modelo)}&anio=$anioClean');
+      final uri = Uri.parse('https://api.studiodigital360.com/api/tasacion?marca=${Uri.encodeComponent(marca)}&modelo=${Uri.encodeComponent(modelo)}&anio=$anioClean');
       final res = await http.get(uri).timeout(const Duration(seconds: 8));
       if (res.statusCode == 200) {
         final decoded = jsonDecode(res.body);
@@ -184,7 +184,7 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
     try {
       final client = HttpClient();
       client.connectionTimeout = const Duration(seconds: 10);
-      final url = Uri.parse('http://91.99.145.70:8000/api/patente/$rawPlate?provider=$_selectedEngine');
+      final url = Uri.parse('https://api.studiodigital360.com/api/patente/$rawPlate?provider=$_selectedEngine');
       final request = await client.getUrl(url);
       final response = await request.close();
       final body = await response.transform(utf8.decoder).join();
@@ -315,7 +315,7 @@ _vehicleData = v;
             final esBoostr = scraped['fuente'] == 'Boostr';
             if (!esBoostr) {
               try {
-                final cacheUri = Uri.parse("http://91.99.145.70:8000/api/vehicle/cache");
+                final cacheUri = Uri.parse("https://api.studiodigital360.com/api/vehicle/cache");
                 final res = await http.post(
                   cacheUri,
                   headers: {"Content-Type": "application/json"},
@@ -518,7 +518,7 @@ _vehicleData = v;
                                   onTap: () async {
                                     Navigator.pop(ctx);
                                     final q = Uri.encodeComponent(cat['meliQuery'] as String);
-                                    final url = 'http://91.99.145.70:8000/api/r/meli?q=' + q;
+                                    final url = 'https://api.studiodigital360.com/api/r/meli?q=' + q;
                                     await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
                                   },
                                   borderRadius: BorderRadius.circular(8),
@@ -1096,7 +1096,7 @@ _vehicleData = v;
       return;
     }
 
-    final uri = Uri.parse('http://91.99.145.70:8000/api/patente/$rawPlate/pdf');
+    final uri = Uri.parse('https://api.studiodigital360.com/api/patente/$rawPlate/pdf');
     try {
       HapticFeedback.mediumImpact();
 
@@ -1744,7 +1744,7 @@ class PrtService {
   static final PrtService instance = PrtService._();
   PrtService._();
 
-  static const String baseUrl = 'http://91.99.145.70:8000';
+  static const String baseUrl = 'https://api.studiodigital360.com';
 
   /// Parsea fechas es-ES: dd/mm/yyyy o dd-mm-yyyy. Null si es inválida.
   static DateTime? parseFechaEs(String? s) {
@@ -2215,7 +2215,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
   Future<void> _sendRemoteLog(String message) async {
     try {
       await http.post(
-        Uri.parse('http://91.99.145.70:8000/api/debug/log'),
+        Uri.parse('https://api.studiodigital360.com/api/debug/log'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({'message': message}),
       ).timeout(const Duration(seconds: 4));
@@ -2230,7 +2230,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
   Future<void> _fetchAndInjectDynamicScript() async {
     try {
       final resp = await http
-          .get(Uri.parse('http://91.99.145.70:8000/api/debug/prt-script.js'))
+          .get(Uri.parse('https://api.studiodigital360.com/api/debug/prt-script.js'))
           .timeout(const Duration(seconds: 2));
       if (resp.statusCode == 200) {
         final script = utf8.decode(resp.bodyBytes);
@@ -2378,7 +2378,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
       };
 
       final resp = await http.post(
-        Uri.parse('http://91.99.145.70:8000/api/debug/dump'),
+        Uri.parse('https://api.studiodigital360.com/api/debug/dump'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode(payload),
       ).timeout(const Duration(seconds: 8));
@@ -3144,7 +3144,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
     try {
       final resp = await http
           .post(
-            Uri.parse('http://91.99.145.70:8000/api/patente/fallback-boostr'),
+            Uri.parse('https://api.studiodigital360.com/api/patente/fallback-boostr'),
             headers: {'Content-Type': 'application/json'},
             body: jsonEncode({'patente': widget.targetPlate}),
           )

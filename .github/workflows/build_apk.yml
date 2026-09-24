@@ -29,7 +29,7 @@ jobs:
       - name: Create Platform, Keystore and Build
         run: |
           # 1. Crear estructura nativa de Android
-          flutter create --project-name partfinder_mobile --org com.partfinder360 --platforms=android --overwrite .
+          flutter create --project-name partfinder360 --org com.studiodigital360 --platforms=android --overwrite .
 
           # 2. Restaurar código real de lib/ y pubspec
           git checkout -- lib/ pubspec.yaml
@@ -41,9 +41,12 @@ jobs:
           # 4. Inyectar firmas y permisos mediante script Python
           python3 patch_android.py
 
-          # 5. Compilar APK release
+          # 5. Compilar artefactos oficiales de Google Play
           flutter pub get
           flutter build apk --release
+          flutter build appbundle --release
+          echo "applicationId aplicado:"
+          grep -R "applicationId" android/app/build.gradle | head -3
 
           # 6. Validar en pantalla certificado oficial
           echo "================ COMPROBACIÓN DE CERTIFICADO ================"
@@ -55,7 +58,9 @@ jobs:
         with:
           tag_name: v1.2.${{ github.run_id }}
           name: PartFinder 360 v1.2.${{ github.run_id }}
-          files: build/app/outputs/flutter-apk/app-release.apk
+          files: |
+            build/app/outputs/flutter-apk/app-release.apk
+            build/app/outputs/bundle/release/app-release.aab
           draft: false
           prerelease: false
         env:
