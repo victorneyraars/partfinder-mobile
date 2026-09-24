@@ -17,6 +17,12 @@ if os.path.exists(gradle_path):
         }
     }
 '''
+    # ===== Google Play: orientar a API 36 (compile + target) =====
+    content = re.sub(r'compileSdkVersion\s+flutter\.compileSdkVersion', 'compileSdkVersion 36', content)
+    content = re.sub(r'targetSdkVersion\s+flutter\.targetSdkVersion', 'targetSdkVersion 36', content)
+    content = re.sub(r'compileSdk\s*=\s*flutter\.compileSdkVersion', 'compileSdk = 36', content)
+    content = re.sub(r'targetSdk\s*=\s*flutter\.targetSdkVersion', 'targetSdk = 36', content)
+
     if 'partfinder-key' not in content:
         content = re.sub(r'android\s*\{', 'android {\n' + signing_block, content, count=1)
         content = re.sub(r'signingConfig\s*=?\s*signingConfigs\.debug', 'signingConfig signingConfigs.release', content)
