@@ -196,13 +196,15 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
           v['patente'] = plate;
 
           // ===== CACHÉ INTELIGENTE (regla condicional) =====
-          // Registro PRT en caché PERO VENCIDO/RECHAZADO → la política exige
-          // consulta técnica fresca obligatoria (el modal re-abre el WebView).
-          // VIGENTE → se usa el registro cacheado sin consumir reCAPTCHA.
+          // La bandera del backend es la autoridad: requiere_verificacion
+          // true (vencida/rechazada/sin vigencia) → consulta fresca
+          // obligatoria. VIGENTE → registro cacheado sin reCAPTCHA.
+          final reqVer = raw['requiere_verificacion'] == true;
           final isPrtRecord = (v['fuente'] == 'PRT Oficial') ||
               (v['rt_estado'] != null && v['rt_estado'].toString().isNotEmpty) ||
               (v['rt_vencimiento'] != null && v['rt_vencimiento'].toString().isNotEmpty);
-          if (isPrtRecord && !PrtService.isVigente(PrtVehiclePayload.fromJson(v))) {
+          if (reqVer ||
+              (isPrtRecord && !PrtService.isVigente(PrtVehiclePayload.fromJson(v)))) {
             _openPrtVerificationScreen(rawPlate);
             return;
           }
