@@ -41,8 +41,14 @@ jobs:
           # 4. Inyectar firmas y permisos mediante script Python
           python3 patch_android.py
 
-          # 5. Compilar artefactos oficiales de Google Play
+          # 5. Iconos de launcher oficiales (adaptive icons Android)
           flutter pub get
+          dart run flutter_launcher_icons
+          echo "== mipmaps generados =="
+          ls -la android/app/src/main/res/mipmap-xxxhdpi/ | head -6
+          ls android/app/src/main/res/mipmap-anydpi-v26/ 2>/dev/null
+
+          # 6. Compilar artefactos oficiales de Google Play
           flutter build apk --release
           flutter build appbundle --release
           echo "applicationId aplicado:"
