@@ -194,6 +194,19 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
           v['data_source'] = raw['data_source'] ?? (raw['source'] == 'database' ? 'CACHE_LOCAL' : (_selectedEngine == 'prt' ? 'PRT_SCRAPING' : 'BOOSTR_API'));
           final plate = raw['plate'] ?? raw['patente'] ?? rawPlate;
           v['patente'] = plate;
+
+          // ===== CACHÉ INTELIGENTE (regla condicional) =====
+          // Registro PRT en caché PERO VENCIDO/RECHAZADO → la política exige
+          // consulta técnica fresca obligatoria (el modal re-abre el WebView).
+          // VIGENTE → se usa el registro cacheado sin consumir reCAPTCHA.
+          final isPrtRecord = (v['fuente'] == 'PRT Oficial') ||
+              (v['rt_estado'] != null && v['rt_estado'].toString().isNotEmpty) ||
+              (v['rt_vencimiento'] != null && v['rt_vencimiento'].toString().isNotEmpty);
+          if (isPrtRecord && !PrtService.isVigente(PrtVehiclePayload.fromJson(v))) {
+            _openPrtVerificationScreen(rawPlate);
+            return;
+          }
+
           setState(() {
             
       // Consultar tasacion fiscal SII
@@ -1633,6 +1646,129 @@ class PrtVehiclePayload {
         'fuente': fuente,
         'extraido_en': extraidoEn,
       };
+}
+
+/// Servicio desacoplado de datos PRT con CACHÉ INTELIGENTE y ciclo de vida
+/// autónomo.
+///
+/// REGLA DE CACHÉ (Cache-First condicional):
+///  - Registro con RT VIGENTE (resultado aprobado Y fecha_vigencia >= hoy)
+///    → se resuelve al instante desde caché, SIN WebView ni reCAPTCHA.
+///  - Registro VENCIDO, RECHAZADO o INEXISTENTE → consulta técnica
+///    obligatoria (modal P2P) y persistencia del resultado crudo completo.
+///  - Un resultado vencido/rechazado NUNCA bloquea consultas futuras: no se
+///    trata como hit, por lo que cada consulta posterior vuelve a verificar
+///    hasta que el vehículo pase a VIGENTE (y [forceRefresh] fuerza siempre).
+class PrtService {
+  static final PrtService instance = PrtService._();
+  PrtService._();
+
+  static const String baseUrl = 'http://91.99.145.70:8000';
+
+  /// Parsea fechas es-ES: dd/mm/yyyy o dd-mm-yyyy. Null si es inválida.
+  static DateTime? parseFechaEs(String? s) {
+    final t = (s ?? '').trim();
+    if (t.isEmpty) return null;
+    final m = RegExp(r'^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$').firstMatch(t);
+    if (m == null) return null;
+    final d = int.tryParse(m.group(1)!);
+    final mo = int.tryParse(m.group(2)!);
+    final y = int.tryParse(m.group(3)!);
+    if (d == null || mo == null || y == null) return null;
+    final dt = DateTime(y, mo, d);
+    if (dt.day != d || dt.month != mo) return null; // 31/02 → inválida
+    return dt;
+  }
+
+  /// VIGENTE = resultado aprobado/vigente Y fecha de vigencia >= hoy.
+  static bool isVigente(PrtVehiclePayload p) {
+    final estado = p.rtEstado.toLowerCase();
+    final aprobado = estado.contains('aprobad') || estado.contains('vigente');
+    if (!aprobado) return false;
+    final vig = parseFechaEs(p.rtVencimiento);
+    if (vig == null) return false;
+    final hoy = DateTime.now();
+    final hoyIni = DateTime(hoy.year, hoy.month, hoy.day);
+    return !vig.isBefore(hoyIni);
+  }
+
+  /// Método unificado: cache-first condicional + consulta fresca + persistencia.
+  Future<PrtVehiclePayload?> getOrFetch(
+    BuildContext context,
+    String patente, {
+    bool forceRefresh = false,
+  }) async {
+    final plateClean = patente.toUpperCase().trim();
+    if (!forceRefresh) {
+      final cached = await getCachedVigente(plateClean);
+      if (cached != null) return cached;
+    }
+    final raw = await fetchFreshViaModal(context, plateClean);
+    if (raw == null) return null;
+    final payload = PrtVehiclePayload.fromJson(raw);
+    await persist(plateClean, raw);
+    return payload;
+  }
+
+  /// Devuelve el payload SOLO si está VIGENTE en caché; null si no existe,
+  /// está vencido o fue rechazado (dispara consulta fresca).
+  Future<PrtVehiclePayload?> getCachedVigente(String patente) async {
+    try {
+      final resp = await http
+          .get(Uri.parse('$baseUrl/api/patente/${patente.toUpperCase()}?provider=prt'))
+          .timeout(const Duration(seconds: 10));
+      if (resp.statusCode != 200) return null;
+      final raw = jsonDecode(resp.body) as Map<String, dynamic>;
+      final data = (raw['data'] is Map<String, dynamic>)
+          ? Map<String, dynamic>.from(raw['data'] as Map)
+          : Map<String, dynamic>.from(raw);
+      if (data.isEmpty) return null;
+      final payload = PrtVehiclePayload.fromJson(data);
+      return isVigente(payload) ? payload : null;
+    } catch (e) {
+      debugPrint('[PRT-CACHE] error leyendo caché: $e');
+      return null;
+    }
+  }
+
+  /// Presenta el modal P2P y espera el resultado crudo del pop.
+  Future<Map<String, dynamic>?> fetchFreshViaModal(
+    BuildContext context,
+    String patente,
+  ) async {
+    try {
+      FocusManager.instance.primaryFocus?.unfocus();
+    } catch (_) {}
+    try {
+      SystemChannels.textInput.invokeMethod<void>('TextInput.hide');
+    } catch (_) {}
+    final result = await Navigator.push<dynamic>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => PrtVerificationScreen(targetPlate: patente),
+      ),
+    );
+    if (result is Map<String, dynamic>) return result;
+    if (result is Map) return Map<String, dynamic>.from(result);
+    return null;
+  }
+
+  /// Persiste el objeto CRUDO COMPLETO (claves vacías incluidas e historial
+  /// íntegro) en PostgreSQL vía el endpoint de ingesta P2P.
+  Future<void> persist(String patente, Map<String, dynamic> raw) async {
+    try {
+      await http
+          .post(
+            Uri.parse('$baseUrl/api/vehicle/cache'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({'plate': patente, 'data': raw}),
+          )
+          .timeout(const Duration(seconds: 15));
+      debugPrint('[PRT-CACHE] persistido $patente');
+    } catch (e) {
+      debugPrint('[PRT-CACHE] error persistiendo: $e');
+    }
+  }
 }
 
 /// Componente AISLADO y reutilizable de verificación PRT.
