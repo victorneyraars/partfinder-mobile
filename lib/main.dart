@@ -1571,6 +1571,9 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
   // activa con POSTBACK_START (justo antes del clic) y permanece hasta que
   // llegan los datos o el error, tapando la recarga completa de ASP.NET.
   bool _isProcessingPostback = false;
+  // Popup de imágenes de Google abierto: oculta temporalmente la tarjeta de
+  // la placa para que el desafío tenga todo el alto sin solaparse.
+  bool _challengeOpen = false;
   // Temporizador de seguridad: si pasan 12s desde POSTBACK_START sin
   // respuesta (DATA/ERROR), cierra el modal. La app jamás queda congelada.
   Timer? _postbackSafetyTimer;
@@ -1669,6 +1672,16 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             if (!_isReady && mounted) {
               setState(() => _isReady = true);
             }
+          } else if (msg == 'CHALLENGE_OPEN') {
+            // Desafío de fotos abierto: ocultar la placa nativa (todo el
+            // alto disponible para el popup de Google).
+            if (mounted && !_challengeOpen) {
+              setState(() => _challengeOpen = true);
+            }
+          } else if (msg == 'CHALLENGE_CLOSE') {
+            if (mounted && _challengeOpen) {
+              setState(() => _challengeOpen = false);
+            }
           } else if (msg.startsWith('DISCOVER_IFRAME:')) {
             // Auto-descubrimiento de iframes del formulario PRT.
             final iframeUrl = msg.substring('DISCOVER_IFRAME:'.length).trim();
@@ -1679,7 +1692,10 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             // el contenedor nativo opaco que cubre el WebView durante todo el
             // postback + recarga completa (cero parpadeo de la web de PRT).
             if (mounted) {
-              setState(() => _isProcessingPostback = true);
+              setState(() {
+                _isProcessingPostback = true;
+                _challengeOpen = false;
+              });
             }
             // Forzar a Android a cerrar el teclado virtual POR COMPLETO en
             // esta misma llamada (no dejar que asome sobre el overlay).
@@ -2651,59 +2667,62 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
           // nativa; el WebView centra el reCAPTCHA orgánicamente (JS flex).
           Column(
             children: [
-              // Banner nativo: instrucción + placa patente estilizada.
-              SafeArea(
-                bottom: false,
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(24, 14, 24, 6),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Text(
-                        'Confirma la verificación para consultar',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          color: Color(0xFF94A3B8),
-                          fontSize: 15,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      // Contenedor nativo tipo placa premium, ancho completo.
-                      Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF1E293B),
-                          borderRadius: BorderRadius.circular(16),
-                          border: Border.all(
-                            color: const Color(0xFF38BDF8).withOpacity(0.45),
-                            width: 1.2,
-                          ),
-                          boxShadow: [
-                            BoxShadow(
-                              color: const Color(0xFF38BDF8).withOpacity(0.18),
-                              blurRadius: 20,
-                              spreadRadius: 1,
-                            ),
-                          ],
-                        ),
-                        child: Text(
-                          widget.targetPlate,
+              // Banner nativo: instrucción + placa patente estilizada. Se
+              // oculta durante el desafío de fotos (CHALLENGE_OPEN) para que
+              // el popup de Google tenga todo el alto sin solaparse.
+              if (!_challengeOpen)
+                SafeArea(
+                  bottom: false,
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(24, 14, 24, 6),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Text(
+                          'Confirma la verificación para consultar',
                           textAlign: TextAlign.center,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 32,
-                            fontWeight: FontWeight.w900,
-                            letterSpacing: 6,
-                            fontFamily: 'monospace',
+                          style: TextStyle(
+                            color: Color(0xFF94A3B8),
+                            fontSize: 15,
+                            fontWeight: FontWeight.w500,
                           ),
                         ),
-                      ),
-                    ],
+                        const SizedBox(height: 10),
+                        // Contenedor nativo tipo placa premium, ancho completo.
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF1E293B),
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(
+                              color: const Color(0xFF38BDF8).withOpacity(0.45),
+                              width: 1.2,
+                            ),
+                            boxShadow: [
+                              BoxShadow(
+                                color: const Color(0xFF38BDF8).withOpacity(0.18),
+                                blurRadius: 20,
+                                spreadRadius: 1,
+                              ),
+                            ],
+                          ),
+                          child: Text(
+                            widget.targetPlate,
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 32,
+                              fontWeight: FontWeight.w900,
+                              letterSpacing: 6,
+                              fontFamily: 'monospace',
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
-              ),
               // WebView siempre a tamaño real (nunca 0x0), ocupando el
               // espacio restante bajo la placa.
               Expanded(
