@@ -302,25 +302,33 @@ _vehicleData = v;
               _vehicleData = scraped;
             });
 
-            // 1. Guardar en PostgreSQL via backend (endpoint de ingesta directa)
+            // 1. Guardar en PostgreSQL via backend (endpoint de ingesta directa).
+            //    Si el dato vino del FALLBACK BOOSTR, el backend ya lo
+            //    persistió (fuente: 'Boostr'): no re-persistir para no
+            //    sobrescribir la fuente.
             final plateClean = _plateController.text.trim().toUpperCase();
-            try {
-              final cacheUri = Uri.parse("http://91.99.145.70:8000/api/vehicle/cache");
-              final res = await http.post(
-                cacheUri,
-                headers: {"Content-Type": "application/json"},
-                body: jsonEncode({
-                  "plate": plateClean,
-                  "data": scraped,
-                }),
-              );
-              if (res.statusCode == 200) {
-                _fetchBoostrTelemetry();
-                _showSnack("¡Vehículo $plateClean sincronizado en la base de datos!");
+            final esBoostr = scraped['fuente'] == 'Boostr';
+            if (!esBoostr) {
+              try {
+                final cacheUri = Uri.parse("http://91.99.145.70:8000/api/vehicle/cache");
+                final res = await http.post(
+                  cacheUri,
+                  headers: {"Content-Type": "application/json"},
+                  body: jsonEncode({
+                    "plate": plateClean,
+                    "data": scraped,
+                  }),
+                );
+                if (res.statusCode == 200) {
+                  _showSnack("¡Vehículo $plateClean sincronizado en la base de datos!");
+                }
+              } catch (e) {
+                debugPrint("Error persistiendo en backend: $e");
               }
-            } catch (e) {
-              debugPrint("Error persistiendo en backend: $e");
+            } else {
+              _showSnack("Vehículo $plateClean recuperado vía Boostr (RT no disponible)");
             }
+            _fetchBoostrTelemetry();
 
             // 2. Consultar tasacion oficial SII
             final sMarca = scraped["marca"] ?? scraped["make"];
@@ -1816,6 +1824,9 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
   // Popup de imágenes de Google abierto: oculta temporalmente la tarjeta de
   // la placa para que el desafío tenga todo el alto sin solaparse.
   bool _challengeOpen = false;
+  // Fallback Boostr en curso: la telemetría muestra la transición fluida
+  // 'Recuperando datos del vehículo vía Boostr...'.
+  bool _boostrRecovery = false;
   // Temporizador de seguridad: si pasan 12s desde POSTBACK_START sin
   // respuesta (DATA/ERROR), cierra el modal. La app jamás queda congelada.
   Timer? _postbackSafetyTimer;
@@ -1890,6 +1901,18 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
               }
               final jsonStr = msg.substring(5);
               final map = jsonDecode(jsonStr) as Map<String, dynamic>;
+
+              // ===== VALIDACIÓN DE CONTENIDO + FALLBACK BOOSTR =====
+              // Si el payload PRT llega sin datos de vehículo (marca/modelo
+              // vacíos), no se falla bruscamente: transición fluida a Boostr.
+              final marca = (map['marca'] ?? '').toString().trim();
+              final modelo = (map['modelo'] ?? '').toString().trim();
+              if (marca.isEmpty && modelo.isEmpty) {
+                debugPrint('[PRT] DATA sin datos de vehículo → fallback Boostr');
+                _boostrFallback();
+                return;
+              }
+
               if (widget.onVehicleSaved != null) {
                 widget.onVehicleSaved!(map);
               }
@@ -1975,15 +1998,12 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
               }
             });
           } else if (msg == 'ERROR:NOT_FOUND') {
-            // Patente no existe en PRT: volver de inmediato a la pantalla
-            // principal, avisar al usuario y devolver el foco al input.
+            // Patente no existe en PRT: transición fluida al fallback Boostr
+            // (la telemetría cambia a 'Recuperando datos del vehículo vía
+            // Boostr...'). Si Boostr tampoco tiene datos, recién entonces se
+            // avisa al usuario y se devuelve el foco al input.
             _postbackSafetyTimer?.cancel();
-            if (mounted) {
-              if (widget.onErrorNotFound != null) {
-                widget.onErrorNotFound!();
-              }
-              Navigator.of(context).pop();
-            }
+            _boostrFallback();
           } else if (msg == 'ERROR:RATE_LIMIT') {
             // Google limitó temporalmente las verificaciones reCAPTCHA
             // ("Vuelve a intentarlo más tarde"): informar amigablemente y
@@ -2980,8 +3000,14 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
           // la recarga completa de página. Hace físicamente imposible ver
           // la web de PRT o el teclado durante la transición. El interior es
           // la telemetría ejecutiva premium (pulso cian/verde + estados).
+          // En modo fallback Boostr muestra la transición fluida dedicada.
           if (_isProcessingPostback)
-            const _ExecutiveTelemetryOverlay(),
+            _boostrRecovery
+                ? const _ExecutiveTelemetryOverlay(
+                    states: ['Recuperando datos del vehículo vía Boostr...'],
+                    rotateStates: false,
+                  )
+                : const _ExecutiveTelemetryOverlay(),
 
           // Capa de carga inicial (telemetría premium) que se DESVANECE por
           // encima del WebView al recibir READY: fundido suave de 350ms sin
@@ -3027,6 +3053,60 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
         setState(() => _showRetryButton = true);
       }
     });
+  }
+
+  /// Fallback automático a Boostr: si PRT no tiene datos (o la patente no
+  /// existe), se recupera la ficha del vehículo vía Boostr con transición
+  /// fluida (telemetría 'Recuperando datos del vehículo vía Boostr...').
+  /// Si Boostr tampoco tiene datos, recién entonces se ejecuta el flujo de
+  /// no-encontrada (SnackBar + refoco del input).
+  Future<void> _boostrFallback() async {
+    if (mounted) {
+      setState(() {
+        _isProcessingPostback = true;
+        _boostrRecovery = true;
+      });
+    }
+    _postbackSafetyTimer?.cancel();
+
+    Map<String, dynamic>? boostrData;
+    try {
+      final resp = await http
+          .post(
+            Uri.parse('http://91.99.145.70:8000/api/patente/fallback-boostr'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({'patente': widget.targetPlate}),
+          )
+          .timeout(const Duration(seconds: 20));
+      if (resp.statusCode == 200) {
+        final raw = jsonDecode(resp.body) as Map<String, dynamic>;
+        final data = (raw['data'] is Map<String, dynamic>)
+            ? Map<String, dynamic>.from(raw['data'] as Map)
+            : Map<String, dynamic>.from(raw);
+        final marca = (data['marca'] ?? data['make'] ?? '').toString().trim();
+        final modelo = (data['modelo'] ?? data['model'] ?? '').toString().trim();
+        if (marca.isNotEmpty || modelo.isNotEmpty) {
+          boostrData = data;
+        }
+      }
+    } catch (e) {
+      debugPrint('[PRT] fallback Boostr error: $e');
+    }
+
+    if (!mounted) return;
+    if (boostrData != null) {
+      debugPrint('[PRT] Boostr OK: ${boostrData!['marca']} ${boostrData['modelo']}');
+      if (widget.onVehicleSaved != null) {
+        widget.onVehicleSaved!(boostrData!);
+      }
+      Navigator.of(context).pop(boostrData);
+      return;
+    }
+    // Boostr tampoco tiene datos → flujo de no encontrada.
+    if (widget.onErrorNotFound != null) {
+      widget.onErrorNotFound!();
+    }
+    Navigator.of(context).pop();
   }
 
   /// Watchdog de 6 segundos para 'READY': si el script dinámico no ha
