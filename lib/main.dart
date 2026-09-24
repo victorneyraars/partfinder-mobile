@@ -1931,7 +1931,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
     // abajo (en el widget), que evita el lienzo en blanco del SurfaceTexture.
     _controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
-      ..setBackgroundColor(const Color(0xFFFFFFFF))
+      ..setBackgroundColor(const Color(0xFF0B132B))
       ..setUserAgent("Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36")
       ..enableZoom(false)
       ..addJavaScriptChannel(
