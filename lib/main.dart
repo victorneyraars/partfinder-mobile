@@ -6,6 +6,8 @@ import 'package:url_launcher/url_launcher.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'package:open_filex/open_filex.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -1094,12 +1096,36 @@ _vehicleData = v;
       return;
     }
 
-    final uri = Uri.parse('http://91.99.145.70:8000/api/patente/$rawPlate?provider=$_selectedEngine');
+    final uri = Uri.parse('http://91.99.145.70:8000/api/patente/$rawPlate/pdf');
     try {
       HapticFeedback.mediumImpact();
-      final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
-      if (!launched) {
-        _showSnack('No se pudo abrir el navegador para descargar el PDF');
+
+      // Descarga binaria del PDF (NO esperar JSON ni abortar por
+      // application/pdf): se leen los bytes y se escriben en el
+      // almacenamiento local antes de abrir el visor.
+      final res = await http.get(uri).timeout(const Duration(seconds: 20));
+      if (res.statusCode != 200) {
+        _showSnack('No se pudo generar el informe (HTTP ${res.statusCode})');
+        debugPrint('[PRT-PDF] error HTTP ${res.statusCode} para $rawPlate');
+        return;
+      }
+      if (res.bodyBytes.isEmpty) {
+        _showSnack('El informe llegó vacío. Intenta nuevamente.');
+        return;
+      }
+
+      final dir = await getTemporaryDirectory();
+      final file = File('${dir.path}/informe_${rawPlate}.pdf');
+      await file.writeAsBytes(res.bodyBytes, flush: true);
+      debugPrint('[PRT-PDF] guardado: ${file.path} (${res.bodyBytes.length} bytes)');
+
+      // Visor local del sistema (open_filex); si falla, navegador externo.
+      final result = await OpenFilex.open(file.path);
+      if (result.type != ResultType.done) {
+        final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
+        if (!launched) {
+          _showSnack('No se pudo abrir el visor del PDF');
+        }
       }
     } catch (e) {
       _showSnack('Error al intentar abrir el PDF ($e)');
