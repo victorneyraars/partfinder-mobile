@@ -1541,6 +1541,110 @@ class OldFormatter {
 // ============================================================================
 // PANTALLA COMPLETA DEDICADA DE VERIFICACIÓN PRT (ESTÁNDAR DE LA INDUSTRIA)
 // ============================================================================
+
+/// Modelo fuertemente tipado del payload de extracción de PRT.
+///
+/// Esquema FIJO y homogéneo: todas las claves existen siempre (vacías como
+/// ''), listo para persistir en base de datos. Se construye desde el JSON
+/// crudo del script de inyección mediante [PrtVehiclePayload.fromJson].
+class PrtVehiclePayload {
+  final String patente;
+  final String tipo;
+  final String marca;
+  final String modelo;
+  final String anio;
+  final String nroMotor;
+  final String chasis;
+  final String vin;
+  final String color;
+  final String combustible;
+  final String pbv;
+  final String sello;
+  final List<Map<String, dynamic>> historialRt;
+  final String rtVencimiento;
+  final String rtEstado;
+  final String fuente;
+  final String extraidoEn;
+
+  PrtVehiclePayload({
+    this.patente = '',
+    this.tipo = '',
+    this.marca = '',
+    this.modelo = '',
+    this.anio = '',
+    this.nroMotor = '',
+    this.chasis = '',
+    this.vin = '',
+    this.color = '',
+    this.combustible = '',
+    this.pbv = '',
+    this.sello = '',
+    this.historialRt = const [],
+    this.rtVencimiento = '',
+    this.rtEstado = '',
+    this.fuente = '',
+    this.extraidoEn = '',
+  });
+
+  static String _s(dynamic v) => (v is String) ? v : '';
+
+  factory PrtVehiclePayload.fromJson(Map<String, dynamic> j) {
+    return PrtVehiclePayload(
+      patente: _s(j['patente']),
+      tipo: _s(j['tipo']),
+      marca: _s(j['marca']),
+      modelo: _s(j['modelo']),
+      anio: _s(j['anio']),
+      nroMotor: _s(j['nro_motor']),
+      chasis: _s(j['chasis']),
+      vin: _s(j['vin']),
+      color: _s(j['color']),
+      combustible: _s(j['combustible']),
+      pbv: _s(j['pbv']),
+      sello: _s(j['sello']),
+      historialRt: (j['historial_rt'] is List)
+          ? (j['historial_rt'] as List)
+              .map((e) => Map<String, dynamic>.from(e as Map))
+              .toList()
+          : const [],
+      rtVencimiento: _s(j['rt_vencimiento']),
+      rtEstado: _s(j['rt_estado']),
+      fuente: _s(j['fuente']),
+      extraidoEn: _s(j['extraido_en']),
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'patente': patente,
+        'tipo': tipo,
+        'marca': marca,
+        'modelo': modelo,
+        'anio': anio,
+        'nro_motor': nroMotor,
+        'chasis': chasis,
+        'vin': vin,
+        'color': color,
+        'combustible': combustible,
+        'pbv': pbv,
+        'sello': sello,
+        'historial_rt': historialRt,
+        'rt_vencimiento': rtVencimiento,
+        'rt_estado': rtEstado,
+        'fuente': fuente,
+        'extraido_en': extraidoEn,
+      };
+}
+
+/// Componente AISLADO y reutilizable de verificación PRT.
+///
+/// CONTRATO:
+///  - Entrada única: [targetPlate] (patente normalizada).
+///  - Salida limpia: al capturar los datos hace `Navigator.pop(context,
+///    Map<String,dynamic>)` con el payload completo (envolver con
+///    [PrtVehiclePayload.fromJson] para acceso tipado). Callbacks opcionales
+///    [onVehicleSaved] / [onErrorNotFound] para integraciones de conveniencia.
+///  - Sin dependencias rígidas: no referencia pantallas concretas; el
+///    resultado se entrega por el pop o por los callbacks.
 class PrtVerificationScreen extends StatefulWidget {
   final String targetPlate;
   final Function(Map<String, dynamic>)? onVehicleSaved;
