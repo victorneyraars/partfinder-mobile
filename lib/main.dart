@@ -136,9 +136,12 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
   
   Future<void> _fetchSiiTasacion(String? marca, String? modelo, dynamic anio) async {
     if (marca == null || modelo == null || anio == null) return;
+    // Normalización robusta del año (int, '2021', '2021-01-01', etc.).
+    final anioStr = anio.toString().trim();
+    final anioClean = RegExp(r'(\d{4})').firstMatch(anioStr)?.group(1) ?? anioStr;
     setState(() => _isLoadingSii = true);
     try {
-      final uri = Uri.parse('http://91.99.145.70:8000/api/tasacion?marca=${Uri.encodeComponent(marca)}&modelo=${Uri.encodeComponent(modelo)}&anio=$anio');
+      final uri = Uri.parse('http://91.99.145.70:8000/api/tasacion?marca=${Uri.encodeComponent(marca)}&modelo=${Uri.encodeComponent(modelo)}&anio=$anioClean');
       final res = await http.get(uri).timeout(const Duration(seconds: 8));
       if (res.statusCode == 200) {
         final decoded = jsonDecode(res.body);
@@ -342,11 +345,20 @@ _vehicleData = v;
   }
 
   void _openPartsMarketplace() {
-    final make = _vehicleData?['marca']?.toString().toUpperCase() ?? '';
-    final model = _vehicleData?['modelo']?.toString().toUpperCase() ?? '';
+    // Claves normalizadas: funciona igual con PRT (marca/modelo) o con
+    // Boostr (make/model). Sin fallos silenciosos.
+    final make = ((_vehicleData?['marca'] ?? _vehicleData?['make'])?.toString() ?? '')
+        .trim()
+        .toUpperCase();
+    final model = ((_vehicleData?['modelo'] ?? _vehicleData?['model'])?.toString() ?? '')
+        .trim()
+        .toUpperCase();
     final vehicleTitle = ('$make $model').trim();
 
-    if (vehicleTitle.isEmpty) return;
+    if (vehicleTitle.isEmpty) {
+      _showSnack('No hay datos de vehículo disponibles para abrir el catálogo');
+      return;
+    }
 
     HapticFeedback.mediumImpact();
 
@@ -1070,8 +1082,17 @@ _vehicleData = v;
   }
 
   Future<void> _openPdfReport() async {
-    final rawPlate = _vehicleData?['patente']?.toString().split('-').first.trim().toUpperCase() ?? '';
-    if (rawPlate.isEmpty) return;
+    // Patente normalizada desde la ficha o desde el input (PRT y Boostr).
+    final rawPlate = ((_vehicleData?['patente'] ?? _vehicleData?['plate'] ?? _plateController.text)
+            .toString()
+            .split('-')
+            .first
+            .trim()
+            .toUpperCase());
+    if (rawPlate.isEmpty) {
+      _showSnack('No hay patente disponible para generar el informe');
+      return;
+    }
 
     final uri = Uri.parse('http://91.99.145.70:8000/api/patente/$rawPlate?provider=$_selectedEngine');
     try {
@@ -1087,9 +1108,33 @@ _vehicleData = v;
 
   
   Widget _buildSiiCard() {
-    final sii = _vehicleData?["sii"] ?? _siiData?["summary"];
+    final sii = _vehicleData?["sii"] ??
+        _siiData?["summary"] ??
+        (_siiData?["data"] is Map ? _siiData?["data"]?["summary"] : null);
     if (sii == null && !_isLoadingSii) {
-      return const SizedBox.shrink();
+      // Estado de no disponibilidad: la tarjeta nunca desaparece en
+      // silencio (PRT o Boostr), muestra el aviso correspondiente.
+      return Container(
+        margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: const Color(0xFF0F172A),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: const Color(0xFF64748B).withOpacity(0.35)),
+        ),
+        child: const Row(
+          children: [
+            Icon(Icons.info_outline_rounded, color: Color(0xFF94A3B8), size: 18),
+            SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                'Tasación fiscal SII no disponible para este modelo',
+                style: TextStyle(color: Colors.white70, fontSize: 12),
+              ),
+            ),
+          ],
+        ),
+      );
     }
 
     if (_isLoadingSii) {
