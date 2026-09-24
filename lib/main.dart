@@ -11,6 +11,10 @@ import 'package:path_provider/path_provider.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'providers/vehicle_data_provider.dart';
+import 'providers/prt_data_provider.dart';
+import 'providers/boostr_data_provider.dart';
+
 
 String _getFreshRandomChileanPlate() {
   const letters = 'BCDFGHJKLPRSTVWXYZ';
@@ -64,6 +68,11 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
   String _selectedEngine = 'prt';
   final TextEditingController _plateController = TextEditingController(text: _getFreshRandomChileanPlate());
   final FocusNode _focusNode = FocusNode();
+
+  // ===== ARQUITECTURA DE PROVEEDORES ("cajas") =====
+  // Cada caja tiene su propio namespace de caché local (cache_prt_,
+  // cache_boostr_, cache_sii_ a futuro) con Negative Caching + TTL.
+  late final Map<String, VehicleDataProvider> _providers;
   
   late AnimationController _scannerController;
   late Animation<double> _scannerAnimation;
@@ -95,6 +104,12 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
   void initState() {
     _fetchBoostrTelemetry();
     super.initState();
+    // Registro de proveedores: el Motor PRT recibe el abridor del modal
+    // (human-in-the-loop) y Boostr consume la API orquestada del backend.
+    _providers = <String, VehicleDataProvider>{
+      'prt': PrtDataProvider(openModal: _openPrtModalAndAwait),
+      'boostr': BoostrDataProvider(),
+    };
     final initPlate = _getFreshRandomChileanPlate();
     _plateController.text = initPlate;
     _evalPlateFormat();
@@ -182,77 +197,75 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
     _scannerController.repeat(reverse: true);
 
     try {
-      final client = HttpClient();
-      client.connectionTimeout = const Duration(seconds: 10);
-      final url = Uri.parse('https://api.studiodigital360.com/api/patente/$rawPlate?provider=$_selectedEngine');
-      final request = await client.getUrl(url);
-      final response = await request.close();
-      final body = await response.transform(utf8.decoder).join();
+      // ===== ARQUITECTURA DE PROVEEDORES: selector de caja =====
+      final provider = _providers[_selectedEngine] ?? _providers['prt']!;
 
-      if (response.statusCode == 200) {
-        final Map<String, dynamic> raw = json.decode(body);
-        final v = raw['data'] != null && raw['data'] is Map<String, dynamic>
-            ? Map<String, dynamic>.from(raw['data'])
-            : Map<String, dynamic>.from(raw);
-
-        if (v.isNotEmpty && (v['make'] != null || v['marca'] != null || v['modelo'] != null)) {
-          v['data_source'] = raw['data_source'] ?? (raw['source'] == 'database' ? 'CACHE_LOCAL' : (_selectedEngine == 'prt' ? 'PRT_SCRAPING' : 'BOOSTR_API'));
-          final plate = raw['plate'] ?? raw['patente'] ?? rawPlate;
-          v['patente'] = plate;
-
-          // ===== CACHÉ INTELIGENTE (regla condicional) =====
-          // La bandera del backend es la autoridad: requiere_verificacion
-          // true (vencida/rechazada/sin vigencia) → consulta fresca
-          // obligatoria. VIGENTE → registro cacheado sin reCAPTCHA.
-          final reqVer = raw['requiere_verificacion'] == true;
-          final isPrtRecord = (v['fuente'] == 'PRT Oficial') ||
-              (v['rt_estado'] != null && v['rt_estado'].toString().isNotEmpty) ||
-              (v['rt_vencimiento'] != null && v['rt_vencimiento'].toString().isNotEmpty);
-          if (reqVer ||
-              (isPrtRecord && !PrtService.isVigente(PrtVehiclePayload.fromJson(v)))) {
-            _openPrtVerificationScreen(rawPlate);
-            return;
-          }
-
-          setState(() {
-            
-      // Consultar tasacion fiscal SII
-      final sMarca = v['marca']?.toString();
-      final sModelo = v['modelo']?.toString();
-      final sAnio = v['anio'] ?? v['year'];
-      _fetchSiiTasacion(sMarca, sModelo, sAnio);
-_vehicleData = v;
-          });
+      // 1) Caché local aislada del proveedor (positive + negative caching).
+      final cached = await provider.cache.read(rawPlate);
+      if (cached != null) {
+        if (cached['found'] == true) {
+          final v = Map<String, dynamic>.from(cached['data'] as Map? ?? const {});
+          v['data_source'] = 'CACHE_LOCAL_${provider.id}';
+          v['patente'] = v['patente'] ?? rawPlate;
+          setState(() => _vehicleData = v);
+          _fetchSiiTasacion(
+            (v['marca'] ?? v['make'])?.toString(),
+            (v['modelo'] ?? v['model'])?.toString(),
+            v['anio'] ?? v['year'],
+          );
           _fetchBoostrTelemetry();
+          _showSnack('Vehículo $rawPlate cargado desde caché local (${provider.id})');
+          return;
         } else {
-          _showSnack('No se encontraron especificaciones para $rawPlate');
-        }
-      } else if (response.statusCode == 404) {
-        // Contrato formal frontend-backend: el backend responde con
-        //   { detail: { error: "not_cached", message: ..., require_prt_solve: true } }
-        // para indicar que la patente NO está cacheada y debe resolverse P2P
-        // desde el navegador del móvil (IP residencial), no desde el backend.
-        bool requirePrtSolve = false;
-        try {
-          final dynamic errJson = jsonDecode(body);
-          if (errJson is Map) {
-            final detail = errJson['detail'];
-            requirePrtSolve =
-                errJson['require_prt_solve'] == true ||
-                (detail is Map && detail['require_prt_solve'] == true);
-          }
-        } catch (_) {}
-
-        // Abrir el resolver P2P si el motor es PRT o si el backend lo solicita
-        // explícitamente (require_prt_solve), independientemente del switch.
-        if (requirePrtSolve || _selectedEngine == 'prt') {
-          _openPrtVerificationScreen(rawPlate);
+          // Negative cache vigente: no repetir la consulta ni gastar cuota.
+          _showSnack('Patente no encontrada (caché reciente de ${provider.id}). Intenta más tarde.');
           return;
         }
-        _showSnack('Patente no encontrada en el registro oficial');
-      } else {
-        _showSnack('Error del servidor (${response.statusCode})');
       }
+
+      // 2) Consulta fresca al proveedor seleccionado.
+      final result = await provider.fetch(rawPlate, context: context);
+
+      if (result.found) {
+        final v = Map<String, dynamic>.from(result.data);
+        v['data_source'] = result.source == 'boostr' ? 'BOOSTR_API' : 'PRT_SCRAPING';
+        v['patente'] = v['patente'] ?? rawPlate;
+
+        // Persistir en la caché local del proveedor (payload completo,
+        // campos vacíos incluidos).
+        await provider.cache.write(rawPlate, found: true, data: v, source: result.source);
+
+        setState(() => _vehicleData = v);
+        final sMarca = (v['marca'] ?? v['make'])?.toString();
+        final sModelo = (v['modelo'] ?? v['model'])?.toString();
+        final sAnio = v['anio'] ?? v['year'];
+        _fetchSiiTasacion(sMarca, sModelo, sAnio);
+
+        // Persistencia en el backend (PRT recién extraído). Los datos de
+        // Boostr ya fueron persistidos por el endpoint orquestado.
+        if (result.source != 'boostr') {
+          try {
+            final res = await http.post(
+              Uri.parse('https://api.studiodigital360.com/api/vehicle/cache'),
+              headers: {'Content-Type': 'application/json'},
+              body: jsonEncode({'plate': rawPlate, 'data': v}),
+            );
+            if (res.statusCode == 200) {
+              _showSnack('¡Vehículo $rawPlate sincronizado en la base de datos!');
+            }
+          } catch (e) {
+            debugPrint('Error persistiendo en backend: $e');
+          }
+        } else {
+          _showSnack('Vehículo $rawPlate recuperado vía Boostr (RT no disponible)');
+        }
+        _fetchBoostrTelemetry();
+        return;
+      }
+
+      // 3) Sin datos: Negative Caching local + aviso.
+      await provider.cache.write(rawPlate, found: false, data: const {}, source: result.source);
+      _showSnack('Patente no encontrada en el registro oficial');
     } catch (e) {
       _showSnack('Error de conexión con el servidor ($e)');
     } finally {
@@ -265,6 +278,37 @@ _vehicleData = v;
         HapticFeedback.mediumImpact();
       }
     }
+  }
+
+  /// Abre el modal PRT (human-in-the-loop) y devuelve el payload crudo del
+  /// pop, conservando el aviso/refoco del flujo de no-encontrada.
+  Future<Map<String, dynamic>?> _openPrtModalAndAwait(BuildContext modalContext, String plate) async {
+    final result = await Navigator.push<dynamic>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => PrtVerificationScreen(
+          targetPlate: plate,
+          onErrorNotFound: () {
+            try { _focusNode.requestFocus(); } catch (_) {}
+            if (mounted) {
+              ScaffoldMessenger.of(this.context).showSnackBar(
+                const SnackBar(
+                  backgroundColor: Color(0xFF1E293B),
+                  content: Text(
+                    'Patente no encontrada en PRT. Verifica e intenta nuevamente',
+                    style: TextStyle(color: Colors.white, fontSize: 14),
+                  ),
+                  duration: Duration(seconds: 4),
+                ),
+              );
+            }
+          },
+        ),
+      ),
+    );
+    if (result is Map<String, dynamic>) return result;
+    if (result is Map) return Map<String, dynamic>.from(result);
+    return null;
   }
 
   
