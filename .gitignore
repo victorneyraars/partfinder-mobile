@@ -1,0 +1,14 @@
+# Python
+__pycache__/
+*.pyc
+
+# Flutter / Dart
+.dart_tool/
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+
+# Android (generado por CI)
+android/.gradle/
+android/app/.cxx/

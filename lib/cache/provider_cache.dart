@@ -40,17 +40,24 @@ class ProviderCache {
 
   /// Devuelve `{found, status, data, source}` si el registro está vigente;
   /// null si no existe o su TTL expiró (negativos usan [negativeTtl]).
+  /// Si la entrada guardó [ttlOverride], se respeta su `expires_at`.
   Future<Map<String, dynamic>?> read(String plate) async {
     try {
       final f = await _file(plate);
       if (!await f.exists()) return null;
       final j = jsonDecode(await f.readAsString()) as Map<String, dynamic>;
-      final ts = DateTime.tryParse((j['timestamp'] ?? j['ts'] ?? '').toString());
-      if (ts == null) return null;
       final status = (j['status'] ?? '').toString();
       final isNegative = status != 'hit';
-      final limit = isNegative ? negativeTtl : ttl;
-      if (DateTime.now().difference(ts) > limit) return null;
+      final expiresRaw = (j['expires_at'] ?? '').toString();
+      final DateTime? expires = expiresRaw.isEmpty ? null : DateTime.tryParse(expiresRaw);
+      if (expires != null) {
+        if (DateTime.now().isAfter(expires)) return null;
+      } else {
+        final ts = DateTime.tryParse((j['timestamp'] ?? j['ts'] ?? '').toString());
+        if (ts == null) return null;
+        final limit = isNegative ? negativeTtl : ttl;
+        if (DateTime.now().difference(ts) > limit) return null;
+      }
       return <String, dynamic>{
         'found': status == 'hit',
         'status': status,
@@ -65,12 +72,15 @@ class ProviderCache {
   }
 
   /// Persiste el resultado (positivo o negativo) con campos vacíos intactos.
+  /// [ttlOverride] permite TTL dinámico por tipo de dato (p. ej. MTT:
+  /// particular 60d vs transporte público 30d).
   Future<void> write(
     String plate, {
     required bool found,
     required Map<String, dynamic> data,
     required String source,
     String status = 'hit',
+    Duration? ttlOverride,
   }) async {
     try {
       final f = await _file(plate);
@@ -79,6 +89,9 @@ class ProviderCache {
         'status': found ? 'hit' : (status == 'hit' ? 'empty' : status),
         'data': data,
         'source': source,
+        'expires_at': ttlOverride == null
+            ? null
+            : DateTime.now().add(ttlOverride).toIso8601String(),
       }));
     } catch (_) {}
   }

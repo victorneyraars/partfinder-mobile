@@ -14,6 +14,7 @@ import 'package:flutter/services.dart';
 import 'providers/vehicle_data_provider.dart';
 import 'providers/prt_data_provider.dart';
 import 'providers/boostr_data_provider.dart';
+import 'providers/mtt_data_provider.dart';
 
 
 String _getFreshRandomChileanPlate() {
@@ -109,6 +110,7 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
     _providers = <String, VehicleDataProvider>{
       'prt': PrtDataProvider(openModal: _openPrtModalAndAwait),
       'boostr': BoostrDataProvider(),
+      'mtt': MttDataProvider(),
     };
     final initPlate = _getFreshRandomChileanPlate();
     _plateController.text = initPlate;
@@ -228,12 +230,18 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
 
       if (result.found) {
         final v = Map<String, dynamic>.from(result.data);
-        v['data_source'] = result.source == 'boostr' ? 'BOOSTR_API' : 'PRT_SCRAPING';
+        v['data_source'] = result.source == 'boostr'
+            ? 'BOOSTR_API'
+            : (result.source == 'mtt' ? 'MTT_REGISTRO' : 'PRT_SCRAPING');
         v['patente'] = v['patente'] ?? rawPlate;
 
         // Persistir en la caché local del proveedor (payload completo,
-        // campos vacíos incluidos).
-        await provider.cache.write(rawPlate, found: true, data: v, source: result.source);
+        // campos vacíos incluidos). MTT ya persistió dentro de su fetch()
+        // con TTL dinámico (30d transporte público / 60d particular), por
+        // lo que no se reescribe aquí.
+        if (result.source != 'mtt') {
+          await provider.cache.write(rawPlate, found: true, data: v, source: result.source);
+        }
 
         setState(() => _vehicleData = v);
         final sMarca = (v['marca'] ?? v['make'])?.toString();
@@ -242,8 +250,8 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
         _fetchSiiTasacion(sMarca, sModelo, sAnio);
 
         // Persistencia en el backend (PRT recién extraído). Los datos de
-        // Boostr ya fueron persistidos por el endpoint orquestado.
-        if (result.source != 'boostr') {
+        // Boostr y MTT ya fueron persistidos por el endpoint orquestado.
+        if (result.source == 'prt') {
           try {
             final res = await http.post(
               Uri.parse('https://api.studiodigital360.com/api/vehicle/cache'),
@@ -256,8 +264,12 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
           } catch (e) {
             debugPrint('Error persistiendo en backend: $e');
           }
-        } else {
+        } else if (result.source == 'boostr') {
           _showSnack('Vehículo $rawPlate recuperado vía Boostr (RT no disponible)');
+        } else {
+          _showSnack(v['isPublicTransport'] == true
+              ? 'Vehículo $rawPlate inscrito como transporte público/escolar (MTT)'
+              : 'Vehículo $rawPlate particular: sin registro en el RNSTP (MTT)');
         }
         _fetchBoostrTelemetry();
         return;
@@ -687,7 +699,8 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
                 const SizedBox(height: 24),
                 _buildScanButton(),
                 const SizedBox(height: 28),
-                if (_vehicleData != null) _buildVehicleSpecsCard(),
+                if (_vehicleData != null)
+                  _isMttResult ? _buildMttCard() : _buildVehicleSpecsCard(),
             _buildSiiCard(),
               ],
             ),
@@ -775,9 +788,14 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
                   children: const [
                     Icon(Icons.bolt, size: 16, color: Color(0xFF38BDF8)),
                     SizedBox(width: 6),
-                    Text(
-                      'Boostr API (Pro)',
-                      style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
+                    Flexible(
+                      child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Text(
+                          'Boostr API',
+                          style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
+                        ),
+                      ),
                     ),
                   ],
                 ),
@@ -800,9 +818,44 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
                   children: const [
                     Icon(Icons.precision_manufacturing, size: 16, color: Color(0xFF10B981)),
                     SizedBox(width: 6),
-                    Text(
-                      'Motor PRT (Local)',
-                      style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
+                    Flexible(
+                      child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Text(
+                          'Motor PRT',
+                          style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          Expanded(
+            child: GestureDetector(
+              onTap: () => setState(() => _selectedEngine = 'mtt'),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                decoration: BoxDecoration(
+                  color: _selectedEngine == 'mtt' ? const Color(0xFF1E293B) : Colors.transparent,
+                  borderRadius: BorderRadius.circular(8),
+                  border: _selectedEngine == 'mtt' ? Border.all(color: const Color(0xFFF59E0B), width: 1.2) : null,
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: const [
+                    Icon(Icons.directions_bus_filled_rounded, size: 16, color: Color(0xFFF59E0B)),
+                    SizedBox(width: 6),
+                    Flexible(
+                      child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Text(
+                          'MTT Transporte',
+                          style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
+                        ),
+                      ),
                     ),
                   ],
                 ),
@@ -816,24 +869,29 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
 
     Widget _buildBoostrTelemetryHud() {
     final bool isBoostr = _selectedEngine == 'boostr';
+    final bool isMtt = _selectedEngine == 'mtt';
     final bool isOnline = _boostrStatus?['status'] == 'ONLINE';
     final String plan = _boostrStatus?['plan']?.toString().toUpperCase() ?? 'PRO';
     final String dailyLimit = _boostrStatus?['daily_limit']?.toString() ?? '100';
     final String remaining = _boostrStatus?['remaining']?.toString() ?? dailyLimit;
     final String cached = _boostrStatus?['cached_plates']?.toString() ?? '0';
 
-    final Color accentColor = isBoostr ? const Color(0xFF38BDF8) : const Color(0xFF10B981);
+    final Color accentColor = isBoostr
+        ? const Color(0xFF38BDF8)
+        : (isMtt ? const Color(0xFFF59E0B) : const Color(0xFF10B981));
     final Color dotColor = isBoostr 
         ? (isOnline ? const Color(0xFF10B981) : const Color(0xFFF59E0B))
         : const Color(0xFF10B981);
 
     final String titleText = isBoostr 
         ? 'BOOSTR API $plan: ${isOnline ? "ONLINE" : "CONECTANDO"}'
-        : 'MOTOR PRT CHILE: ACTIVO';
+        : (isMtt ? 'MTT RNSTP: CONSULTA WEB OFICIAL' : 'MOTOR PRT CHILE: ACTIVO');
 
     final String metricsText = isBoostr
         ? 'Cuota: $remaining/$dailyLimit   •   Caché: $cached'
-        : 'Modo: Directo (P2P)   •   Caché: $cached';
+        : (isMtt
+            ? 'Transporte Público / Escolar / Particular'
+            : 'Modo: Directo (P2P)   •   Caché: $cached');
 
     return Container(
       constraints: const BoxConstraints(maxWidth: 360),
@@ -1603,6 +1661,152 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
               ),
             ),
           ),
+        ],
+      ),
+    );
+  }
+
+  bool get _isMttResult {
+    final d = _vehicleData;
+    if (d == null) return false;
+    final src = (d['data_source']?.toString() ?? '').toUpperCase();
+    final fuente = (d['fuente']?.toString() ?? '').toUpperCase();
+    return src.contains('MTT') || fuente == 'MTT';
+  }
+
+  /// Tarjeta de resultado del Registro Nacional de Servicios de Transporte
+  /// de Pasajeros y Escolar (RNSTP - MTT). Reemplaza la tarjeta de
+  /// especificaciones cuando la caja activa es MTT.
+  Widget _buildMttCard() {
+    final bool isPublic = _vehicleData!['isPublicTransport'] == true;
+    final Color accent = isPublic ? const Color(0xFFF59E0B) : const Color(0xFF38BDF8);
+    final String patente = _vehicleData!['patente']?.toString().toUpperCase() ?? '';
+
+    return Container(
+      width: double.infinity,
+      constraints: const BoxConstraints(maxWidth: 380),
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: const Color(0xFF0F172A).withOpacity(0.85),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: accent.withOpacity(0.45), width: 1.5),
+        boxShadow: [
+          BoxShadow(
+            color: accent.withOpacity(0.10),
+            blurRadius: 20,
+            spreadRadius: 4,
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Expanded(
+                child: Row(
+                  children: [
+                    Icon(Icons.directions_bus_filled_rounded, color: accent, size: 22),
+                    const SizedBox(width: 8),
+                    Flexible(
+                      child: Text(
+                        patente,
+                        style: TextStyle(fontSize: 15, fontWeight: FontWeight.w900, color: accent, letterSpacing: 1.2),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF59E0B).withOpacity(0.16),
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(color: const Color(0xFFF59E0B), width: 0.9),
+                ),
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.account_balance, color: Color(0xFFF59E0B), size: 12),
+                    SizedBox(width: 4),
+                    Text(
+                      'MTT / RNSTP',
+                      style: TextStyle(color: Color(0xFFF59E0B), fontSize: 10, fontWeight: FontWeight.w900, letterSpacing: 0.6),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: accent.withOpacity(0.12),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: accent.withOpacity(0.55), width: 1),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  isPublic ? Icons.verified_user : Icons.directions_car_filled_rounded,
+                  color: accent,
+                  size: 20,
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    isPublic
+                        ? 'TRANSPORTE PÚBLICO / ESCOLAR AUTORIZADO'
+                        : 'VEHÍCULO PARTICULAR',
+                    style: TextStyle(
+                      color: accent,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: 0.8,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+          if (isPublic) ...[
+            _specRow('TIPO DE SERVICIO', _vehicleData!['tipo_servicio']?.toString()),
+            _specRow('ESTADO DEL SERVICIO', _vehicleData!['estado_servicio']?.toString()),
+            _specRow('REGIÓN', _vehicleData!['region']?.toString()),
+            _specRow('FOLIO FLOTA', _vehicleData!['folio_flota']?.toString()),
+            _specRow('VENCIMIENTO PERMISO', _vehicleData!['fecha_vencimiento_permiso']?.toString()),
+          ] else ...[
+            Text(
+              'El vehículo no pertenece al Registro Nacional de Servicios de '
+              'Transporte de Pasajeros y Escolar (RNSTP) del Ministerio de '
+              'Transportes y Telecomunicaciones.',
+              style: const TextStyle(
+                color: Color(0xFF94A3B8),
+                fontSize: 12,
+                height: 1.5,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 10),
+            const Row(
+              children: [
+                Icon(Icons.info_outline_rounded, color: Color(0xFF64748B), size: 15),
+                SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    'No está inscrito como transporte público, privado de pasajeros ni escolar. '
+                    'Resultado oficial consultado en apps.mtt.cl.',
+                    style: TextStyle(color: Color(0xFF64748B), fontSize: 11, height: 1.4),
+                  ),
+                ),
+              ],
+            ),
+          ],
         ],
       ),
     );
