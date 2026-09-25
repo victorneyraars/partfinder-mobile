@@ -84,8 +84,6 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
   bool _isRefreshingMtt = false;
   bool _isRefreshingSii = false;
   bool _isRefreshingBoostr = false;
-  Map<String, dynamic>? _selectedSiiVersion;
-  int? _selectedSiiVersionIndex;
   Map<String, dynamic>? _siiData;
   bool _isLoadingSii = false;
 
@@ -223,8 +221,6 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
           v['data_source'] = 'CACHE_LOCAL_${provider.id}';
           v['patente'] = v['patente'] ?? rawPlate;
           setState(() {
-            _selectedSiiVersion = null;
-            _selectedSiiVersionIndex = null;
             _vehicleData = v;
           });
           _fetchSiiTasacion(
@@ -264,8 +260,6 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
         }
 
         setState(() {
-          _selectedSiiVersion = null;
-          _selectedSiiVersionIndex = null;
           _vehicleData = v;
         });
         final sMarca = (v['marca'] ?? v['make'])?.toString();
@@ -2021,6 +2015,14 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
   /// - exact_match == false → rangos ($MIN - $MAX) + selector desplegable
   ///   de versiones: al elegir una, los montos y el código se actualizan
   ///   al instante en pantalla.
+  /// Tarjeta de resultado de la caja SII (Tasación Fiscal Oficial —
+  /// motor local por Decreto Exento). SIN selector: desglose completo.
+  ///
+  /// - 1 variante  → tarjeta destacada con montos exactos + ficha técnica.
+  /// - N variantes → badge con conteo, resumen de rangos y tarjetas
+  ///   individuales por versión homologada (código, especificaciones,
+  ///   equipamiento, tasación y permiso).
+  /// - 0 variantes → estado informativo con botón de reintento.
   Widget _buildSiiCard() {
     const Color accent = Color(0xFF34D399);
     final Map<String, dynamic> d = _vehicleData!;
@@ -2028,17 +2030,10 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
         _sanitizeMttText(d['patente']?.toString() ?? '').toUpperCase();
     final bool exact = d['exact_match'] == true;
 
-    // Versión seleccionada por el usuario (solo en modo rango).
-    final Map<String, dynamic>? sel = _selectedSiiVersion;
-
-    String _sv(String key, [String fallbackKey = '']) =>
-        _sanitizeMttText((sel != null ? (sel[key] ?? '') : (fallbackKey.isEmpty ? '' : d[fallbackKey]))?.toString() ?? '');
-
-    final String tasacion = _sv('tasacion', 'tasacion_fiscal');
-    final String permiso = _sv('permiso', 'permiso_circulacion');
-    final String codigo = _sv('codigo_sii', 'codigo_sii');
-    final String anioTasacion = _sanitizeMttText(
-        (sel != null ? (sel['anio'] ?? '') : d['anio_tasacion'])?.toString() ?? '');
+    final List<dynamic> versiones = (d['versiones'] is List)
+        ? List<dynamic>.from(d['versiones'] as List)
+        : const <dynamic>[];
+    final int nVariantes = versiones.length;
 
     final Map<String, dynamic> rangoT = (d['rango_tasacion'] is Map)
         ? Map<String, dynamic>.from(d['rango_tasacion'] as Map)
@@ -2046,47 +2041,10 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
     final Map<String, dynamic> rangoP = (d['rango_permiso'] is Map)
         ? Map<String, dynamic>.from(d['rango_permiso'] as Map)
         : const <String, dynamic>{};
-    final List<dynamic> versiones = (d['versiones'] is List)
-        ? List<dynamic>.from(d['versiones'] as List)
-        : const <dynamic>[];
 
-    final bool modoRango = !exact && versiones.isNotEmpty;
-    final String tMin = _sanitizeMttText(rangoT['min']?.toString() ?? '');
-    final String tMax = _sanitizeMttText(rangoT['max']?.toString() ?? '');
-    final String pMin = _sanitizeMttText(rangoP['min']?.toString() ?? '');
-    final String pMax = _sanitizeMttText(rangoP['max']?.toString() ?? '');
-
-    // Valor a mostrar: exacto si hay selección o exact_match; rango si no.
-    final String valorTasacion = (sel != null || exact)
-        ? _formatClp(tasacion)
-        : ((tMin.isNotEmpty && tMax.isNotEmpty)
-            ? '${_formatClp(tMin)} - ${_formatClp(tMax)}'
-            : '—');
-    final String valorPermiso = (sel != null || exact)
-        ? _formatClp(permiso)
-        : ((pMin.isNotEmpty && pMax.isNotEmpty)
-            ? '${_formatClp(pMin)} - ${_formatClp(pMax)}'
-            : '—');
-    final String codigoDisplay = codigo.isNotEmpty
-        ? codigo
-        : (modoRango ? 'SELECCIONA VERSIÓN' : '—');
-
-    // Ficha técnica: si hay versión seleccionada, sus datos mandan.
-    final Map<String, dynamic> homo = (d['datos_homologacion'] is Map)
-        ? Map<String, dynamic>.from(d['datos_homologacion'] as Map)
-        : <String, dynamic>{};
-    final String hVersion = sel != null
-        ? _sanitizeMttText(sel['version']?.toString() ?? '')
-        : _sanitizeMttText(homo['version']?.toString() ?? '');
-    final String hCilindrada = sel != null
-        ? _sanitizeMttText(sel['cilindrada']?.toString() ?? '')
-        : _sanitizeMttText(homo['cilindrada']?.toString() ?? '');
-    final String hCombustible = sel != null
-        ? _sanitizeMttText(sel['combustible']?.toString() ?? '')
-        : _sanitizeMttText(homo['combustible']?.toString() ?? '');
-    final String hTransmision = sel != null
-        ? _sanitizeMttText(sel['transmision']?.toString() ?? '')
-        : _sanitizeMttText(homo['transmision']?.toString() ?? '');
+    final String badgeText = (nVariantes > 1)
+        ? 'SII / TASACIÓN OFICIAL: $nVariantes VARIANTES HOMOLOGADAS'
+        : 'SII / TASACIÓN OFICIAL';
 
     return Container(
       width: double.infinity,
@@ -2135,14 +2093,17 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
                       borderRadius: BorderRadius.circular(6),
                       border: Border.all(color: accent, width: 0.9),
                     ),
-                    child: const Row(
+                    child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Icon(Icons.verified_rounded, color: accent, size: 12),
-                        SizedBox(width: 4),
-                        Text(
-                          'SII / TASACIÓN OFICIAL',
-                          style: TextStyle(color: accent, fontSize: 9, fontWeight: FontWeight.w900, letterSpacing: 0.4),
+                        const Icon(Icons.verified_rounded, color: accent, size: 12),
+                        const SizedBox(width: 4),
+                        Flexible(
+                          child: Text(
+                            badgeText,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(color: accent, fontSize: 9, fontWeight: FontWeight.w900, letterSpacing: 0.4),
+                          ),
                         ),
                       ],
                     ),
@@ -2156,10 +2117,7 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
                             child: SizedBox(
                               width: 16,
                               height: 16,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: accent,
-                              ),
+                              child: CircularProgressIndicator(strokeWidth: 2, color: accent),
                             ),
                           )
                         : IconButton(
@@ -2175,609 +2133,356 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
             ],
           ),
           const SizedBox(height: 14),
-          // ===== Tarjetas destacadas: montos fiscales =====
-          Row(
-            children: [
-              Expanded(
-                child: Container(
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(
-                    color: accent.withOpacity(0.10),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: accent.withOpacity(0.5), width: 1),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        modoRango && sel == null ? 'AVALÚO FISCAL (RANGO)' : 'AVALÚO FISCAL OFICIAL',
-                        style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 9, fontWeight: FontWeight.w800, letterSpacing: 0.6),
-                      ),
-                      const SizedBox(height: 6),
-                      Text(
-                        valorTasacion,
-                        softWrap: true,
-                        style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w900),
-                      ),
-                      if (anioTasacion.isNotEmpty) ...[
-                        const SizedBox(height: 4),
-                        Text(
-                          'Año: $anioTasacion',
-                          style: const TextStyle(color: Color(0xFF6EE7B7), fontSize: 10, fontWeight: FontWeight.w600),
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Container(
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF1E293B),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: const Color(0xFF334155), width: 1),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        modoRango && sel == null ? 'PERMISO CIRCULACIÓN (RANGO)' : 'VALOR PERMISO DE CIRCULACIÓN',
-                        style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 9, fontWeight: FontWeight.w800, letterSpacing: 0.6),
-                      ),
-                      const SizedBox(height: 6),
-                      Text(
-                        valorPermiso,
-                        softWrap: true,
-                        style: const TextStyle(color: Color(0xFF34D399), fontSize: 15, fontWeight: FontWeight.w900),
-                      ),
-                      const SizedBox(height: 4),
-                      const Text(
-                        'Base imponible del permiso anual',
-                        style: TextStyle(color: Color(0xFF64748B), fontSize: 10, fontWeight: FontWeight.w600),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          // ===== Código de homologación =====
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-            decoration: BoxDecoration(
-              color: const Color(0xFF052E22).withOpacity(0.5),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: accent.withOpacity(0.45), width: 1),
-            ),
-            child: Row(
+
+          if (nVariantes == 0)
+            // ===== 0 variantes: estado limpio + reintento =====
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Icon(Icons.qr_code_2_rounded, color: accent, size: 22),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        'CÓDIGO HOMOLOGACIÓN SII',
-                        style: TextStyle(color: Color(0xFF94A3B8), fontSize: 9, fontWeight: FontWeight.w800, letterSpacing: 0.6),
-                      ),
-                      const SizedBox(height: 4),
-                      SelectableText(
-                        codigoDisplay,
-                        style: TextStyle(
-                          color: accent,
-                          fontSize: codigoDisplay == 'SELECCIONA VERSIÓN' ? 12 : 16,
-                          fontWeight: FontWeight.w900,
-                          fontFamily: 'monospace',
-                          letterSpacing: 1.4,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 12),
-          // ===== Selector de versión (solo modo rango) =====
-          if (modoRango) ...[
-            const Text(
-              'Selecciona tu versión para ver el valor exacto:',
-              style: TextStyle(color: Color(0xFF94A3B8), fontSize: 11, fontWeight: FontWeight.w700),
-            ),
-            const SizedBox(height: 8),
-            DropdownButtonFormField<int>(
-              value: _selectedSiiVersionIndex,
-              isExpanded: true,
-              dropdownColor: const Color(0xFF1E293B),
-              iconEnabledColor: accent,
-              decoration: InputDecoration(
-                filled: true,
-                fillColor: const Color(0xFF1E293B),
-                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
-                  borderSide: BorderSide(color: accent.withOpacity(0.45), width: 1),
-                ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
-                  borderSide: const BorderSide(color: accent, width: 1.2),
-                ),
-                hintText: 'Selecciona una versión (${versiones.length} opciones)',
-                hintStyle: const TextStyle(color: Color(0xFF64748B), fontSize: 12),
-              ),
-              style: const TextStyle(color: Colors.white, fontSize: 12),
-              items: [
-                for (int i = 0; i < versiones.length; i++)
-                  DropdownMenuItem<int>(
-                    value: i,
-                    child: Text(
-                      _versionLabel(versiones[i]),
-                      overflow: TextOverflow.ellipsis,
+                _mttEmptyBadge(
+                    'Vehículo no tipificado en las tablas oficiales del Decreto Exento 2026.'),
+                const SizedBox(height: 10),
+                SizedBox(
+                  width: double.infinity,
+                  height: 44,
+                  child: ElevatedButton.icon(
+                    onPressed: () => _refreshSiiData(patente),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: accent.withOpacity(0.15),
+                      foregroundColor: accent,
+                      side: const BorderSide(color: accent, width: 1.2),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
+                    icon: const Icon(Icons.sync_rounded, size: 18),
+                    label: const Text(
+                      'REINTENTAR / SINCRONIZAR DECRETO 2026',
+                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.w900, letterSpacing: 0.6),
                     ),
                   ),
+                ),
               ],
-              onChanged: (idx) {
-                if (idx == null) return;
-                setState(() {
-                  _selectedSiiVersionIndex = idx;
-                  _selectedSiiVersion = (versiones[idx] is Map)
-                      ? Map<String, dynamic>.from(versiones[idx] as Map)
-                      : <String, dynamic>{};
-                });
-              },
-            ),
-            if (_selectedSiiVersion != null) ...[
-              const SizedBox(height: 6),
-              Text(
-                'Versión seleccionada: ${_sanitizeMttText(_selectedSiiVersion!['version']?.toString() ?? '')}',
-                style: const TextStyle(color: accent, fontSize: 11, fontWeight: FontWeight.w800),
-              ),
-            ],
-          ],
-          const SizedBox(height: 14),
-          // ===== Ficha técnica tributaria =====
-          Row(
-            children: [
-              const Icon(Icons.segment, color: accent, size: 15),
-              const SizedBox(width: 6),
-              Expanded(
-                child: Text(
-                  'FICHA TÉCNICA TRIBUTARIA',
-                  softWrap: true,
-                  style: const TextStyle(
-                    color: accent,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w900,
-                    letterSpacing: 1.0,
+            )
+          else if (nVariantes == 1)
+            // ===== 1 variante: tarjeta destacada exacta =====
+            _buildSiiSingleVariant(d, versiones.first, accent)
+          else ...[
+            // ===== N variantes: resumen de rangos + desglose completo =====
+            Row(
+              children: [
+                Expanded(
+                  child: Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: accent.withOpacity(0.10),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: accent.withOpacity(0.45), width: 1),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'RANGO AVALÚO FISCAL',
+                          style: TextStyle(color: Color(0xFF94A3B8), fontSize: 9, fontWeight: FontWeight.w800, letterSpacing: 0.6),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          '${_formatClp(rangoT['min'])} - ${_formatClp(rangoT['max'])}',
+                          softWrap: true,
+                          style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w900),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
-              ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF1E293B),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: const Color(0xFF334155), width: 1),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'RANGO PERMISO CIRCULACIÓN',
+                          style: TextStyle(color: Color(0xFF94A3B8), fontSize: 9, fontWeight: FontWeight.w800, letterSpacing: 0.6),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          '${_formatClp(rangoP['min'])} - ${_formatClp(rangoP['max'])}',
+                          softWrap: true,
+                          style: const TextStyle(color: accent, fontSize: 13, fontWeight: FontWeight.w900),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            for (int i = 0; i < versiones.length; i++) ...[
+              _buildSiiVariantCard(versiones[i], accent),
+              if (i < versiones.length - 1) const SizedBox(height: 8),
             ],
-          ),
-          const SizedBox(height: 6),
-          if (_sanitizeMttText(homo['marca']?.toString() ?? '').isNotEmpty)
-            _mttPairRow('MARCA', _sanitizeMttText(homo['marca']?.toString() ?? '')),
-          if (_sanitizeMttText(homo['modelo']?.toString() ?? '').isNotEmpty)
-            _mttPairRow('MODELO', _sanitizeMttText(homo['modelo']?.toString() ?? '')),
-          if (hVersion.isNotEmpty) _mttPairRow('VERSIÓN', hVersion),
-          if (_sanitizeMttText(homo['anio']?.toString() ?? '').isNotEmpty)
-            _mttPairRow('AÑO', _sanitizeMttText(homo['anio']?.toString() ?? '')),
-          if (hCilindrada.isNotEmpty) _mttPairRow('CILINDRADA', hCilindrada),
-          if (hCombustible.isNotEmpty) _mttPairRow('TIPO DE COMBUSTIBLE', hCombustible),
-          if (hTransmision.isNotEmpty) _mttPairRow('TRANSMISIÓN', hTransmision),
-          if (tasacion.isEmpty && permiso.isEmpty && codigo.isEmpty && tMin.isEmpty)
-            _mttEmptyBadge('Sin tasación registrada: pulsa el botón de refresco'),
+          ],
         ],
       ),
     );
   }
 
-  /// Etiqueta legible de una versión en el selector SII.
-  String _versionLabel(dynamic v) {
-    if (v is! Map) return v.toString();
-    final version = _sanitizeMttText(v['version']?.toString() ?? '');
-    final transmision = _sanitizeMttText(v['transmision']?.toString() ?? '');
-    final combustible = _sanitizeMttText(v['combustible']?.toString() ?? '');
-    final anio = _sanitizeMttText(v['anio']?.toString() ?? '');
-    final extras = [transmision, combustible].where((s) => s.isNotEmpty).join(' · ');
-    final base = [version, extras].where((s) => s.isNotEmpty).join(' — ');
-    return anio.isNotEmpty ? '$base ($anio)' : base;
+  /// Tarjeta destacada cuando existe UNA sola variante homologada.
+  Widget _buildSiiSingleVariant(Map<String, dynamic> d, dynamic raw, Color accent) {
+    final v = (raw is Map) ? Map<String, dynamic>.from(raw) : <String, dynamic>{};
+    final String tasacion = _sanitizeMttText(
+        (v['tasacion_formateada'] ?? v['tasacion'] ?? d['tasacion_fiscal'])?.toString() ?? '');
+    final String permiso = _sanitizeMttText(
+        (v['permiso_formateada'] ?? v['permiso'] ?? d['permiso_circulacion'])?.toString() ?? '');
+    final String codigo = _sanitizeMttText(
+        (v['codigo_sii'] ?? d['codigo_sii'])?.toString() ?? '');
+    final String anio = _sanitizeMttText(
+        (v['anio_fabricacion'] ?? d['anio_tasacion'])?.toString() ?? '');
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: accent.withOpacity(0.10),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: accent.withOpacity(0.5), width: 1),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('AVALÚO FISCAL OFICIAL',
+                        style: TextStyle(color: Color(0xFF94A3B8), fontSize: 9, fontWeight: FontWeight.w800, letterSpacing: 0.6)),
+                    const SizedBox(height: 6),
+                    Text(tasacion, softWrap: true,
+                        style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w900)),
+                    if (anio.isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      Text('Año: $anio',
+                          style: const TextStyle(color: Color(0xFF6EE7B7), fontSize: 10, fontWeight: FontWeight.w600)),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF1E293B),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: const Color(0xFF334155), width: 1),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('VALOR PERMISO DE CIRCULACIÓN',
+                        style: TextStyle(color: Color(0xFF94A3B8), fontSize: 9, fontWeight: FontWeight.w800, letterSpacing: 0.6)),
+                    const SizedBox(height: 6),
+                    Text(permiso, softWrap: true,
+                        style: const TextStyle(color: accent, fontSize: 16, fontWeight: FontWeight.w900)),
+                    const SizedBox(height: 4),
+                    const Text('Base imponible del permiso anual',
+                        style: TextStyle(color: Color(0xFF64748B), fontSize: 10, fontWeight: FontWeight.w600)),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          decoration: BoxDecoration(
+            color: const Color(0xFF052E22).withOpacity(0.5),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: accent.withOpacity(0.45), width: 1),
+          ),
+          child: Row(
+            children: [
+              const Icon(Icons.qr_code_2_rounded, color: accent, size: 22),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('CÓDIGO HOMOLOGACIÓN SII',
+                        style: TextStyle(color: Color(0xFF94A3B8), fontSize: 9, fontWeight: FontWeight.w800, letterSpacing: 0.6)),
+                    const SizedBox(height: 4),
+                    SelectableText(
+                      codigo.isEmpty ? '—' : codigo,
+                      style: const TextStyle(color: accent, fontSize: 16, fontWeight: FontWeight.w900, fontFamily: 'monospace', letterSpacing: 1.4),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
+        _buildSiiVariantCard(raw, accent, highlighted: true),
+      ],
+    );
   }
 
+  /// Tarjeta individual de una variante homologada (desglose exhaustivo).
+  Widget _buildSiiVariantCard(dynamic raw, Color accent, {bool highlighted = false}) {
+    final v = (raw is Map) ? Map<String, dynamic>.from(raw) : <String, dynamic>{};
+    final String version = _sanitizeMttText(v['version']?.toString() ?? '');
+    final String descripcion = _sanitizeMttText(v['descripcion']?.toString() ?? '');
+    final String modelo = _sanitizeMttText(v['modelo']?.toString() ?? '');
+    final String codigo = _sanitizeMttText(v['codigo_sii']?.toString() ?? '');
+    final String cilindrada = _sanitizeMttText(v['cilindrada']?.toString() ?? '');
+    final String combustible = _sanitizeMttText(v['combustible']?.toString() ?? '');
+    final String transmision = _sanitizeMttText(v['transmision']?.toString() ?? '');
+    final String equipamiento = _sanitizeMttText(v['equipamiento']?.toString() ?? '');
+    final String puertas = _sanitizeMttText(v['puertas']?.toString() ?? '');
+    final bool ccMatch = v['cilindrada_match'] == true;
+    final String titulo = descripcion.isNotEmpty
+        ? descripcion
+        : (version.isNotEmpty ? '$modelo $version'.trim() : modelo);
 
-  /// Tarjeta Boostr / Ficha Base Exhaustiva con 4 bloques:
-  ///  A) Identificación y Propietario (destacado)
-  ///  B) Especificaciones y Ficha Técnica
-  ///  C) Motor, Combustible y Desgaste
-  ///  D) Fabricación y Procedencia
-  /// Layout responsivo (Wrap/Expanded + softWrap), sin truncar texto.
-  Widget _buildBoostrCard() {
-    const Color accent = Color(0xFF38BDF8);
-    final VehicleBaseModel v = VehicleBaseModel.fromJson(_vehicleData!);
-    final String plateDv = [
-      v.plate ?? '',
-      if ((v.dv ?? '').isNotEmpty) v.dv!,
-    ].join('-');
-
-    String info(String? value, [String fallback = 'No informado']) {
-      final s = (value ?? '').toString().trim();
-      return s.isEmpty ? fallback : s;
-    }
-
-    String infoVersion() {
-      final s = (v.version ?? '').toString().trim();
-      return s.isEmpty ? 'No informada' : s;
-    }
-
-    String doorsText() => (v.doors ?? 0) > 0 ? '${v.doors} puertas' : 'No informado';
-    String kmText() => (v.kilometers ?? 0) > 0
-        ? '${_formatThousands(v.kilometers!)} Km'
-        : '0 Km / No registrado';
+    final specs = <String>[
+      if (cilindrada.isNotEmpty && cilindrada != '0') 'Cilindrada: $cilindrada cc',
+      if (combustible.isNotEmpty) 'Combustible: $combustible',
+      if (transmision.isNotEmpty) 'Transmisión: $transmision',
+      if (puertas.isNotEmpty && puertas != '0') 'Puertas: $puertas',
+    ];
 
     return Container(
       width: double.infinity,
-      constraints: const BoxConstraints(maxWidth: 380),
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: const Color(0xFF0F172A).withOpacity(0.85),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: accent.withOpacity(0.45), width: 1.5),
-        boxShadow: [
-          BoxShadow(
-            color: accent.withOpacity(0.10),
-            blurRadius: 20,
-            spreadRadius: 4,
-          ),
-        ],
+        color: const Color(0xFF101B2D).withOpacity(highlighted ? 1.0 : 0.75),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: highlighted ? accent.withOpacity(0.65) : const Color(0xFF1E293B),
+          width: highlighted ? 1.2 : 0.9,
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              Icon(ccMatch ? Icons.check_circle : Icons.directions_car_filled_rounded,
+                  color: accent, size: 16),
+              const SizedBox(width: 8),
               Expanded(
-                child: Row(
-                  children: [
-                    const Icon(Icons.bolt, color: accent, size: 22),
-                    const SizedBox(width: 8),
-                    Flexible(
-                      child: Text(
-                        plateDv,
-                        style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w900, color: accent, letterSpacing: 1.2),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                  ],
+                child: Text(
+                  titulo,
+                  softWrap: true,
+                  style: const TextStyle(color: Colors.white, fontSize: 12.5, fontWeight: FontWeight.w800, height: 1.3),
                 ),
-              ),
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: accent.withOpacity(0.16),
-                      borderRadius: BorderRadius.circular(6),
-                      border: Border.all(color: accent, width: 0.9),
-                    ),
-                    child: const Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.verified_user, color: accent, size: 12),
-                        SizedBox(width: 4),
-                        Text(
-                          'BOOSTR / PADRÓN CIVIL',
-                          style: TextStyle(color: accent, fontSize: 9, fontWeight: FontWeight.w900, letterSpacing: 0.4),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: 2),
-                  Tooltip(
-                    message: 'Actualizar datos desde Boostr',
-                    child: _isRefreshingBoostr
-                        ? const Padding(
-                            padding: EdgeInsets.all(12),
-                            child: SizedBox(
-                              width: 16,
-                              height: 16,
-                              child: CircularProgressIndicator(strokeWidth: 2, color: accent),
-                            ),
-                          )
-                        : IconButton(
-                            onPressed: () => _refreshBoostrData(v.plate ?? ''),
-                            icon: const Icon(Icons.refresh, size: 20, color: accent),
-                            padding: EdgeInsets.zero,
-                            constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
-                            visualDensity: VisualDensity.compact,
-                          ),
-                  ),
-                ],
               ),
             ],
           ),
-          const SizedBox(height: 14),
-
-          // ===== Bloque A: Identificación y Propietario =====
-          _boostrBlockHeader(Icons.badge_outlined, 'IDENTIFICACIÓN Y PROPIETARIO'),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: accent.withOpacity(0.08),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: accent.withOpacity(0.4), width: 1),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'PLACA PATENTE ${plateDv}',
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 16,
-                    fontWeight: FontWeight.w900,
-                    letterSpacing: 1.6,
-                    fontFamily: 'monospace',
-                  ),
-                ),
-                const SizedBox(height: 8),
-                if ((v.ownerName ?? '').isNotEmpty) ...[
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Icon(Icons.person, color: accent, size: 16),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          v.ownerName!,
-                          softWrap: true,
-                          style: const TextStyle(color: Color(0xFFE2E8F0), fontSize: 12.5, fontWeight: FontWeight.w800),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 4),
-                  Row(
-                    children: [
-                      const Icon(Icons.badge, color: Color(0xFF94A3B8), size: 15),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          'RUT: ${v.ownerRut ?? 'No informado'}',
-                          softWrap: true,
-                          style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 12, fontWeight: FontWeight.w600, fontFamily: 'monospace'),
-                        ),
-                      ),
-                    ],
-                  ),
-                ] else ...[
-                  const Row(
-                    children: [
-                      Icon(Icons.badge, color: Color(0xFF64748B), size: 16),
-                      SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          'Titular: No registrado en padrón',
-                          softWrap: true,
-                          style: TextStyle(color: Color(0xFF94A3B8), fontSize: 12.5, fontWeight: FontWeight.w600, fontStyle: FontStyle.italic),
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ],
-            ),
-          ),
-          const SizedBox(height: 12),
-
-          // ===== Bloque B: Especificaciones y Ficha Técnica =====
-          _boostrBlockHeader(Icons.settings_suggest_rounded, 'ESPECIFICACIONES Y FICHA TÉCNICA'),
-          _boostrInfoRow('Marca y Modelo', '${info(v.make)} ${info(v.model)}'.trim()),
-          _boostrInfoRow('Tipo de Carrocería / Uso', info(v.type)),
-          _boostrInfoRow('Año de Fabricación', v.year != null ? '${v.year}' : 'No informado'),
-          _boostrInfoRow('Versión', infoVersion()),
-          _boostrInfoRow('Color', info(v.color)),
-          _boostrInfoRow('Puertas', doorsText()),
-          _boostrInfoRow('Transmisión', info(v.transmission, 'No informada')),
-          const SizedBox(height: 12),
-
-          // ===== Bloque C: Motor, Combustible y Desgaste =====
-          _boostrBlockHeader(Icons.speed_rounded, 'MOTOR, COMBUSTIBLE Y DESGASTE'),
+          const SizedBox(height: 6),
           Row(
             children: [
+              const Icon(Icons.qr_code_2_rounded, color: Color(0xFF94A3B8), size: 13),
+              const SizedBox(width: 6),
               Expanded(
-                child: Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: accent.withOpacity(0.10),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: accent.withOpacity(0.45), width: 1),
-                  ),
-                  child: Row(
-                    children: [
-                      const Icon(Icons.speed, color: accent, size: 22),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text(
-                              'KILOMETRAJE',
-                              style: TextStyle(color: Color(0xFF94A3B8), fontSize: 9, fontWeight: FontWeight.w800, letterSpacing: 0.6),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              kmText(),
-                              softWrap: true,
-                              style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w900),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
+                child: SelectableText(
+                  codigo.isEmpty ? '—' : codigo,
+                  style: const TextStyle(color: Color(0xFF6EE7B7), fontSize: 12, fontWeight: FontWeight.w800, fontFamily: 'monospace', letterSpacing: 1.1),
                 ),
               ),
             ],
           ),
           const SizedBox(height: 8),
-          _boostrInfoRow('Combustible', info(v.gasType)),
-          _boostrInfoRow('N° de Motor', info(v.engine)),
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 5),
-            child: Column(
+          if (specs.isNotEmpty)
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
               children: [
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(
-                      flex: 4,
-                      child: Text(
-                        'N° de Chasis / VIN',
-                        softWrap: true,
-                        style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 11, fontWeight: FontWeight.w700),
-                      ),
+                for (final s in specs)
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF1E293B),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: const Color(0xFF334155), width: 0.8),
                     ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      flex: 6,
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.end,
-                        children: [
-                          Flexible(
-                            child: SelectableText(
-                              info(v.chassis),
-                              textAlign: TextAlign.end,
-                              style: TextStyle(
-                                color: (v.chassis ?? '').isEmpty ? const Color(0xFF64748B) : Colors.white,
-                                fontSize: 12,
-                                fontWeight: FontWeight.w700,
-                                fontFamily: 'monospace',
-                              ),
-                            ),
-                          ),
-                          if ((v.chassis ?? '').isNotEmpty) ...[
-                            const SizedBox(width: 4),
-                            InkWell(
-                              borderRadius: BorderRadius.circular(6),
-                              onTap: () async {
-                                await Clipboard.setData(ClipboardData(text: v.chassis!));
-                                if (mounted) _showSnack('VIN copiado al portapapeles');
-                              },
-                              child: const Padding(
-                                padding: EdgeInsets.all(4),
-                                child: Icon(Icons.copy_rounded, size: 15, color: accent),
-                              ),
-                            ),
-                          ],
-                        ],
-                      ),
+                    child: Text(
+                      s,
+                      softWrap: true,
+                      style: const TextStyle(color: Color(0xFFCBD5E1), fontSize: 10, fontWeight: FontWeight.w700),
                     ),
-                  ],
-                ),
-                const SizedBox(height: 4),
-                Divider(color: const Color(0xFF1E293B).withOpacity(0.5), height: 1),
+                  ),
               ],
             ),
-          ),
-          _boostrInfoRow('Cilindrada', info(v.engineSize, 'No informada')),
-          if (v.valuation != null && v.valuation.toString().isNotEmpty && v.valuation != 0)
-            _boostrInfoRow('Valuación', _formatClp(v.valuation)),
-          const SizedBox(height: 12),
-
-          // ===== Bloque D: Fabricación y Procedencia =====
-          _boostrBlockHeader(Icons.factory_rounded, 'FABRICACIÓN Y PROCEDENCIA'),
-          _boostrInfoRow('Fabricante', info(v.manufacturer)),
-          _boostrInfoRow(
-            'País y Región',
-            [
-              info(v.country, 'No informado'),
-              if ((v.region ?? '').isNotEmpty) v.region!,
-            ].join(' — '),
-          ),
-        ],
-      ),
-    );
-  }
-
-  /// Cabecera de sub-bloque de la tarjeta Boostr.
-  Widget _boostrBlockHeader(IconData icon, String title) {
-    return Padding(
-      padding: const EdgeInsets.only(top: 2, bottom: 6),
-      child: Row(
-        children: [
-          Icon(icon, color: const Color(0xFF38BDF8), size: 15),
-          const SizedBox(width: 6),
-          Expanded(
-            child: Text(
-              title,
-              softWrap: true,
-              style: const TextStyle(
-                color: Color(0xFF38BDF8),
-                fontSize: 11.5,
-                fontWeight: FontWeight.w900,
-                letterSpacing: 0.9,
+          if (equipamiento.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: const Color(0xFF0F172A),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: const Color(0xFF334155), width: 0.6),
+              ),
+              child: Text(
+                'Equipamiento: $equipamiento',
+                softWrap: true,
+                style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 10, height: 1.4),
               ),
             ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  /// Fila etiqueta→valor de la tarjeta Boostr (sin truncado).
-  Widget _boostrInfoRow(String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 5),
-      child: Column(
-        children: [
+          ],
+          const SizedBox(height: 8),
           Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Expanded(
-                flex: 4,
-                child: Text(
-                  label,
-                  softWrap: true,
-                  style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 11, fontWeight: FontWeight.w700),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('TASACIÓN FISCAL',
+                        style: TextStyle(color: Color(0xFF94A3B8), fontSize: 9, fontWeight: FontWeight.w800, letterSpacing: 0.5)),
+                    const SizedBox(height: 3),
+                    Text(
+                      _sanitizeMttText((v['tasacion_formateada'] ?? v['tasacion'] ?? '').toString()),
+                      softWrap: true,
+                      style: const TextStyle(color: Colors.white, fontSize: 13.5, fontWeight: FontWeight.w900),
+                    ),
+                  ],
                 ),
               ),
               const SizedBox(width: 10),
               Expanded(
-                flex: 6,
-                child: SelectableText(
-                  value,
-                  textAlign: TextAlign.end,
-                  style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w700),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('PERMISO DE CIRCULACIÓN',
+                        style: TextStyle(color: Color(0xFF94A3B8), fontSize: 9, fontWeight: FontWeight.w800, letterSpacing: 0.5)),
+                    const SizedBox(height: 3),
+                    Text(
+                      _sanitizeMttText((v['permiso_formateada'] ?? v['permiso'] ?? '').toString()),
+                      softWrap: true,
+                      style: const TextStyle(color: accent, fontSize: 13.5, fontWeight: FontWeight.w900),
+                    ),
+                  ],
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 4),
-          Divider(color: const Color(0xFF1E293B).withOpacity(0.5), height: 1),
         ],
       ),
     );
   }
 
-  /// Separador de miles chileno: 283961 → '283.961'.
-  String _formatThousands(int n) {
-    final s = n.toString();
-    final buf = StringBuffer();
-    for (int i = 0; i < s.length; i++) {
-      final rem = s.length - i;
-      buf.write(s[i]);
-      if (rem > 1 && (rem - 1) % 3 == 0) buf.write('.');
-    }
-    return buf.toString();
-  }
 
   /// Sanitización profunda anti-mojibake (misma política que el backend):
   /// reemplazos explícitos + barrido genérico de pares 'Ã'+byte, para que
