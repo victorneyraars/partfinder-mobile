@@ -3,9 +3,8 @@
 ///
 /// El parser clave-valor del backend/WebView garantiza que los valores no se
 /// desplacen cuando una celda viene vacía (p. ej. N° Vin vacío en SJFX87):
-///  - vin vacío        → null (la UI muestra "No informado", nunca "Tipo").
-///  - combustible null → null (la UI muestra "No registrado", nunca una
-///    fecha de vencimiento).
+///  - vin vacío        → la UI muestra "No informado", nunca "Tipo".
+///  - combustible null → la UI muestra "No registrado", nunca una fecha.
 ///  - La fecha de vencimiento general viaja en rt_vencimiento y se pinta en
 ///    la tarjeta destacada de vigencia oficial.
 class PrtHistoryEntry {
@@ -17,7 +16,9 @@ class PrtHistoryEntry {
   final String estado;
   final String kilometraje;
   final String observaciones;
-  final bool esGases;
+
+  /// Bandera cruda enviada por el parser (es_gases del WebView).
+  final bool _esGasesRaw;
 
   const PrtHistoryEntry({
     this.fecha = '',
@@ -28,8 +29,8 @@ class PrtHistoryEntry {
     this.estado = '',
     this.kilometraje = '',
     this.observaciones = '',
-    this.esGases = false,
-  });
+    bool esGasesRaw = false,
+  }) : _esGasesRaw = esGasesRaw;
 
   factory PrtHistoryEntry.fromJson(dynamic j) {
     if (j is! Map) {
@@ -44,11 +45,35 @@ class PrtHistoryEntry {
       estado: _s(j['estado']),
       kilometraje: _s(j['kilometraje']),
       observaciones: _s(j['observaciones']),
-      esGases: j['es_gases'] == true || (j['observaciones'] ?? '').toString().toLowerCase().contains('gas'),
+      esGasesRaw: j['es_gases'] == true,
     );
   }
 
   static String _s(dynamic v) => (v == null) ? '' : v.toString().trim();
+
+  /// true si la planta, el certificado o el estado contienen "(g)" o
+  /// "Gases" (case-insensitive), o el parser ya lo marcó.
+  bool get esGases {
+    if (_esGasesRaw) return true;
+    final blob = '$planta $certificado $estado $observaciones'.toUpperCase();
+    return blob.contains('(G)') || blob.contains('GASES');
+  }
+
+  /// Número oficial limpio del certificado: descarta sufijos de gases
+  /// pegados ("(g)", "Revisión de Gases", "Sólo Gases") y devuelve solo el
+  /// número (ej. "B1354000000274772").
+  String get certificadoLimpio {
+    var c = certificado.trim();
+    if (c.isEmpty) return '';
+    c = c.replaceAll(RegExp(r'\(\s*g\s*\)', caseSensitive: false), '');
+    c = c.replaceAll(RegExp(r'revisi[oó]n\s+de\s+gases', caseSensitive: false), '');
+    c = c.replaceAll(RegExp(r's[oó]lo\s+gases', caseSensitive: false), '');
+    c = c.replaceAll(RegExp(r'\s+'), ' ').trim();
+    // Si tras la limpieza queda texto residual, extraer el número largo.
+    final num = RegExp(r'[A-Z]{0,3}\d{7,}').firstMatch(c);
+    if (num != null) return num.group(0)!;
+    return c;
+  }
 }
 
 class PrtVehicleData {
@@ -119,17 +144,27 @@ class PrtVehicleData {
   static bool looksLikeDate(String v) =>
       RegExp(r'^\d{1,2}[/-]\d{1,2}[/-]\d{2,4}$').hasMatch(v.trim());
 
-  /// VIN seguro para UI: nunca otro atributo desplazado.
+  /// VIN seguro para UI: descarta encabezados residuales y texto de
+  /// etiquetas ("Tipo", "N° VIN", "VIN"); nunca otro atributo desplazado.
   String get vinSeguro {
-    final v = vin;
-    if (v.isEmpty || looksLikeDate(v)) return '';
+    final v = (vin ?? '').trim();
+    if (v.isEmpty ||
+        v.toUpperCase() == 'TIPO' ||
+        v.toUpperCase() == 'N° VIN' ||
+        v.toUpperCase() == 'Nº VIN' ||
+        v.toUpperCase() == 'VIN' ||
+        looksLikeDate(v)) {
+      return 'No informado';
+    }
     return v;
   }
 
-  /// Combustible seguro para UI: nunca una fecha de vencimiento.
+  /// Combustible seguro para UI: descarta fechas o strings anómalos.
   String get combustibleSeguro {
-    final v = combustible;
-    if (v.isEmpty || looksLikeDate(v)) return '';
-    return v;
+    final c = (combustible ?? '').trim();
+    if (c.isEmpty || RegExp(r'^\d{2}[-/]\d{2}[-/]\d{4}').hasMatch(c)) {
+      return 'No registrado';
+    }
+    return c;
   }
 }

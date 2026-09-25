@@ -3039,9 +3039,8 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
     final PrtVehicleData v = PrtVehicleData.fromJson(_vehicleData!);
     final String patente = v.patente.toUpperCase();
 
-    final String vinTxt = v.vinSeguro.isEmpty ? 'No informado' : v.vinSeguro;
-    final String combTxt =
-        v.combustibleSeguro.isEmpty ? 'No registrado' : v.combustibleSeguro;
+    final String vinTxt = v.vinSeguro;
+    final String combTxt = v.combustibleSeguro;
 
     return Container(
       width: double.infinity,
@@ -3212,108 +3211,7 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
                   'Historial de Revisiones (${v.historial.length} registros)',
                   style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Color(0xFF38BDF8), letterSpacing: 0.5),
                 ),
-                children: v.historial.map<Widget>((rt) {
-                  final rawEstado = rt.estado.toUpperCase();
-                  final isApproved = rawEstado.contains('APROB');
-                  final isRechazado = rawEstado.contains('RECHAZ');
-                  String displayEstado = rawEstado;
-                  if (rt.esGases && isRechazado) {
-                    displayEstado = 'RECHAZADO: GASES';
-                  }
-                  return Container(
-                    margin: const EdgeInsets.only(bottom: 8),
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF0F172A),
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(
-                        color: isApproved
-                            ? const Color(0xFF10B981).withOpacity(0.35)
-                            : Colors.redAccent.withOpacity(0.35),
-                        width: 0.8,
-                      ),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Expanded(
-                              child: Text(
-                                'Control: ${rt.fecha.isEmpty ? '-' : rt.fecha}',
-                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.white),
-                              ),
-                            ),
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                              decoration: BoxDecoration(
-                                color: isApproved
-                                    ? const Color(0xFF10B981).withOpacity(0.2)
-                                    : Colors.redAccent.withOpacity(0.2),
-                                borderRadius: BorderRadius.circular(4),
-                              ),
-                              child: Text(
-                                displayEstado.isEmpty ? '-' : displayEstado,
-                                style: TextStyle(
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.bold,
-                                  color: isApproved ? const Color(0xFF10B981) : Colors.redAccent,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                        if (rt.esGases) ...[
-                          const SizedBox(height: 6),
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFFF59E0B).withOpacity(0.15),
-                              borderRadius: BorderRadius.circular(4),
-                              border: Border.all(color: const Color(0xFFF59E0B).withOpacity(0.5), width: 0.8),
-                            ),
-                            child: const Text(
-                              '(G) REVISIÓN DE GASES',
-                              style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.w900, color: Color(0xFFF59E0B), letterSpacing: 0.6),
-                            ),
-                          ),
-                        ],
-                        const SizedBox(height: 6),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Expanded(
-                              child: Text(
-                                'Vence: ${rt.vencimiento.isEmpty ? '-' : rt.vencimiento}',
-                                style: const TextStyle(fontSize: 12, color: Color(0xFF38BDF8), fontWeight: FontWeight.w600),
-                              ),
-                            ),
-                            Text(
-                              rt.codPlanta,
-                              style: const TextStyle(fontSize: 11, color: Colors.white38),
-                            ),
-                          ],
-                        ),
-                        if (rt.planta.isNotEmpty) ...[
-                          const SizedBox(height: 4),
-                          Text(
-                            rt.planta,
-                            softWrap: true,
-                            style: const TextStyle(fontSize: 11, color: Colors.white70),
-                          ),
-                        ],
-                        if (rt.certificado.isNotEmpty) ...[
-                          const SizedBox(height: 4),
-                          Text(
-                            'Cert: ${rt.certificado}',
-                            style: const TextStyle(fontSize: 10, color: Colors.white38),
-                          ),
-                        ],
-                      ],
-                    ),
-                  );
-                }).toList(),
+                children: v.historial.map<Widget>((rt) => _prtTimelineCard(rt)).toList(),
               ),
             ),
             const SizedBox(height: 12),
@@ -3369,6 +3267,227 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
             ),
           ),
         ],
+      ),
+    );
+  }
+
+
+
+  /// Timeline Card premium de una inspección histórica: cabecera con fecha
+  /// y badges adaptativos (GASES + estado), sub-línea de vigencia, planta y
+  /// certificado limpio. Borde izquierdo acentuado según el resultado.
+  Widget _prtTimelineCard(PrtHistoryEntry rt) {
+    final rawEstado = rt.estado.trim().toUpperCase();
+    final isApproved = rawEstado.contains('APROB');
+    final isRechazado = rawEstado.contains('RECHAZ');
+    final accent = isApproved
+        ? const Color(0xFF10B981)
+        : (isRechazado ? const Color(0xFFF87171) : const Color(0xFF64748B));
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [Color(0xFF14223C), Color(0xFF0F172A)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(10),
+        border: Border(
+          left: BorderSide(color: accent, width: 3),
+          top: BorderSide(color: const Color(0xFF1E293B), width: 0.8),
+          right: BorderSide(color: const Color(0xFF1E293B), width: 0.8),
+          bottom: BorderSide(color: const Color(0xFF1E293B), width: 0.8),
+        ),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // a) Cabecera: fecha + badges adaptativos (sin overflow).
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Icon(Icons.calendar_today_rounded,
+                    size: 15, color: Colors.white38),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Control: ${rt.fecha.isEmpty ? '-' : rt.fecha}',
+                    softWrap: true,
+                    style: const TextStyle(
+                        fontSize: 13.5,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.white),
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Flexible(
+                  child: Wrap(
+                    spacing: 6,
+                    runSpacing: 4,
+                    alignment: WrapAlignment.end,
+                    children: [
+                      if (rt.esGases) _prtGasesBadge(),
+                      _prtEstadoBadge(rt),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            // b) Sub-línea de vigencia histórica (peso visual bajo).
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Expanded(
+                  child: Text(
+                    'Vigencia otorgada: ${rt.vencimiento.isEmpty ? '-' : rt.vencimiento}',
+                    softWrap: true,
+                    style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
+                        color: Color(0xFF94A3B8)),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Flexible(
+                  child: Text(
+                    'Planta: ${rt.codPlanta.isEmpty ? '-' : rt.codPlanta}',
+                    softWrap: true,
+                    textAlign: TextAlign.end,
+                    style: const TextStyle(
+                      fontSize: 10.5,
+                      color: Colors.white38,
+                      fontFamily: 'monospace',
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            // c) Planta (mayúsculas sobrias) + certificado limpio.
+            if (rt.planta.isNotEmpty)
+              Text(
+                rt.planta.toUpperCase(),
+                softWrap: true,
+                style: const TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                  color: Colors.white70,
+                  letterSpacing: 0.3,
+                ),
+              ),
+            if (rt.certificadoLimpio.isNotEmpty) ...[
+              const SizedBox(height: 4),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Icon(Icons.description_outlined,
+                      size: 12, color: Colors.white38),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      'Certificado: ${rt.certificadoLimpio}',
+                      softWrap: true,
+                      style: const TextStyle(
+                        fontSize: 10.5,
+                        color: Colors.white54,
+                        fontFamily: 'monospace',
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Badge de estado APROBADA / RECHAZADA (· causa) con icono y colores
+  /// translúcidos, blindado contra overflow (Flexible + ellipsis).
+  Widget _prtEstadoBadge(PrtHistoryEntry rt) {
+    final raw = rt.estado.trim().toUpperCase();
+    final isApproved = raw.contains('APROB');
+    final isRechazado = raw.contains('RECHAZ');
+
+    String label;
+    Color color;
+    IconData icon;
+    if (isApproved) {
+      label = 'APROBADA';
+      color = const Color(0xFF10B981);
+      icon = Icons.check_circle_outline;
+    } else if (isRechazado) {
+      String causa = '';
+      if (raw.contains('GASES')) {
+        causa = 'GASES';
+      } else if (raw.contains('MECAN')) {
+        causa = 'MECÁNICA';
+      }
+      label = causa.isNotEmpty ? 'RECHAZADA · $causa' : 'RECHAZADA';
+      color = const Color(0xFFF87171);
+      icon = Icons.cancel_outlined;
+    } else {
+      label = raw.isEmpty ? '—' : raw;
+      color = const Color(0xFF94A3B8);
+      icon = Icons.info_outline_rounded;
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.15),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: color.withOpacity(0.55), width: 0.9),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 12, color: color),
+          const SizedBox(width: 4),
+          Flexible(
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 9.5,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 0.5,
+                  color: color,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Badge [ GASES ] cian atenuado con borde sutil.
+  Widget _prtGasesBadge() {
+    const color = Color(0xFF22D3EE);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.12),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: color.withOpacity(0.45), width: 0.9),
+      ),
+      child: const Text(
+        '[ GASES ]',
+        style: TextStyle(
+          fontSize: 9.5,
+          fontWeight: FontWeight.w900,
+          letterSpacing: 0.6,
+          color: color,
+        ),
       ),
     );
   }
