@@ -1856,9 +1856,24 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
       }
       if (tipo == 'lista') {
         for (final it in rawItems) {
-          final txt = it is Map
+          var txt = it is Map
               ? (it['valor'] ?? it['texto'] ?? '').toString().trim()
               : it.toString().trim();
+          // Limpieza defensiva para entradas de caché antiguas: quitar el
+          // título de sección repetido y conceptos ya presentes en el
+          // encabezado (misma política que el backend).
+          final upper = txt.toUpperCase();
+          if (upper == titulo) {
+            txt = '';
+          } else if (upper.startsWith('$titulo ')) {
+            txt = txt.substring(titulo.length).trim();
+          }
+          txt = txt
+              .replaceFirst(
+                RegExp(r'^RENOVACI[OÓ]N\s*POR\s*CANCELACI[OÓ]N\s*[:.\-–—]?\s*', caseSensitive: false),
+                '',
+              )
+              .trim();
           widgets.add(txt.isEmpty ? _mttEmptyBadge() : _mttListItem(txt, titulo));
         }
       } else {
