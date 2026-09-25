@@ -79,6 +79,7 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
   late Animation<double> _scannerAnimation;
   
   bool _isLoading = false;
+  bool _isRefreshingMtt = false;
   Map<String, dynamic>? _siiData;
   bool _isLoadingSii = false;
 
@@ -176,8 +177,10 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
     setState(() => _isLoadingSii = false);
   }
 
-  Future<void> _searchPlate() async {
-    final rawPlate = _plateController.text.replaceAll(RegExp(r'[^A-Za-z0-9]'), '').toUpperCase();
+  Future<void> _searchPlate({bool forceNetwork = false, String? plateOverride}) async {
+    final rawPlate = (plateOverride ?? _plateController.text)
+        .replaceAll(RegExp(r'[^A-Za-z0-9]'), '')
+        .toUpperCase();
     if (rawPlate.length < 5) {
       HapticFeedback.heavyImpact();
       ScaffoldMessenger.of(context).showSnackBar(
@@ -203,9 +206,12 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
       final provider = _providers[_selectedEngine] ?? _providers['prt']!;
 
       // 1) Caché local aislada del proveedor (positive + negative caching).
-      final cached = await provider.cache.read(rawPlate);
-      if (cached != null) {
-        if (cached['found'] == true) {
+      //    Con forceNetwork (botón "Refrescar Caché") se omite la caché
+      //    local y se consulta directamente la fuente.
+      if (!forceNetwork) {
+        final cached = await provider.cache.read(rawPlate);
+        if (cached != null) {
+          if (cached['found'] == true) {
           final v = Map<String, dynamic>.from(cached['data'] as Map? ?? const {});
           v['data_source'] = 'CACHE_LOCAL_${provider.id}';
           v['patente'] = v['patente'] ?? rawPlate;
@@ -222,6 +228,7 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
           // Negative cache vigente: no repetir la consulta ni gastar cuota.
           _showSnack('Patente no encontrada (caché reciente de ${provider.id}). Intenta más tarde.');
           return;
+        }
         }
       }
 
@@ -266,7 +273,7 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
           }
         } else if (result.source == 'boostr') {
           _showSnack('Vehículo $rawPlate recuperado vía Boostr (RT no disponible)');
-        } else {
+        } else if (!forceNetwork) {
           _showSnack(v['isPublicTransport'] == true
               ? 'Vehículo $rawPlate inscrito como transporte público/escolar (MTT)'
               : 'Vehículo $rawPlate particular: sin registro en el RNSTP (MTT)');
@@ -1720,24 +1727,52 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
                   ],
                 ),
               ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFF59E0B).withOpacity(0.16),
-                  borderRadius: BorderRadius.circular(6),
-                  border: Border.all(color: const Color(0xFFF59E0B), width: 0.9),
-                ),
-                child: const Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.account_balance, color: Color(0xFFF59E0B), size: 12),
-                    SizedBox(width: 4),
-                    Text(
-                      'MTT / RNSTP',
-                      style: TextStyle(color: Color(0xFFF59E0B), fontSize: 10, fontWeight: FontWeight.w900, letterSpacing: 0.6),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF59E0B).withOpacity(0.16),
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(color: const Color(0xFFF59E0B), width: 0.9),
                     ),
-                  ],
-                ),
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.account_balance, color: Color(0xFFF59E0B), size: 12),
+                        SizedBox(width: 4),
+                        Text(
+                          'MTT / RNSTP',
+                          style: TextStyle(color: Color(0xFFF59E0B), fontSize: 10, fontWeight: FontWeight.w900, letterSpacing: 0.6),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 2),
+                  Tooltip(
+                    message: 'Actualizar datos desde MTT',
+                    child: _isRefreshingMtt
+                        ? const Padding(
+                            padding: EdgeInsets.all(12),
+                            child: SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Color(0xFFF59E0B),
+                              ),
+                            ),
+                          )
+                        : IconButton(
+                            onPressed: () => _refreshMttData(patente),
+                            icon: const Icon(Icons.refresh, size: 20, color: Color(0xFFF59E0B)),
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+                            visualDensity: VisualDensity.compact,
+                          ),
+                  ),
+                ],
               ),
             ],
           ),
@@ -1807,6 +1842,28 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
         ],
       ),
     );
+  }
+
+  /// Botón "Refrescar Caché" de la tarjeta MTT: invalida la caché local de
+  /// la patente mostrada y fuerza una consulta fresca a la fuente. Los
+  /// datos limpios recién obtenidos sobreescriben la entrada en disco
+  /// (dentro del fetch del proveedor) y el setState refresca la pantalla
+  /// al instante.
+  Future<void> _refreshMttData(String plate) async {
+    if (_isRefreshingMtt) return;
+    setState(() => _isRefreshingMtt = true);
+    try {
+      final provider = _providers['mtt'];
+      if (provider != null) {
+        await provider.cache.invalidate(plate);
+      }
+      await _searchPlate(forceNetwork: true, plateOverride: plate);
+      if (mounted) {
+        _showSnack('Datos de MTT actualizados exitosamente');
+      }
+    } finally {
+      if (mounted) setState(() => _isRefreshingMtt = false);
+    }
   }
 
   /// Sanitización profunda anti-mojibake (misma política que el backend):
