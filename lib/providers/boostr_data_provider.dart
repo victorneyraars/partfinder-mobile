@@ -6,20 +6,76 @@ import 'package:http/http.dart' as http;
 import '../cache/provider_cache.dart';
 import 'vehicle_data_provider.dart';
 
-/// Proveedor Boostr API (comercial).
+/// Caja conectora de Boostr API (Pro).
 ///
-/// Consume el endpoint orquestado del backend:
-/// GET /api/patente/{plate}?provider=boostr → el servidor consulta Boostr,
-/// homologa el payload (fuente: 'Boostr', RT vacía explícita) y lo cachea.
-/// Sin datos → VehicleResult(found:false) (Negative Caching local).
+/// Endpoint orquestado (la API KEY vive en el servidor, NUNCA en el APK):
+///   GET https://api.studiodigital360.com/api/patente/{PLATE}?provider=boostr
+///   (el backend consume https://api.boostr.cl/vehicle/{PLATE}.json con
+///   'X-API-KEY' configurada en el entorno del servidor y homologa el payload).
+///
+/// Manejo HTTP:
+///  - 200 con datos      → VehicleResult(found:true, status:'hit') mapeado al
+///                          esquema unificado (marca/modelo/anio/motor/chasis...).
+///  - 200 sin datos      → VehicleResult(found:false, status:'empty').
+///  - 404                → VehicleResult(found:false, status:'not_found')
+///                          (la capa de caché lo guarda como negative cache).
+///  - 429                → ProviderException (límite de cuota) para que la UI
+///                          notifique al usuario.
+///  - Red / 5xx          → ProviderException controlada para permitir fallback.
+///
+/// Caché aislada: namespace `boostr` → archivos `boostr_cache_<PLATE>.json`
+/// con TTL de 60 días para hits y 7 días para negativos.
 class BoostrDataProvider extends VehicleDataProvider {
+  BoostrDataProvider({
+    ProviderCache? cache,
+  }) : _cache = cache ??
+            const ProviderCache(
+              namespace: 'boostr',
+              ttl: Duration(days: 60),
+              negativeTtl: Duration(days: 7),
+            );
+
   static const String _base = 'https://api.studiodigital360.com';
+
+  final ProviderCache _cache;
 
   @override
   String get id => 'boostr';
 
   @override
-  ProviderCache get cache => const ProviderCache(namespace: 'boostr');
+  ProviderCache get cache => _cache;
+
+  /// Limpieza de patente: mayúsculas, sin guiones ni espacios.
+  static String normalizePlate(String plate) =>
+      plate.toUpperCase().replaceAll(RegExp(r'[^A-Z0-9]'), '').trim();
+
+  /// Mapeo Boostr → esquema unificado (los campos ausentes quedan como '').
+  static Map<String, dynamic> mapToUnified(Map<String, dynamic> b) {
+    String s(dynamic v) => (v == null) ? '' : v.toString().trim();
+
+    final vin = s(b['vin']);
+    final chasis = s(b['chasis'] ?? b['vin']);
+    return <String, dynamic>{
+      'patente': s(b['patente'] ?? b['plate']),
+      'dv': s(b['dv']),
+      'marca': s(b['marca'] ?? b['make']),
+      'modelo': s(b['modelo'] ?? b['model']),
+      'anio': s(b['anio'] ?? b['year']),
+      'tipo': s(b['tipo'] ?? b['type'] ?? b['body_type']),
+      'color': s(b['color']),
+      'nro_motor': s(b['nro_motor'] ?? b['engine']),
+      'chasis': chasis,
+      'vin': vin,
+      'pbv': s(b['pbv']),
+      'combustible': s(b['combustible']),
+      'sello': '',
+      'fuente': 'Boostr',
+      'rt_estado': '',
+      'rt_vencimiento': '',
+      'historial_rt': <dynamic>[],
+      'rt_disponible': false,
+    };
+  }
 
   bool _hasVehicleData(Map<String, dynamic> d) {
     final marca = (d['marca'] ?? d['make'] ?? '').toString().trim();
@@ -29,42 +85,45 @@ class BoostrDataProvider extends VehicleDataProvider {
 
   @override
   Future<VehicleResult> fetch(String plate, {BuildContext? context}) async {
-    final plateClean = plate.toUpperCase().trim();
+    final plateClean = normalizePlate(plate);
+    if (plateClean.isEmpty) {
+      return const VehicleResult(found: false, data: <String, dynamic>{}, source: 'boostr', status: 'empty');
+    }
+
+    http.Response resp;
     try {
-      final resp = await http
+      resp = await http
           .get(Uri.parse('$_base/api/patente/$plateClean?provider=boostr'))
           .timeout(const Duration(seconds: 15));
-      if (resp.statusCode == 200) {
+    } catch (e) {
+      throw ProviderException('Boostr: error de red ($e)');
+    }
+
+    switch (resp.statusCode) {
+      case 200:
         final raw = jsonDecode(resp.body) as Map<String, dynamic>;
         final data = (raw['data'] is Map)
             ? Map<String, dynamic>.from(raw['data'] as Map)
             : Map<String, dynamic>.from(raw);
-        if (_hasVehicleData(data)) {
-          return VehicleResult(found: true, data: data, source: 'boostr');
+        if (!_hasVehicleData(data)) {
+          return const VehicleResult(
+              found: false, data: <String, dynamic>{}, source: 'boostr', status: 'empty');
         }
-      }
-    } catch (_) {}
-
-    // Intento de recuperación por el endpoint de fallback explícito.
-    try {
-      final resp = await http
-          .post(
-            Uri.parse('$_base/api/patente/fallback-boostr'),
-            headers: <String, String>{'Content-Type': 'application/json'},
-            body: jsonEncode(<String, String>{'patente': plateClean}),
-          )
-          .timeout(const Duration(seconds: 20));
-      if (resp.statusCode == 200) {
-        final raw = jsonDecode(resp.body) as Map<String, dynamic>;
-        final data = (raw['data'] is Map)
-            ? Map<String, dynamic>.from(raw['data'] as Map)
-            : Map<String, dynamic>.from(raw);
-        if (_hasVehicleData(data)) {
-          return VehicleResult(found: true, data: data, source: 'boostr');
-        }
-      }
-    } catch (_) {}
-
-    return const VehicleResult(found: false, data: <String, dynamic>{}, source: 'boostr');
+        return VehicleResult(
+          found: true,
+          data: mapToUnified(data),
+          source: 'boostr',
+          status: 'hit',
+        );
+      case 404:
+        return const VehicleResult(
+            found: false, data: <String, dynamic>{}, source: 'boostr', status: 'not_found');
+      case 429:
+        throw const ProviderException('Boostr: límite de cuota alcanzado. Intenta nuevamente en unos minutos.',
+            statusCode: 429);
+      default:
+        throw ProviderException('Boostr: error del servicio (HTTP ${resp.statusCode})',
+            statusCode: resp.statusCode);
+    }
   }
 }

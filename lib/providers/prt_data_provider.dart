@@ -27,7 +27,11 @@ class PrtDataProvider extends VehicleDataProvider {
   String get id => 'prt';
 
   @override
-  ProviderCache get cache => const ProviderCache(namespace: 'prt');
+  ProviderCache get cache => const ProviderCache(
+        namespace: 'prt',
+        ttl: Duration(days: 3),
+        negativeTtl: Duration(hours: 12),
+      );
 
   bool _hasVehicleData(Map<String, dynamic> d) {
     final marca = (d['marca'] ?? d['make'] ?? '').toString().trim();
@@ -51,7 +55,7 @@ class PrtDataProvider extends VehicleDataProvider {
             ? Map<String, dynamic>.from(raw['data'] as Map)
             : Map<String, dynamic>.from(raw);
         if (!requiere && _hasVehicleData(data)) {
-          return VehicleResult(found: true, data: data, source: 'prt');
+          return VehicleResult(found: true, data: data, source: 'prt', status: 'hit');
         }
       }
     } catch (_) {
@@ -62,10 +66,10 @@ class PrtDataProvider extends VehicleDataProvider {
     if (context != null && _openModal != null) {
       final raw = await _openModal!(context, plateClean);
       if (raw != null && _hasVehicleData(raw)) {
-        return VehicleResult(found: true, data: raw, source: 'prt');
+        return VehicleResult(found: true, data: raw, source: 'prt', status: 'hit');
       }
     }
 
-    return const VehicleResult(found: false, data: <String, dynamic>{}, source: 'prt');
+    return const VehicleResult(found: false, data: <String, dynamic>{}, source: 'prt', status: 'not_found');
   }
 }

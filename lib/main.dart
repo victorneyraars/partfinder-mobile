@@ -264,8 +264,15 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
       }
 
       // 3) Sin datos: Negative Caching local + aviso.
-      await provider.cache.write(rawPlate, found: false, data: const {}, source: result.source);
-      _showSnack('Patente no encontrada en el registro oficial');
+      await provider.cache.write(rawPlate,
+          found: false, data: const {}, source: result.source, status: result.status);
+      _showSnack(result.status == 'not_found'
+          ? 'Patente no encontrada en el registro oficial'
+          : 'Sin datos de vehículo para $rawPlate');
+    } on ProviderException catch (e) {
+      // Excepción controlada del proveedor (cuota 429, red, 5xx): permite
+      // decidir fallback o informar al usuario sin romper el flujo.
+      _showSnack(e.message);
     } catch (e) {
       _showSnack('Error de conexión con el servidor ($e)');
     } finally {
@@ -1386,7 +1393,7 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
                             } else if (src.contains('BOOSTR')) {
                               bColor = const Color(0xFF38BDF8);
                               bIcon = Icons.bolt;
-                              bText = 'BOOSTR API';
+                              bText = 'Datos vía Boostr API';
                             }
 
                             return Container(

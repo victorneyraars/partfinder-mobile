@@ -14,16 +14,21 @@ class VehicleResult {
   /// Identificador de la fuente: 'prt' | 'boostr' | 'sii'.
   final String source;
 
+  /// 'hit' (datos), 'empty' (200 sin datos de vehículo) o 'not_found' (404).
+  final String status;
+
   const VehicleResult({
     required this.found,
     this.data = const <String, dynamic>{},
     required this.source,
+    this.status = 'hit',
   });
 
   Map<String, dynamic> toJson() => {
         'found': found,
         'data': data,
         'source': source,
+        'status': found ? 'hit' : status,
       };
 
   static VehicleResult fromJson(Map<String, dynamic> j) => VehicleResult(
@@ -32,7 +37,20 @@ class VehicleResult {
             ? Map<String, dynamic>.from(j['data'] as Map)
             : const <String, dynamic>{},
         source: (j['source'] ?? '').toString(),
+        status: (j['status'] ?? 'hit').toString(),
       );
+}
+
+/// Excepción controlada de proveedor: permite que la capa superior decida
+/// un fallback o muestre un aviso específico (cuota, red, 5xx).
+class ProviderException implements Exception {
+  final String message;
+  final int? statusCode;
+
+  const ProviderException(this.message, {this.statusCode});
+
+  @override
+  String toString() => 'ProviderException($statusCode): $message';
 }
 
 /// Interfaz abstracta del patrón Provider ("cajas").
@@ -44,8 +62,8 @@ abstract class VehicleDataProvider {
   /// Identificador del proveedor ('prt', 'boostr', 'sii').
   String get id;
 
-  /// Caché local aislada del proveedor (prefijos cache_prt_, cache_boostr_,
-  /// cache_sii_) con soporte de Negative Caching y TTL configurable.
+  /// Caché local aislada del proveedor (prefijos prt_cache_, boostr_cache_,
+  /// sii_cache_) con Negative Caching y TTL configurable.
   ProviderCache get cache;
 
   /// Consulta el vehículo por patente. [context] solo se usa en flujos
