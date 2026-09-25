@@ -17,6 +17,7 @@ import 'providers/boostr_data_provider.dart';
 import 'providers/mtt_data_provider.dart';
 import 'providers/sii_data_provider.dart';
 import 'models/vehicle_model.dart';
+import 'utils/plate_validator.dart';
 
 
 String _getFreshRandomChileanPlate() {
@@ -67,7 +68,7 @@ class LicensePlateDashboard extends StatefulWidget {
 }
 
 class _LicensePlateDashboardState extends State<LicensePlateDashboard>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   String _selectedEngine = 'prt';
   final TextEditingController _plateController = TextEditingController(text: _getFreshRandomChileanPlate());
   final FocusNode _focusNode = FocusNode();
@@ -79,6 +80,14 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
   
   late AnimationController _scannerController;
   late Animation<double> _scannerAnimation;
+
+  // ===== MOTOR NORMATIVO DE PATENTES + UI REACTIVA =====
+  PlateValidationResult _plateValidation = const PlateValidationResult(
+      valid: false, format: null, formatLabel: 'SIN FORMATO');
+  late AnimationController _shakeController;
+  late Animation<double> _shakeAnimation;
+  late AnimationController _bannerController;
+  late Animation<double> _bannerFade;
   
   bool _isLoading = false;
   bool _isRefreshingMtt = false;
@@ -118,11 +127,6 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
       'mtt': MttDataProvider(),
       'sii': SiiDataProvider(),
     };
-    final initPlate = _getFreshRandomChileanPlate();
-    _plateController.text = initPlate;
-    _evalPlateFormat();
-    
-    
     _scannerController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1400),
@@ -130,32 +134,70 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
     _scannerAnimation = Tween<double>(begin: -1.0, end: 1.0).animate(
       CurvedAnimation(parent: _scannerController, curve: Curves.easeInOut),
     );
+
+    // Shake normativo de la placa (letra prohibida).
+    _shakeController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 450),
+    );
+    _shakeAnimation = TweenSequence<double>([
+      TweenSequenceItem(tween: Tween<double>(begin: 0, end: -10), weight: 1),
+      TweenSequenceItem(tween: Tween<double>(begin: -10, end: 10), weight: 2),
+      TweenSequenceItem(tween: Tween<double>(begin: 10, end: -7), weight: 2),
+      TweenSequenceItem(tween: Tween<double>(begin: -7, end: 7), weight: 2),
+      TweenSequenceItem(tween: Tween<double>(begin: 7, end: -3), weight: 1),
+      TweenSequenceItem(tween: Tween<double>(begin: -3, end: 0), weight: 1),
+    ]).animate(CurvedAnimation(parent: _shakeController, curve: Curves.linear));
+
+    // Banner explicativo animado (AnimatedSize + FadeTransition).
+    _bannerController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 300),
+    );
+    _bannerFade =
+        CurvedAnimation(parent: _bannerController, curve: Curves.easeOut);
+
+    final initPlate = _getFreshRandomChileanPlate();
+    _plateController.text = initPlate;
+    _evalPlateFormat();
     _plateController.addListener(_evalPlateFormat);
   }
 
   @override
   void dispose() {
     _scannerController.dispose();
+    _shakeController.dispose();
+    _bannerController.dispose();
     _plateController.dispose();
     _focusNode.dispose();
     super.dispose();
   }
 
   void _evalPlateFormat() {
-    final text = _plateController.text.replaceAll(RegExp(r'[^A-Za-z0-9]'), '').toUpperCase();
+    final result = ChileanPlateEngine.validate(_plateController.text);
     setState(() {
-      if (RegExp(r'^[B-DF-HJ-NP-TV-Z]{4}\d{2}$').hasMatch(text)) {
-        _activeFormat = "AUTO NUEVO (4L+2N)";
-      } else if (RegExp(r'^[A-Z]{2}\d{4}$').hasMatch(text)) {
-        _activeFormat = "CLÁSICO (2L+4N)";
-      } else if (RegExp(r'^[A-Z]{3}\d{2,3}$').hasMatch(text)) {
-        _activeFormat = "MOTO";
-      } else if (text.isNotEmpty) {
-        _activeFormat = "INGRESANDO...";
-      } else {
-        _activeFormat = "SIN FORMATO";
-      }
+      _plateValidation = result;
+      _activeFormat = result.formatLabel;
     });
+
+    if (result.hasError) {
+      // Letra prohibida (vocal/M/Q/Ñ en territorio nuevo): shake + haptic
+      // + banner explicativo animado.
+      HapticFeedback.lightImpact();
+      if (!_shakeController.isAnimating) {
+        _shakeController.forward(from: 0);
+      }
+      if (_bannerController.status != AnimationStatus.forward &&
+          _bannerController.status != AnimationStatus.completed) {
+        _bannerController.forward();
+      }
+    } else {
+      // Sin error normativo: desvanecer el banner.
+      if (_bannerController.status == AnimationStatus.completed ||
+          _bannerController.status == AnimationStatus.forward) {
+        _bannerController.reverse();
+      }
+    }
   }
 
   
@@ -717,8 +759,18 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
               children: [
                 _buildHeader(),
                 const SizedBox(height: 24),
-                _buildPhysicalPlate(),
-                const SizedBox(height: 16),
+                // Placa con shake normativo (letra prohibida) + banner
+                // explicativo animado (AnimatedSize + FadeTransition).
+                AnimatedBuilder(
+                  animation: _shakeAnimation,
+                  builder: (context, child) => Transform.translate(
+                    offset: Offset(_shakeAnimation.value, 0),
+                    child: child,
+                  ),
+                  child: _buildPhysicalPlate(),
+                ),
+                _buildPlateErrorBanner(),
+                const SizedBox(height: 12),
                 _buildFormatPills(),
                 const SizedBox(height: 24),
                 _buildScanButton(),
@@ -1166,6 +1218,57 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
     );
   }
 
+  /// Banner explicativo animado (AnimatedSize + FadeTransition) que aparece
+  /// bajo la placa cuando se detecta un error normativo (vocal / M / Q / Ñ).
+  Widget _buildPlateErrorBanner() {
+    final show = _plateValidation.hasError;
+    final message = show ? _plateValidation.message : '';
+    return AnimatedSize(
+      duration: const Duration(milliseconds: 250),
+      curve: Curves.easeOut,
+      alignment: Alignment.topCenter,
+      child: show
+          ? FadeTransition(
+              opacity: _bannerFade,
+              child: Container(
+                width: double.infinity,
+                constraints: const BoxConstraints(maxWidth: 360),
+                margin: const EdgeInsets.only(top: 10),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF59E0B).withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: const Color(0xFFF59E0B).withOpacity(0.5),
+                    width: 1,
+                  ),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Icon(Icons.info_outline_rounded,
+                        color: Color(0xFFF59E0B), size: 15),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        message,
+                        softWrap: true,
+                        style: const TextStyle(
+                          color: Color(0xFFE2E8F0),
+                          fontSize: 11.5,
+                          height: 1.4,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            )
+          : const SizedBox(width: double.infinity),
+    );
+  }
+
   Widget _buildFormatPills() {
     return Wrap(
       spacing: 8,
@@ -1203,12 +1306,18 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
   }
 
   Widget _buildScanButton() {
-    return Container(
+    // Motor normativo: si la patente no valida (formato incompleto o letra
+    // prohibida), el botón queda bloqueado para no consumir cuota de API.
+    final bloqueado = !_plateValidation.valid;
+    return AnimatedOpacity(
+      duration: const Duration(milliseconds: 250),
+      opacity: (_isLoading || !bloqueado) ? 1.0 : 0.45,
+      child: Container(
       width: double.infinity,
       constraints: const BoxConstraints(maxWidth: 360),
       height: 54,
       child: ElevatedButton(
-        onPressed: _isLoading ? null : _searchPlate,
+        onPressed: (_isLoading || bloqueado) ? null : _searchPlate,
         style: ElevatedButton.styleFrom(
           padding: EdgeInsets.zero,
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
@@ -1242,19 +1351,29 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
                       ),
                     ],
                   )
-                : const Row(
+                : Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Icon(Icons.radar_rounded, color: Colors.white, size: 22),
-                      SizedBox(width: 10),
-                      Text(
-                        'CONSULTAR VEHÍCULO',
-                        style: TextStyle(fontSize: 15, fontWeight: FontWeight.w900, letterSpacing: 1.5, color: Colors.white),
+                      Icon(
+                        Icons.radar_rounded,
+                        color: Colors.white,
+                        size: 22,
+                      ),
+                      const SizedBox(width: 10),
+                      Flexible(
+                        child: Text(
+                          _plateValidation.valid
+                              ? 'CONSULTAR VEHÍCULO'
+                              : 'FORMATO INVÁLIDO — REVISA LA PLACA',
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w900, letterSpacing: 1.2, color: Colors.white),
+                        ),
                       ),
                     ],
                   ),
           ),
         ),
+      ),
       ),
     );
   }
