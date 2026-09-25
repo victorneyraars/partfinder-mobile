@@ -4,6 +4,7 @@ import 'package:flutter/widgets.dart';
 import 'package:http/http.dart' as http;
 
 import '../cache/provider_cache.dart';
+import '../models/vehicle_model.dart';
 import 'vehicle_data_provider.dart';
 
 /// Caja conectora de Boostr API (Pro).
@@ -49,32 +50,15 @@ class BoostrDataProvider extends VehicleDataProvider {
   static String normalizePlate(String plate) =>
       plate.toUpperCase().replaceAll(RegExp(r'[^A-Z0-9]'), '').trim();
 
-  /// Mapeo Boostr → esquema unificado (los campos ausentes quedan como '').
+  /// Mapeo Boostr → esquema unificado con el 100% de los campos expuestos
+  /// por la API (incluyendo ?include=owner): plate, dv, make, model,
+  /// version, year, type, engine, engine_size, chassis, color, doors,
+  /// transmission, kilometers, valuation, gas_type, manufacturer, region,
+  /// country y owner (owner_name / owner_rut). Los valores vacíos ("", 0,
+  /// null) se preservan tal cual para la ficha exhaustiva.
   static Map<String, dynamic> mapToUnified(Map<String, dynamic> b) {
-    String s(dynamic v) => (v == null) ? '' : v.toString().trim();
-
-    final vin = s(b['vin']);
-    final chasis = s(b['chasis'] ?? b['vin']);
-    return <String, dynamic>{
-      'patente': s(b['patente'] ?? b['plate']),
-      'dv': s(b['dv']),
-      'marca': s(b['marca'] ?? b['make']),
-      'modelo': s(b['modelo'] ?? b['model']),
-      'anio': s(b['anio'] ?? b['year']),
-      'tipo': s(b['tipo'] ?? b['type'] ?? b['body_type']),
-      'color': s(b['color']),
-      'nro_motor': s(b['nro_motor'] ?? b['engine']),
-      'chasis': chasis,
-      'vin': vin,
-      'pbv': s(b['pbv']),
-      'combustible': s(b['combustible']),
-      'sello': '',
-      'fuente': 'Boostr',
-      'rt_estado': '',
-      'rt_vencimiento': '',
-      'historial_rt': <dynamic>[],
-      'rt_disponible': false,
-    };
+    final model = VehicleBaseModel.fromJson(b);
+    return model.toUnified();
   }
 
   bool _hasVehicleData(Map<String, dynamic> d) {

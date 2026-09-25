@@ -16,6 +16,7 @@ import 'providers/prt_data_provider.dart';
 import 'providers/boostr_data_provider.dart';
 import 'providers/mtt_data_provider.dart';
 import 'providers/sii_data_provider.dart';
+import 'models/vehicle_model.dart';
 
 
 String _getFreshRandomChileanPlate() {
@@ -82,6 +83,7 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
   bool _isLoading = false;
   bool _isRefreshingMtt = false;
   bool _isRefreshingSii = false;
+  bool _isRefreshingBoostr = false;
   Map<String, dynamic>? _selectedSiiVersion;
   int? _selectedSiiVersionIndex;
   Map<String, dynamic>? _siiData;
@@ -286,7 +288,7 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
           } catch (e) {
             debugPrint('Error persistiendo en backend: $e');
           }
-        } else if (result.source == 'boostr') {
+        } else if (result.source == 'boostr' && !forceNetwork) {
           _showSnack('Vehículo $rawPlate recuperado vía Boostr (RT no disponible)');
         } else if (result.source == 'sii') {
           // El backend ya persistió la tasación (merge en vehicle_cache)
@@ -730,7 +732,11 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
                 if (_vehicleData != null)
                   _isMttResult
                       ? _buildMttCard()
-                      : (_isSiiResult ? _buildSiiCard() : _buildVehicleSpecsCard()),
+                      : (_isSiiResult
+                          ? _buildSiiCard()
+                          : (_isBoostrResult
+                              ? _buildBoostrCard()
+                              : _buildVehicleSpecsCard())),
             _buildSiiEstimateCard(),
               ],
             ),
@@ -1934,6 +1940,41 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
     return src.contains('SII') || fuente == 'SII';
   }
 
+  bool get _isBoostrResult {
+    final d = _vehicleData;
+    if (d == null) return false;
+    final src = (d['data_source']?.toString() ?? '').toUpperCase();
+    final fuente = (d['fuente']?.toString() ?? '').toUpperCase();
+    return src.contains('BOOSTR') || fuente == 'BOOSTR';
+  }
+
+  /// Refresco en caliente de la ficha Boostr: invalida la caché central del
+  /// backend (DELETE /api/vehicle/cache/{plate}, para forzar una nueva
+  /// llamada con ?include=owner) y la caché local, y consulta la fuente.
+  Future<void> _refreshBoostrData(String plate) async {
+    if (_isRefreshingBoostr) return;
+    setState(() => _isRefreshingBoostr = true);
+    try {
+      final provider = _providers['boostr'];
+      if (provider != null) {
+        await provider.cache.invalidate(plate);
+      }
+      try {
+        await http
+            .delete(Uri.parse('https://api.studiodigital360.com/api/vehicle/cache/$plate'))
+            .timeout(const Duration(seconds: 8));
+      } catch (e) {
+        debugPrint('Boostr: error invalidando caché backend: $e');
+      }
+      await _searchPlate(forceNetwork: true, plateOverride: plate);
+      if (mounted) {
+        _showSnack('Datos de Boostr actualizados exitosamente');
+      }
+    } finally {
+      if (mounted) setState(() => _isRefreshingBoostr = false);
+    }
+  }
+
   /// Formatea un monto CLP crudo (con/sin $ y puntos) a '$X.XXX.XXX'.
   String _formatClp(dynamic raw) {
     final digits = (raw ?? '').toString().replaceAll(RegExp(r'[^0-9]'), '');
@@ -2348,6 +2389,395 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
     return anio.isNotEmpty ? '$base ($anio)' : base;
   }
 
+
+  /// Tarjeta Boostr / Ficha Base Exhaustiva con 4 bloques:
+  ///  A) Identificación y Propietario (destacado)
+  ///  B) Especificaciones y Ficha Técnica
+  ///  C) Motor, Combustible y Desgaste
+  ///  D) Fabricación y Procedencia
+  /// Layout responsivo (Wrap/Expanded + softWrap), sin truncar texto.
+  Widget _buildBoostrCard() {
+    const Color accent = Color(0xFF38BDF8);
+    final VehicleBaseModel v = VehicleBaseModel.fromJson(_vehicleData!);
+    final String plateDv = [
+      v.plate ?? '',
+      if ((v.dv ?? '').isNotEmpty) v.dv!,
+    ].join('-');
+
+    String info(String? value, [String fallback = 'No informado']) {
+      final s = (value ?? '').toString().trim();
+      return s.isEmpty ? fallback : s;
+    }
+
+    String infoVersion() {
+      final s = (v.version ?? '').toString().trim();
+      return s.isEmpty ? 'No informada' : s;
+    }
+
+    String doorsText() => (v.doors ?? 0) > 0 ? '${v.doors} puertas' : 'No informado';
+    String kmText() => (v.kilometers ?? 0) > 0
+        ? '${_formatThousands(v.kilometers!)} Km'
+        : '0 Km / No registrado';
+
+    return Container(
+      width: double.infinity,
+      constraints: const BoxConstraints(maxWidth: 380),
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: const Color(0xFF0F172A).withOpacity(0.85),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: accent.withOpacity(0.45), width: 1.5),
+        boxShadow: [
+          BoxShadow(
+            color: accent.withOpacity(0.10),
+            blurRadius: 20,
+            spreadRadius: 4,
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Expanded(
+                child: Row(
+                  children: [
+                    const Icon(Icons.bolt, color: accent, size: 22),
+                    const SizedBox(width: 8),
+                    Flexible(
+                      child: Text(
+                        plateDv,
+                        style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w900, color: accent, letterSpacing: 1.2),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: accent.withOpacity(0.16),
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(color: accent, width: 0.9),
+                    ),
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.verified_user, color: accent, size: 12),
+                        SizedBox(width: 4),
+                        Text(
+                          'BOOSTR / PADRÓN CIVIL',
+                          style: TextStyle(color: accent, fontSize: 9, fontWeight: FontWeight.w900, letterSpacing: 0.4),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 2),
+                  Tooltip(
+                    message: 'Actualizar datos desde Boostr',
+                    child: _isRefreshingBoostr
+                        ? const Padding(
+                            padding: EdgeInsets.all(12),
+                            child: SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(strokeWidth: 2, color: accent),
+                            ),
+                          )
+                        : IconButton(
+                            onPressed: () => _refreshBoostrData(v.plate ?? ''),
+                            icon: const Icon(Icons.refresh, size: 20, color: accent),
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+                            visualDensity: VisualDensity.compact,
+                          ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+
+          // ===== Bloque A: Identificación y Propietario =====
+          _boostrBlockHeader(Icons.badge_outlined, 'IDENTIFICACIÓN Y PROPIETARIO'),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: accent.withOpacity(0.08),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: accent.withOpacity(0.4), width: 1),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'PLACA PATENTE ${plateDv}',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 1.6,
+                    fontFamily: 'monospace',
+                  ),
+                ),
+                const SizedBox(height: 8),
+                if ((v.ownerName ?? '').isNotEmpty) ...[
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Icon(Icons.person, color: accent, size: 16),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          v.ownerName!,
+                          softWrap: true,
+                          style: const TextStyle(color: Color(0xFFE2E8F0), fontSize: 12.5, fontWeight: FontWeight.w800),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Row(
+                    children: [
+                      const Icon(Icons.badge, color: Color(0xFF94A3B8), size: 15),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'RUT: ${v.ownerRut ?? 'No informado'}',
+                          softWrap: true,
+                          style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 12, fontWeight: FontWeight.w600, fontFamily: 'monospace'),
+                        ),
+                      ),
+                    ],
+                  ),
+                ] else ...[
+                  const Row(
+                    children: [
+                      Icon(Icons.badge, color: Color(0xFF64748B), size: 16),
+                      SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Titular: No registrado en padrón',
+                          softWrap: true,
+                          style: TextStyle(color: Color(0xFF94A3B8), fontSize: 12.5, fontWeight: FontWeight.w600, fontStyle: FontStyle.italic),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+
+          // ===== Bloque B: Especificaciones y Ficha Técnica =====
+          _boostrBlockHeader(Icons.settings_suggest_rounded, 'ESPECIFICACIONES Y FICHA TÉCNICA'),
+          _boostrInfoRow('Marca y Modelo', '${info(v.make)} ${info(v.model)}'.trim()),
+          _boostrInfoRow('Tipo de Carrocería / Uso', info(v.type)),
+          _boostrInfoRow('Año de Fabricación', v.year != null ? '${v.year}' : 'No informado'),
+          _boostrInfoRow('Versión', infoVersion()),
+          _boostrInfoRow('Color', info(v.color)),
+          _boostrInfoRow('Puertas', doorsText()),
+          _boostrInfoRow('Transmisión', info(v.transmission, 'No informada')),
+          const SizedBox(height: 12),
+
+          // ===== Bloque C: Motor, Combustible y Desgaste =====
+          _boostrBlockHeader(Icons.speed_rounded, 'MOTOR, COMBUSTIBLE Y DESGASTE'),
+          Row(
+            children: [
+              Expanded(
+                child: Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: accent.withOpacity(0.10),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: accent.withOpacity(0.45), width: 1),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.speed, color: accent, size: 22),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'KILOMETRAJE',
+                              style: TextStyle(color: Color(0xFF94A3B8), fontSize: 9, fontWeight: FontWeight.w800, letterSpacing: 0.6),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              kmText(),
+                              softWrap: true,
+                              style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w900),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          _boostrInfoRow('Combustible', info(v.gasType)),
+          _boostrInfoRow('N° de Motor', info(v.engine)),
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 5),
+            child: Column(
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      flex: 4,
+                      child: Text(
+                        'N° de Chasis / VIN',
+                        softWrap: true,
+                        style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 11, fontWeight: FontWeight.w700),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      flex: 6,
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: [
+                          Flexible(
+                            child: SelectableText(
+                              info(v.chassis),
+                              textAlign: TextAlign.end,
+                              style: TextStyle(
+                                color: (v.chassis ?? '').isEmpty ? const Color(0xFF64748B) : Colors.white,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                                fontFamily: 'monospace',
+                              ),
+                            ),
+                          ),
+                          if ((v.chassis ?? '').isNotEmpty) ...[
+                            const SizedBox(width: 4),
+                            InkWell(
+                              borderRadius: BorderRadius.circular(6),
+                              onTap: () async {
+                                await Clipboard.setData(ClipboardData(text: v.chassis!));
+                                if (mounted) _showSnack('VIN copiado al portapapeles');
+                              },
+                              child: const Padding(
+                                padding: EdgeInsets.all(4),
+                                child: Icon(Icons.copy_rounded, size: 15, color: accent),
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Divider(color: const Color(0xFF1E293B).withOpacity(0.5), height: 1),
+              ],
+            ),
+          ),
+          _boostrInfoRow('Cilindrada', info(v.engineSize, 'No informada')),
+          if (v.valuation != null && v.valuation.toString().isNotEmpty && v.valuation != 0)
+            _boostrInfoRow('Valuación', _formatClp(v.valuation)),
+          const SizedBox(height: 12),
+
+          // ===== Bloque D: Fabricación y Procedencia =====
+          _boostrBlockHeader(Icons.factory_rounded, 'FABRICACIÓN Y PROCEDENCIA'),
+          _boostrInfoRow('Fabricante', info(v.manufacturer)),
+          _boostrInfoRow(
+            'País y Región',
+            [
+              info(v.country, 'No informado'),
+              if ((v.region ?? '').isNotEmpty) v.region!,
+            ].join(' — '),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Cabecera de sub-bloque de la tarjeta Boostr.
+  Widget _boostrBlockHeader(IconData icon, String title) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 2, bottom: 6),
+      child: Row(
+        children: [
+          Icon(icon, color: const Color(0xFF38BDF8), size: 15),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              title,
+              softWrap: true,
+              style: const TextStyle(
+                color: Color(0xFF38BDF8),
+                fontSize: 11.5,
+                fontWeight: FontWeight.w900,
+                letterSpacing: 0.9,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Fila etiqueta→valor de la tarjeta Boostr (sin truncado).
+  Widget _boostrInfoRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 5),
+      child: Column(
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                flex: 4,
+                child: Text(
+                  label,
+                  softWrap: true,
+                  style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 11, fontWeight: FontWeight.w700),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                flex: 6,
+                child: SelectableText(
+                  value,
+                  textAlign: TextAlign.end,
+                  style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w700),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Divider(color: const Color(0xFF1E293B).withOpacity(0.5), height: 1),
+        ],
+      ),
+    );
+  }
+
+  /// Separador de miles chileno: 283961 → '283.961'.
+  String _formatThousands(int n) {
+    final s = n.toString();
+    final buf = StringBuffer();
+    for (int i = 0; i < s.length; i++) {
+      final rem = s.length - i;
+      buf.write(s[i]);
+      if (rem > 1 && (rem - 1) % 3 == 0) buf.write('.');
+    }
+    return buf.toString();
+  }
 
   /// Sanitización profunda anti-mojibake (misma política que el backend):
   /// reemplazos explícitos + barrido genérico de pares 'Ã'+byte, para que
