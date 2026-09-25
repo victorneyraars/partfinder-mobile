@@ -17,6 +17,7 @@ import 'providers/boostr_data_provider.dart';
 import 'providers/mtt_data_provider.dart';
 import 'providers/sii_data_provider.dart';
 import 'models/vehicle_model.dart';
+import 'models/prt_model.dart';
 import 'utils/plate_validator.dart';
 
 
@@ -93,6 +94,7 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
   bool _isRefreshingMtt = false;
   bool _isRefreshingSii = false;
   bool _isRefreshingBoostr = false;
+  bool _isRefreshingPrt = false;
   Map<String, dynamic>? _siiData;
   bool _isLoadingSii = false;
 
@@ -782,7 +784,9 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
                           ? _buildSiiCard()
                           : (_isBoostrResult
                               ? _buildBoostrCard()
-                              : _buildVehicleSpecsCard())),
+                              : (_isPrtResult
+                                  ? _buildPrtCard()
+                                  : _buildVehicleSpecsCard()))),
             _buildSiiEstimateCard(),
               ],
             ),
@@ -2061,6 +2065,41 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
     return src.contains('BOOSTR') || fuente == 'BOOSTR';
   }
 
+  bool get _isPrtResult {
+    final d = _vehicleData;
+    if (d == null) return false;
+    final src = (d['data_source']?.toString() ?? '').toUpperCase();
+    final fuente = (d['fuente']?.toString() ?? '').toUpperCase();
+    return src.contains('PRT') || fuente.contains('PRT');
+  }
+
+  /// Refresco en caliente del Motor PRT: invalida la caché central del
+  /// backend y la caché local, y fuerza una nueva consulta. Si la vigencia
+  /// exige verificación, el flujo reabre el modal reCAPTCHA (re-scraping).
+  Future<void> _refreshPrtData(String plate) async {
+    if (_isRefreshingPrt) return;
+    setState(() => _isRefreshingPrt = true);
+    try {
+      final provider = _providers['prt'];
+      if (provider != null) {
+        await provider.cache.invalidate(plate);
+      }
+      try {
+        await http
+            .delete(Uri.parse('https://api.studiodigital360.com/api/vehicle/cache/$plate'))
+            .timeout(const Duration(seconds: 8));
+      } catch (e) {
+        debugPrint('PRT: error invalidando caché backend: $e');
+      }
+      await _searchPlate(forceNetwork: true, plateOverride: plate);
+      if (mounted) {
+        _showSnack('Datos de PRT actualizados exitosamente');
+      }
+    } finally {
+      if (mounted) setState(() => _isRefreshingPrt = false);
+    }
+  }
+
   /// Refresco en caliente de la ficha Boostr: invalida la caché central del
   /// backend (DELETE /api/vehicle/cache/{plate}, para forzar una nueva
   /// llamada con ?include=owner) y la caché local, y consulta la fuente.
@@ -2986,6 +3025,352 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
       if (rem > 1 && (rem - 1) % 3 == 0) buf.write('.');
     }
     return buf.toString();
+  }
+
+
+
+  /// Tarjeta del Motor PRT (Información del Vehículo + Revisión Técnica).
+  /// Usa el modelo tipificado [PrtVehicleData]: el VIN vacío se pinta como
+  /// "No informado" (nunca "Tipo"), el combustible vacío como "No
+  /// registrado" (nunca una fecha) y la fecha de vencimiento general se
+  /// muestra en su tarjeta destacada de vigencia oficial.
+  Widget _buildPrtCard() {
+    const Color accent = Color(0xFF10B981);
+    final PrtVehicleData v = PrtVehicleData.fromJson(_vehicleData!);
+    final String patente = v.patente.toUpperCase();
+
+    final String vinTxt = v.vinSeguro.isEmpty ? 'No informado' : v.vinSeguro;
+    final String combTxt =
+        v.combustibleSeguro.isEmpty ? 'No registrado' : v.combustibleSeguro;
+
+    return Container(
+      width: double.infinity,
+      constraints: const BoxConstraints(maxWidth: 380),
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: const Color(0xFF0F172A).withOpacity(0.85),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: accent.withOpacity(0.45), width: 1.5),
+        boxShadow: [
+          BoxShadow(
+            color: accent.withOpacity(0.10),
+            blurRadius: 20,
+            spreadRadius: 4,
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Expanded(
+                child: Row(
+                  children: [
+                    const Icon(Icons.precision_manufacturing, color: accent, size: 22),
+                    const SizedBox(width: 8),
+                    Flexible(
+                      child: Text(
+                        patente,
+                        style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w900, color: accent, letterSpacing: 1.2),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: accent.withOpacity(0.16),
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(color: accent, width: 0.9),
+                    ),
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.verified_user, color: accent, size: 12),
+                        SizedBox(width: 4),
+                        Text(
+                          'PRT / CONSULTA OFICIAL',
+                          style: TextStyle(color: accent, fontSize: 9, fontWeight: FontWeight.w900, letterSpacing: 0.4),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 2),
+                  Tooltip(
+                    message: 'Actualizar datos desde PRT',
+                    child: _isRefreshingPrt
+                        ? const Padding(
+                            padding: EdgeInsets.all(12),
+                            child: SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(strokeWidth: 2, color: accent),
+                            ),
+                          )
+                        : IconButton(
+                            onPressed: () => _refreshPrtData(patente),
+                            icon: const Icon(Icons.refresh, size: 20, color: accent),
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+                            visualDensity: VisualDensity.compact,
+                          ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+
+          // ===== Tarjeta destacada de VIGENCIA OFICIAL =====
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [accent.withOpacity(0.22), accent.withOpacity(0.08)],
+                begin: Alignment.centerLeft,
+                end: Alignment.centerRight,
+              ),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: accent.withOpacity(0.55), width: 1.2),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.event_available_rounded, color: accent, size: 24),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'VIGENCIA OFICIAL REVISIÓN TÉCNICA',
+                        style: TextStyle(color: Color(0xFF94A3B8), fontSize: 9, fontWeight: FontWeight.w800, letterSpacing: 0.6),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        v.rtEstado.isEmpty ? 'Sin registro' : v.rtEstado.toUpperCase(),
+                        style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w900),
+                      ),
+                      if (v.rtVencimiento.isNotEmpty) ...[
+                        const SizedBox(height: 3),
+                        Text(
+                          'Vence: ${v.rtVencimiento}',
+                          style: const TextStyle(color: accent, fontSize: 13, fontWeight: FontWeight.w900, fontFamily: 'monospace'),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 14),
+
+          // ===== Ficha técnica clave-valor (valores nunca desplazados) =====
+          Row(
+            children: [
+              const Icon(Icons.segment, color: accent, size: 15),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  'INFORMACIÓN DEL VEHÍCULO',
+                  softWrap: true,
+                  style: const TextStyle(color: accent, fontSize: 12, fontWeight: FontWeight.w900, letterSpacing: 1.0),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          if (v.tipo.isNotEmpty) _mttPairRow('TIPO', v.tipo),
+          if (v.marca.isNotEmpty) _mttPairRow('MARCA', v.marca),
+          if (v.modelo.isNotEmpty) _mttPairRow('MODELO', v.modelo),
+          if (v.anio.isNotEmpty) _mttPairRow('AÑO FAB.', v.anio),
+          if (v.nroMotor.isNotEmpty) _mttPairRow('N° MOTOR', v.nroMotor),
+          if (v.chasis.isNotEmpty) _mttPairRow('N° CHASIS', v.chasis),
+          _mttPairRow('N° VIN', vinTxt),
+          if (v.color.isNotEmpty) _mttPairRow('COLOR', v.color),
+          _mttPairRow('COMBUSTIBLE', combTxt),
+          if (v.pbv.isNotEmpty) _mttPairRow('PBV', v.pbv),
+          if (v.sello.isNotEmpty) _mttPairRow('TIPO SELLO', v.sello),
+          const SizedBox(height: 12),
+
+          // ===== Historial completo de Revisión Técnica =====
+          if (v.historial.isNotEmpty) ...[
+            Theme(
+              data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+              child: ExpansionTile(
+                tilePadding: EdgeInsets.zero,
+                leading: const Icon(Icons.history, color: Color(0xFF38BDF8), size: 22),
+                title: Text(
+                  'Historial de Revisiones (${v.historial.length} registros)',
+                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Color(0xFF38BDF8), letterSpacing: 0.5),
+                ),
+                children: v.historial.map<Widget>((rt) {
+                  final rawEstado = rt.estado.toUpperCase();
+                  final isApproved = rawEstado.contains('APROB');
+                  final isRechazado = rawEstado.contains('RECHAZ');
+                  String displayEstado = rawEstado;
+                  if (rt.esGases && isRechazado) {
+                    displayEstado = 'RECHAZADO: GASES';
+                  }
+                  return Container(
+                    margin: const EdgeInsets.only(bottom: 8),
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF0F172A),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: isApproved
+                            ? const Color(0xFF10B981).withOpacity(0.35)
+                            : Colors.redAccent.withOpacity(0.35),
+                        width: 0.8,
+                      ),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Expanded(
+                              child: Text(
+                                'Control: ${rt.fecha.isEmpty ? '-' : rt.fecha}',
+                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.white),
+                              ),
+                            ),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: isApproved
+                                    ? const Color(0xFF10B981).withOpacity(0.2)
+                                    : Colors.redAccent.withOpacity(0.2),
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Text(
+                                displayEstado.isEmpty ? '-' : displayEstado,
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.bold,
+                                  color: isApproved ? const Color(0xFF10B981) : Colors.redAccent,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        if (rt.esGases) ...[
+                          const SizedBox(height: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFF59E0B).withOpacity(0.15),
+                              borderRadius: BorderRadius.circular(4),
+                              border: Border.all(color: const Color(0xFFF59E0B).withOpacity(0.5), width: 0.8),
+                            ),
+                            child: const Text(
+                              '(G) REVISIÓN DE GASES',
+                              style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.w900, color: Color(0xFFF59E0B), letterSpacing: 0.6),
+                            ),
+                          ),
+                        ],
+                        const SizedBox(height: 6),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Expanded(
+                              child: Text(
+                                'Vence: ${rt.vencimiento.isEmpty ? '-' : rt.vencimiento}',
+                                style: const TextStyle(fontSize: 12, color: Color(0xFF38BDF8), fontWeight: FontWeight.w600),
+                              ),
+                            ),
+                            Text(
+                              rt.codPlanta,
+                              style: const TextStyle(fontSize: 11, color: Colors.white38),
+                            ),
+                          ],
+                        ),
+                        if (rt.planta.isNotEmpty) ...[
+                          const SizedBox(height: 4),
+                          Text(
+                            rt.planta,
+                            softWrap: true,
+                            style: const TextStyle(fontSize: 11, color: Colors.white70),
+                          ),
+                        ],
+                        if (rt.certificado.isNotEmpty) ...[
+                          const SizedBox(height: 4),
+                          Text(
+                            'Cert: ${rt.certificado}',
+                            style: const TextStyle(fontSize: 10, color: Colors.white38),
+                          ),
+                        ],
+                      ],
+                    ),
+                  );
+                }).toList(),
+              ),
+            ),
+            const SizedBox(height: 12),
+          ],
+          SizedBox(
+            width: double.infinity,
+            height: 48,
+            child: ElevatedButton.icon(
+              onPressed: _openPdfReport,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF00E5FF).withOpacity(0.15),
+                foregroundColor: const Color(0xFF00E5FF),
+                side: const BorderSide(color: Color(0xFF00E5FF), width: 1.5),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                elevation: 0,
+              ),
+              icon: const Icon(Icons.picture_as_pdf_rounded, color: Color(0xFF00E5FF), size: 22),
+              label: const Text(
+                'DESCARGAR INFORME OFICIAL (PDF)',
+                style: TextStyle(color: Color(0xFF00E5FF), fontSize: 13, fontWeight: FontWeight.w900, letterSpacing: 1.1),
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          Material(
+            color: Colors.transparent,
+            child: InkWell(
+              onTap: _openPartsMarketplace,
+              borderRadius: BorderRadius.circular(12),
+              splashColor: const Color(0xFF00E5FF).withOpacity(0.2),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF1E293B),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: const Color(0xFF00E5FF).withOpacity(0.6), width: 1.2),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.storefront_rounded, color: Color(0xFF00E5FF), size: 22),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        _vehicleData!['repuestos_compatibles'] ?? 'Ver catálogo de repuestos compatibles',
+                        softWrap: true,
+                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: Color(0xFFE2E8F0)),
+                      ),
+                    ),
+                    const Icon(Icons.arrow_forward_ios_rounded, color: Color(0xFF00E5FF), size: 14),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
 
