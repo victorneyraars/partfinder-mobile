@@ -87,6 +87,12 @@ class MttDataProvider extends VehicleDataProvider {
           'mttRegion': _s(data['region']),
           'folio_flota': _s(data['folio_flota']),
           'fecha_vencimiento_permiso': _s(data['fecha_vencimiento_permiso']),
+          // Estructura dinámica de secciones (titulo/tipo/items) parseada
+          // por el backend: cualquier campo nuevo que MTT publique llega
+          // aquí sin cambios de código.
+          'secciones': (data['secciones'] is List)
+              ? List<dynamic>.from(data['secciones'] as List)
+              : const <dynamic>[],
           'rt_estado': '',
           'rt_vencimiento': '',
           'historial_rt': <dynamic>[],

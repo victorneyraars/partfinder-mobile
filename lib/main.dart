@@ -1774,13 +1774,9 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
             ),
           ),
           const SizedBox(height: 12),
-          if (isPublic) ...[
-            _specRow('TIPO DE SERVICIO', _vehicleData!['tipo_servicio']?.toString()),
-            _specRow('ESTADO DEL SERVICIO', _vehicleData!['estado_servicio']?.toString()),
-            _specRow('REGIÓN', _vehicleData!['region']?.toString()),
-            _specRow('FOLIO FLOTA', _vehicleData!['folio_flota']?.toString()),
-            _specRow('VENCIMIENTO PERMISO', _vehicleData!['fecha_vencimiento_permiso']?.toString()),
-          ] else ...[
+          if (isPublic)
+            ..._buildMttSections()
+          else ...[
             Text(
               'El vehículo no pertenece al Registro Nacional de Servicios de '
               'Transporte de Pasajeros y Escolar (RNSTP) del Ministerio de '
@@ -1807,6 +1803,209 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
               ],
             ),
           ],
+        ],
+      ),
+    );
+  }
+
+  /// Normaliza la estructura dinámica de secciones que entrega el backend
+  /// (`secciones: [{titulo, tipo: pares|lista, items: [...]}]`).
+  /// Si la entrada de caché local es antigua (solo campos planos), sintetiza
+  /// una sección de pares para mantener la UI uniforme.
+  List<dynamic> _mttSections() {
+    final raw = _vehicleData!['secciones'];
+    if (raw is List && raw.isNotEmpty) return raw;
+    final pairs = <Map<String, String>>[];
+    void add(String key, dynamic v) {
+      final s = v?.toString().trim() ?? '';
+      if (s.isNotEmpty) pairs.add({'etiqueta': key, 'valor': s});
+    }
+
+    add('Tipo de Servicio', _vehicleData!['tipo_servicio']);
+    add('Estado del Servicio', _vehicleData!['estado_servicio']);
+    add('Región', _vehicleData!['region']);
+    add('Folio Flota', _vehicleData!['folio_flota']);
+    add('Vencimiento Permiso', _vehicleData!['fecha_vencimiento_permiso']);
+    if (pairs.isEmpty) return const <dynamic>[];
+    return <dynamic>[
+      <String, dynamic>{'titulo': 'DATOS DEL SERVICIO', 'tipo': 'pares', 'items': pairs},
+    ];
+  }
+
+  /// Renderizado 100% dinámico de `secciones`: títulos en ámbar, pares
+  /// etiqueta/valor sin truncar (softWrap) y listas como tarjetas destacadas.
+  List<Widget> _buildMttSections() {
+    final widgets = <Widget>[];
+    final secciones = _mttSections();
+    if (secciones.isEmpty) {
+      widgets.add(_mttEmptyBadge('No registra datos'));
+      return widgets;
+    }
+    for (final sec in secciones) {
+      if (sec is! Map) continue;
+      final titulo = (sec['titulo']?.toString() ?? 'INFORMACIÓN').toUpperCase();
+      final tipo = (sec['tipo']?.toString() ?? 'pares').toLowerCase();
+      final rawItems = (sec['items'] is List) ? (sec['items'] as List) : const <dynamic>[];
+
+      widgets.add(const SizedBox(height: 6));
+      widgets.add(_mttSectionHeader(titulo));
+
+      if (rawItems.isEmpty) {
+        widgets.add(_mttEmptyBadge());
+        continue;
+      }
+      if (tipo == 'lista') {
+        for (final it in rawItems) {
+          final txt = it is Map
+              ? (it['valor'] ?? it['texto'] ?? '').toString().trim()
+              : it.toString().trim();
+          widgets.add(txt.isEmpty ? _mttEmptyBadge() : _mttListItem(txt, titulo));
+        }
+      } else {
+        for (final it in rawItems) {
+          final label = it is Map ? (it['etiqueta']?.toString().trim() ?? 'Dato') : 'Dato';
+          final value = it is Map ? (it['valor']?.toString().trim() ?? '') : it.toString().trim();
+          widgets.add(_mttPairRow(label, value));
+        }
+      }
+    }
+    return widgets;
+  }
+
+  Widget _mttSectionHeader(String title) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 4, bottom: 4),
+      child: Row(
+        children: [
+          const Icon(Icons.segment, color: Color(0xFFF59E0B), size: 15),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              title,
+              softWrap: true,
+              style: const TextStyle(
+                color: Color(0xFFF59E0B),
+                fontSize: 12,
+                fontWeight: FontWeight.w900,
+                letterSpacing: 1.0,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Fila de par etiqueta→valor con wrap total: sin ellipsis ni truncado.
+  Widget _mttPairRow(String label, String value) {
+    final noData = value.isEmpty || value.toLowerCase() == 'no registra';
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 5),
+      child: Column(
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                flex: 4,
+                child: Text(
+                  label,
+                  softWrap: true,
+                  style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 11, fontWeight: FontWeight.w700),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                flex: 6,
+                child: SelectableText(
+                  noData ? 'No registra' : value,
+                  textAlign: TextAlign.end,
+                  style: TextStyle(
+                    color: noData ? const Color(0xFF64748B) : Colors.white,
+                    fontSize: 12,
+                    fontWeight: noData ? FontWeight.w500 : FontWeight.w700,
+                    fontStyle: noData ? FontStyle.italic : FontStyle.normal,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Divider(color: const Color(0xFF1E293B).withOpacity(0.5), height: 1),
+        ],
+      ),
+    );
+  }
+
+  /// Tarjeta destacada por elemento de lista (conductores, notas, etc.),
+  /// con icono según el tipo de sección y texto completo sin truncar.
+  Widget _mttListItem(String text, String sectionTitle) {
+    final t = sectionTitle.toUpperCase();
+    IconData icon = Icons.badge;
+    if (t.contains('CONDUCT') || t.contains('ACOMPA')) {
+      icon = Icons.person;
+    } else if (t.contains('NOTA')) {
+      icon = Icons.sticky_note_2_rounded;
+    } else if (t.contains('RESULTADO')) {
+      icon = Icons.search_rounded;
+    }
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1E293B),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: const Color(0xFFF59E0B).withOpacity(0.35), width: 0.9),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, color: const Color(0xFFF59E0B), size: 18),
+          const SizedBox(width: 10),
+          Expanded(
+            child: SelectableText(
+              text,
+              style: const TextStyle(
+                color: Color(0xFFE2E8F0),
+                fontSize: 12.5,
+                height: 1.45,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Badge neutro para secciones/listas sin datos.
+  Widget _mttEmptyBadge([String text = 'No registra datos']) {
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: const Color(0xFF94A3B8).withOpacity(0.08),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: const Color(0xFF64748B).withOpacity(0.4), width: 0.8),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.remove_circle_outline, color: Color(0xFF64748B), size: 14),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              text,
+              softWrap: true,
+              style: const TextStyle(
+                color: Color(0xFF94A3B8),
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                fontStyle: FontStyle.italic,
+              ),
+            ),
+          ),
         ],
       ),
     );
