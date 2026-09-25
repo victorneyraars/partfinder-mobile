@@ -3302,12 +3302,14 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
 class ChileanPlateFormatter extends TextInputFormatter {
   @override
   TextEditingValue formatEditUpdate(TextEditingValue oldValue, TextEditingValue newValue) {
-    String clean = newValue.text.toUpperCase().replaceAll(RegExp(r'[^A-Z0-9]'), '');
+    // La Ñ se deja pasar para que el Motor Normativo la detecte y muestre
+    // el banner educativo (no se bloquea en silencio).
+    String clean = newValue.text.toUpperCase().replaceAll(RegExp(r'[^A-Z0-9Ñ]'), '');
     if (clean.length > 6) clean = clean.substring(0, 6);
     StringBuffer valid = StringBuffer();
     for (int i = 0; i < clean.length; i++) {
       String char = clean[i];
-      bool isLetter = RegExp(r'[A-Z]').hasMatch(char);
+      bool isLetter = RegExp(r'[A-ZÑ]').hasMatch(char);
       bool isDigit = RegExp(r'[0-9]').hasMatch(char);
       if (i == 0 || i == 1) {
         if (isLetter) valid.write(char); else break;
