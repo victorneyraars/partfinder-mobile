@@ -15,6 +15,7 @@ import 'providers/vehicle_data_provider.dart';
 import 'providers/prt_data_provider.dart';
 import 'providers/boostr_data_provider.dart';
 import 'providers/mtt_data_provider.dart';
+import 'providers/sii_data_provider.dart';
 
 
 String _getFreshRandomChileanPlate() {
@@ -80,6 +81,7 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
   
   bool _isLoading = false;
   bool _isRefreshingMtt = false;
+  bool _isRefreshingSii = false;
   Map<String, dynamic>? _siiData;
   bool _isLoadingSii = false;
 
@@ -112,6 +114,7 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
       'prt': PrtDataProvider(openModal: _openPrtModalAndAwait),
       'boostr': BoostrDataProvider(),
       'mtt': MttDataProvider(),
+      'sii': SiiDataProvider(openModal: _openSiiModalAndAwait),
     };
     final initPlate = _getFreshRandomChileanPlate();
     _plateController.text = initPlate;
@@ -239,14 +242,16 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
         final v = Map<String, dynamic>.from(result.data);
         v['data_source'] = result.source == 'boostr'
             ? 'BOOSTR_API'
-            : (result.source == 'mtt' ? 'MTT_REGISTRO' : 'PRT_SCRAPING');
+            : (result.source == 'mtt'
+                ? 'MTT_REGISTRO'
+                : (result.source == 'sii' ? 'SII_TASACION' : 'PRT_SCRAPING'));
         v['patente'] = v['patente'] ?? rawPlate;
 
         // Persistir en la caché local del proveedor (payload completo,
-        // campos vacíos incluidos). MTT ya persistió dentro de su fetch()
-        // con TTL dinámico (30d transporte público / 60d particular), por
-        // lo que no se reescribe aquí.
-        if (result.source != 'mtt') {
+        // campos vacíos incluidos). MTT y SII ya persistieron dentro de su
+        // fetch() (TTL dinámico 30/60d y 180d respectivamente), por lo que
+        // no se reescriben aquí.
+        if (result.source != 'mtt' && result.source != 'sii') {
           await provider.cache.write(rawPlate, found: true, data: v, source: result.source);
         }
 
@@ -273,6 +278,20 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
           }
         } else if (result.source == 'boostr') {
           _showSnack('Vehículo $rawPlate recuperado vía Boostr (RT no disponible)');
+        } else if (result.source == 'sii') {
+          // Sincronizar la tasación con la base centralizada del backend.
+          try {
+            final res = await http.post(
+              Uri.parse('https://api.studiodigital360.com/api/vehicle/cache'),
+              headers: {'Content-Type': 'application/json'},
+              body: jsonEncode({'plate': rawPlate, 'data': v}),
+            );
+            if (res.statusCode == 200) {
+              _showSnack('Tasación SII de $rawPlate sincronizada en la base de datos');
+            }
+          } catch (e) {
+            debugPrint('Error persistiendo tasación SII en backend: $e');
+          }
         } else if (!forceNetwork) {
           _showSnack(v['isPublicTransport'] == true
               ? 'Vehículo $rawPlate inscrito como transporte público/escolar (MTT)'
@@ -329,6 +348,28 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
               );
             }
           },
+        ),
+      ),
+    );
+    if (result is Map<String, dynamic>) return result;
+    if (result is Map) return Map<String, dynamic>.from(result);
+    return null;
+  }
+
+  /// Abre el modal SII (human-in-the-loop) y devuelve el payload crudo del
+  /// interceptor (filas de tasación capturadas del portal oficial).
+  Future<Map<String, dynamic>?> _openSiiModalAndAwait(
+      BuildContext modalContext, String plate, Map<String, String> hints) async {
+    try { _focusNode.unfocus(); } catch (_) {}
+    try {
+      SystemChannels.textInput.invokeMethod<void>('TextInput.hide');
+    } catch (_) {}
+    final result = await Navigator.push<dynamic>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => SiiVerificationScreen(
+          targetPlate: plate,
+          hints: hints,
         ),
       ),
     );
@@ -707,8 +748,10 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
                 _buildScanButton(),
                 const SizedBox(height: 28),
                 if (_vehicleData != null)
-                  _isMttResult ? _buildMttCard() : _buildVehicleSpecsCard(),
-            _buildSiiCard(),
+                  _isMttResult
+                      ? _buildMttCard()
+                      : (_isSiiResult ? _buildSiiCard() : _buildVehicleSpecsCard()),
+            _buildSiiEstimateCard(),
               ],
             ),
           ),
@@ -869,6 +912,36 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
               ),
             ),
           ),
+          Expanded(
+            child: GestureDetector(
+              onTap: () => setState(() => _selectedEngine = 'sii'),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                decoration: BoxDecoration(
+                  color: _selectedEngine == 'sii' ? const Color(0xFF1E293B) : Colors.transparent,
+                  borderRadius: BorderRadius.circular(8),
+                  border: _selectedEngine == 'sii' ? Border.all(color: const Color(0xFF34D399), width: 1.2) : null,
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: const [
+                    Icon(Icons.account_balance_rounded, size: 16, color: Color(0xFF34D399)),
+                    SizedBox(width: 6),
+                    Flexible(
+                      child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Text(
+                          'SII Tasación',
+                          style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
         ],
       ),
     );
@@ -877,6 +950,7 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
     Widget _buildBoostrTelemetryHud() {
     final bool isBoostr = _selectedEngine == 'boostr';
     final bool isMtt = _selectedEngine == 'mtt';
+    final bool isSii = _selectedEngine == 'sii';
     final bool isOnline = _boostrStatus?['status'] == 'ONLINE';
     final String plan = _boostrStatus?['plan']?.toString().toUpperCase() ?? 'PRO';
     final String dailyLimit = _boostrStatus?['daily_limit']?.toString() ?? '100';
@@ -885,20 +959,26 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
 
     final Color accentColor = isBoostr
         ? const Color(0xFF38BDF8)
-        : (isMtt ? const Color(0xFFF59E0B) : const Color(0xFF10B981));
+        : (isMtt
+            ? const Color(0xFFF59E0B)
+            : (isSii ? const Color(0xFF34D399) : const Color(0xFF10B981)));
     final Color dotColor = isBoostr 
         ? (isOnline ? const Color(0xFF10B981) : const Color(0xFFF59E0B))
         : const Color(0xFF10B981);
 
     final String titleText = isBoostr 
         ? 'BOOSTR API $plan: ${isOnline ? "ONLINE" : "CONECTANDO"}'
-        : (isMtt ? 'MTT RNSTP: CONSULTA WEB OFICIAL' : 'MOTOR PRT CHILE: ACTIVO');
+        : (isMtt
+            ? 'MTT RNSTP: CONSULTA WEB OFICIAL'
+            : (isSii ? 'SII TASACIÓN: AVALÚO FISCAL OFICIAL' : 'MOTOR PRT CHILE: ACTIVO'));
 
     final String metricsText = isBoostr
         ? 'Cuota: $remaining/$dailyLimit   •   Caché: $cached'
         : (isMtt
             ? 'Transporte Público / Escolar / Particular'
-            : 'Modo: Directo (P2P)   •   Caché: $cached');
+            : (isSii
+                ? 'Permiso de Circulación • Código SII • Caché 180 días'
+                : 'Modo: Directo (P2P)   •   Caché: $cached'));
 
     return Container(
       constraints: const BoxConstraints(maxWidth: 360),
@@ -1249,7 +1329,7 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
   }
 
   
-  Widget _buildSiiCard() {
+  Widget _buildSiiEstimateCard() {
     final sii = _vehicleData?["sii"] ??
         _siiData?["summary"] ??
         (_siiData?["data"] is Map ? _siiData?["data"]?["summary"] : null);
@@ -1866,6 +1946,307 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
     }
   }
 
+  bool get _isSiiResult {
+    final d = _vehicleData;
+    if (d == null) return false;
+    final src = (d['data_source']?.toString() ?? '').toUpperCase();
+    final fuente = (d['fuente']?.toString() ?? '').toUpperCase();
+    return src.contains('SII') || fuente == 'SII';
+  }
+
+  /// Formatea un monto CLP crudo (con/sin $ y puntos) a '$X.XXX.XXX'.
+  String _formatClp(dynamic raw) {
+    final digits = (raw ?? '').toString().replaceAll(RegExp(r'[^0-9]'), '');
+    if (digits.isEmpty) return '—';
+    final n = int.tryParse(digits);
+    if (n == null || n <= 0) return '—';
+    final s = n.toString();
+    final buf = StringBuffer();
+    for (int i = 0; i < s.length; i++) {
+      final rem = s.length - i;
+      buf.write(s[i]);
+      if (rem > 1 && (rem - 1) % 3 == 0) buf.write('.');
+    }
+    return '\$$buf';
+  }
+
+  /// Botón "Refrescar Caché" de la tarjeta SII: invalida la caché local de
+  /// la patente mostrada y fuerza una consulta fresca (los datos limpios
+  /// sobreescriben la entrada en disco y el setState repinta al instante).
+  Future<void> _refreshSiiData(String plate) async {
+    if (_isRefreshingSii) return;
+    setState(() => _isRefreshingSii = true);
+    try {
+      final provider = _providers['sii'];
+      if (provider != null) {
+        await provider.cache.invalidate(plate);
+      }
+      await _searchPlate(forceNetwork: true, plateOverride: plate);
+      if (mounted) {
+        _showSnack('Datos de SII actualizados exitosamente');
+      }
+    } finally {
+      if (mounted) setState(() => _isRefreshingSii = false);
+    }
+  }
+
+  /// Tarjeta de resultado de la caja SII (Tasación Fiscal Oficial).
+  /// Cabecera esmeralda/verde fiscal + tarjetas destacadas de montos y
+  /// ficha técnica tributaria desde datos_homologacion.
+  Widget _buildSiiCard() {
+    const Color accent = Color(0xFF34D399);
+    final String patente =
+        _sanitizeMttText(_vehicleData!['patente']?.toString() ?? '').toUpperCase();
+    final String tasacion = _sanitizeMttText(_vehicleData!['tasacion_fiscal']?.toString() ?? '');
+    final String permiso = _sanitizeMttText(_vehicleData!['permiso_circulacion']?.toString() ?? '');
+    final String codigo = _sanitizeMttText(_vehicleData!['codigo_sii']?.toString() ?? '');
+    final String anioTasacion = _sanitizeMttText(_vehicleData!['anio_tasacion']?.toString() ?? '');
+    final Map<String, dynamic> homo = (_vehicleData!['datos_homologacion'] is Map)
+        ? Map<String, dynamic>.from(_vehicleData!['datos_homologacion'] as Map)
+        : <String, dynamic>{
+            'marca': _vehicleData!['marca'] ?? '',
+            'modelo': _vehicleData!['modelo'] ?? '',
+            'version': _vehicleData!['version'] ?? '',
+            'anio': _vehicleData!['anio'] ?? '',
+            'cilindrada': '',
+            'combustible': '',
+            'transmision': '',
+          };
+
+    return Container(
+      width: double.infinity,
+      constraints: const BoxConstraints(maxWidth: 380),
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: const Color(0xFF0F172A).withOpacity(0.85),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: accent.withOpacity(0.45), width: 1.5),
+        boxShadow: [
+          BoxShadow(
+            color: accent.withOpacity(0.10),
+            blurRadius: 20,
+            spreadRadius: 4,
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Expanded(
+                child: Row(
+                  children: [
+                    const Icon(Icons.account_balance_rounded, color: accent, size: 22),
+                    const SizedBox(width: 8),
+                    Flexible(
+                      child: Text(
+                        patente,
+                        style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w900, color: accent, letterSpacing: 1.2),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: accent.withOpacity(0.16),
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(color: accent, width: 0.9),
+                    ),
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.verified_rounded, color: accent, size: 12),
+                        SizedBox(width: 4),
+                        Text(
+                          'SII / TASACIÓN OFICIAL',
+                          style: TextStyle(color: accent, fontSize: 9, fontWeight: FontWeight.w900, letterSpacing: 0.4),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 2),
+                  Tooltip(
+                    message: 'Actualizar datos desde SII',
+                    child: _isRefreshingSii
+                        ? const Padding(
+                            padding: EdgeInsets.all(12),
+                            child: SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: accent,
+                              ),
+                            ),
+                          )
+                        : IconButton(
+                            onPressed: () => _refreshSiiData(patente),
+                            icon: const Icon(Icons.refresh, size: 20, color: accent),
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+                            visualDensity: VisualDensity.compact,
+                          ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          // ===== Tarjetas destacadas: montos fiscales =====
+          Row(
+            children: [
+              Expanded(
+                child: Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: accent.withOpacity(0.10),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: accent.withOpacity(0.5), width: 1),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'AVALÚO FISCAL OFICIAL',
+                        style: TextStyle(color: Color(0xFF94A3B8), fontSize: 9, fontWeight: FontWeight.w800, letterSpacing: 0.6),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        _formatClp(tasacion),
+                        style: const TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w900),
+                      ),
+                      if (anioTasacion.isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          'Año tributario: $anioTasacion',
+                          style: const TextStyle(color: Color(0xFF6EE7B7), fontSize: 10, fontWeight: FontWeight.w600),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF1E293B),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: const Color(0xFF334155), width: 1),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'VALOR PERMISO DE CIRCULACIÓN',
+                        style: TextStyle(color: Color(0xFF94A3B8), fontSize: 9, fontWeight: FontWeight.w800, letterSpacing: 0.6),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        _formatClp(permiso),
+                        style: const TextStyle(color: Color(0xFF34D399), fontSize: 17, fontWeight: FontWeight.w900),
+                      ),
+                      const SizedBox(height: 4),
+                      const Text(
+                        'Base imponible del permiso anual',
+                        style: TextStyle(color: Color(0xFF64748B), fontSize: 10, fontWeight: FontWeight.w600),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          // ===== Código de homologación =====
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            decoration: BoxDecoration(
+              color: const Color(0xFF052E22).withOpacity(0.5),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: accent.withOpacity(0.45), width: 1),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.qr_code_2_rounded, color: accent, size: 22),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'CÓDIGO HOMOLOGACIÓN SII',
+                        style: TextStyle(color: Color(0xFF94A3B8), fontSize: 9, fontWeight: FontWeight.w800, letterSpacing: 0.6),
+                      ),
+                      const SizedBox(height: 4),
+                      SelectableText(
+                        codigo.isEmpty ? '—' : codigo,
+                        style: TextStyle(
+                          color: accent,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w900,
+                          fontFamily: 'monospace',
+                          letterSpacing: 1.4,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 14),
+          // ===== Ficha técnica tributaria =====
+          Row(
+            children: [
+              const Icon(Icons.segment, color: accent, size: 15),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  'FICHA TÉCNICA TRIBUTARIA',
+                  softWrap: true,
+                  style: const TextStyle(
+                    color: accent,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 1.0,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          if (_sanitizeMttText(homo['marca']?.toString() ?? '').isNotEmpty)
+            _mttPairRow('MARCA', _sanitizeMttText(homo['marca']?.toString() ?? '')),
+          if (_sanitizeMttText(homo['modelo']?.toString() ?? '').isNotEmpty)
+            _mttPairRow('MODELO', _sanitizeMttText(homo['modelo']?.toString() ?? '')),
+          if (_sanitizeMttText(homo['version']?.toString() ?? '').isNotEmpty)
+            _mttPairRow('VERSIÓN', _sanitizeMttText(homo['version']?.toString() ?? '')),
+          if (_sanitizeMttText(homo['anio']?.toString() ?? '').isNotEmpty)
+            _mttPairRow('AÑO', _sanitizeMttText(homo['anio']?.toString() ?? '')),
+          if (_sanitizeMttText(homo['cilindrada']?.toString() ?? '').isNotEmpty)
+            _mttPairRow('CILINDRADA', _sanitizeMttText(homo['cilindrada']?.toString() ?? '')),
+          if (_sanitizeMttText(homo['combustible']?.toString() ?? '').isNotEmpty)
+            _mttPairRow('TIPO DE COMBUSTIBLE', _sanitizeMttText(homo['combustible']?.toString() ?? '')),
+          if (_sanitizeMttText(homo['transmision']?.toString() ?? '').isNotEmpty)
+            _mttPairRow('TRANSMISIÓN', _sanitizeMttText(homo['transmision']?.toString() ?? '')),
+          if (tasacion.isEmpty && permiso.isEmpty && codigo.isEmpty)
+            _mttEmptyBadge('Sin tasación registrada: pulsa el botón de refresco'),
+        ],
+      ),
+    );
+  }
+
   /// Sanitización profunda anti-mojibake (misma política que el backend):
   /// reemplazos explícitos + barrido genérico de pares 'Ã'+byte, para que
   /// TODO texto se pinte con acentos y ñ perfectos aunque provenga de una
@@ -2432,6 +2813,326 @@ class PrtService {
     } catch (e) {
       debugPrint('[PRT-CACHE] error persistiendo: $e');
     }
+  }
+}
+
+/// Modal human-in-the-loop de la caja SII (Tasación Fiscal Oficial).
+///
+/// CONTRATO:
+///  - Entrada: [targetPlate] (patente normalizada) + [hints] (marca/modelo/
+///    año del vehículo si el backend ya lo conoce, para elegir la mejor fila).
+///  - Carga el portal oficial https://www4.sii.cl/vehiculospubui/#/searchtasacion
+///    en WebView; el humano resuelve el captcha numérico y ejecuta la consulta
+///    (por código SII del permiso de circulación o marca/modelo/año).
+///  - El interceptor dinámico (sii_injection.js, servido en caliente por
+///    /api/debug/sii-script.js) captura las filas de tasación vía hook de
+///    XHR/fetch + MutationObserver y las envía por el canal 'SiiBridge'.
+///  - Salida: Navigator.pop(context, payload) con las filas capturadas y la
+///    mejor fila promovida a nivel superior.
+class SiiVerificationScreen extends StatefulWidget {
+  final String targetPlate;
+  final Map<String, String> hints;
+
+  const SiiVerificationScreen({super.key, required this.targetPlate, required this.hints});
+
+  @override
+  State<SiiVerificationScreen> createState() => _SiiVerificationScreenState();
+}
+
+class _SiiVerificationScreenState extends State<SiiVerificationScreen> {
+  static const String _siiUrl = 'https://www4.sii.cl/vehiculospubui/#/searchtasacion';
+
+  late final WebViewController _controller;
+  bool _isReady = false;
+  bool _showRetryButton = false;
+  Timer? _readyFallbackTimer;
+  Timer? _retryTimer;
+  String _injectedScript = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = WebViewController()
+      ..setJavaScriptMode(JavaScriptMode.unrestricted)
+      ..setBackgroundColor(const Color(0xFF0B132B))
+      ..setUserAgent('Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36')
+      ..enableZoom(false)
+      ..setNavigationDelegate(NavigationDelegate(
+        onPageFinished: (_) => _onPageLoaded(),
+        onWebResourceError: (e) => debugPrint('[SII] web error: ${e.description}'),
+      ))
+      ..addJavaScriptChannel(
+        'SiiBridge',
+        onMessageReceived: (JavaScriptMessage message) {
+          _onBridgeMessage(message.message);
+        },
+      );
+    _retryTimer = Timer(const Duration(seconds: 15), () {
+      if (mounted && !_isReady) setState(() => _showRetryButton = true);
+    });
+    _init();
+  }
+
+  Future<void> _init() async {
+    // 1) Descargar el interceptor dinámico (hot-served) y reemplazar la patente.
+    try {
+      final resp = await http
+          .get(Uri.parse('https://api.studiodigital360.com/api/debug/sii-script.js'))
+          .timeout(const Duration(seconds: 4));
+      if (resp.statusCode == 200) {
+        _injectedScript = utf8
+            .decode(resp.bodyBytes)
+            .replaceAll('{{PLATE}}', widget.targetPlate.trim().toUpperCase());
+      }
+    } catch (e) {
+      debugPrint('[SII] error descargando interceptor: $e');
+    }
+    // 2) Instalar el hook ANTES del documento (captura $http desde el inicio).
+    if (_injectedScript.isNotEmpty) {
+      try {
+        await _controller.addJavaScriptToRunOnDocumentStart(_injectedScript);
+      } catch (e) {
+        debugPrint('[SII] documentStart injection error: $e');
+      }
+    }
+    // 3) Cargar el portal oficial.
+    await _controller.loadRequest(Uri.parse(_siiUrl));
+    // 4) Revelar el WebView como respaldo a los 8s aunque READY no llegue.
+    _readyFallbackTimer = Timer(const Duration(seconds: 8), () {
+      if (mounted && !_isReady) setState(() => _isReady = true);
+    });
+  }
+
+  Future<void> _onPageLoaded() async {
+    if (_injectedScript.isNotEmpty) {
+      try {
+        await _controller.runJavaScript(_injectedScript);
+      } catch (e) {
+        debugPrint('[SII] re-injection error: $e');
+      }
+    }
+  }
+
+  void _onBridgeMessage(String msg) {
+    if (msg == 'READY') {
+      _readyFallbackTimer?.cancel();
+      _retryTimer?.cancel();
+      if (mounted && !_isReady) setState(() => _isReady = true);
+      return;
+    }
+    if (msg.startsWith('LOG:')) {
+      debugPrint('[SII-LOG] ${msg.substring(4)}');
+      _sendRemoteLog('[SII] ${msg.substring(4)}');
+      return;
+    }
+    if (msg.startsWith('ERROR:')) {
+      debugPrint('[SII-ERROR] ${msg.substring(6)}');
+      return;
+    }
+    if (msg.startsWith('DATA:')) {
+      try {
+        final map = jsonDecode(msg.substring(5)) as Map<String, dynamic>;
+        final filasRaw = (map['filas'] is List) ? (map['filas'] as List) : const <dynamic>[];
+        final filas = filasRaw.whereType<Map>().map(Map<String, dynamic>.from).toList();
+        if (filas.isEmpty) return;
+        // Elegir la fila que mejor calce con los hints del vehículo.
+        final best = _pickBestRow(filas);
+        // Promover los campos de la mejor fila a nivel superior (el provider
+        // los unifica directamente).
+        final payload = <String, dynamic>{
+          'source': 'SII',
+          'plate': widget.targetPlate,
+          'filas': filas,
+          'codigo': best['codigo'] ?? '',
+          'marca': best['marca'] ?? '',
+          'modelo': best['modelo'] ?? '',
+          'version': best['version'] ?? '',
+          'anio': best['anio'] ?? '',
+          'tipo': best['tipo'] ?? '',
+          'monto_tasacion': best['monto_tasacion'] ?? '',
+          'monto_permiso': best['monto_permiso'] ?? '',
+        };
+        if (mounted) Navigator.of(context).pop(payload);
+      } catch (e) {
+        debugPrint('[SII] error parseando payload: $e');
+      }
+    }
+  }
+
+  Map<String, dynamic> _pickBestRow(List<Map<String, dynamic>> filas) {
+    Map<String, dynamic> best = filas.first;
+    final hMarca = (widget.hints['marca'] ?? '').toUpperCase();
+    final hModelo = (widget.hints['modelo'] ?? '').toUpperCase();
+    final hAnio = widget.hints['anio'] ?? '';
+    int score(Map<String, dynamic> r) {
+      int s = 0;
+      final m = (r['marca'] ?? '').toString().toUpperCase();
+      final mo = (r['modelo'] ?? '').toString().toUpperCase();
+      final a = (r['anio'] ?? '').toString();
+      if (hMarca.isNotEmpty && m.isNotEmpty && (m.contains(hMarca) || hMarca.contains(m))) s += 2;
+      if (hModelo.isNotEmpty && mo.isNotEmpty && (mo.contains(hModelo) || hModelo.contains(mo))) s += 2;
+      if (hAnio.isNotEmpty && a == hAnio) s += 1;
+      return s;
+    }
+
+    var bestScore = -1;
+    for (final f in filas) {
+      final sc = score(f);
+      if (sc > bestScore) {
+        bestScore = sc;
+        best = f;
+      }
+    }
+    return best;
+  }
+
+  Future<void> _sendRemoteLog(String message) async {
+    try {
+      await http.post(
+        Uri.parse('https://api.studiodigital360.com/api/debug/log'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'message': message}),
+      ).timeout(const Duration(seconds: 4));
+    } catch (_) {}
+  }
+
+  PlatformWebViewWidgetCreationParams _creationParams() {
+    PlatformWebViewWidgetCreationParams params = PlatformWebViewWidgetCreationParams(
+      controller: _controller.platform,
+      layoutDirection: TextDirection.ltr,
+    );
+    if (WebViewPlatform.instance is AndroidWebViewPlatform) {
+      params = AndroidWebViewWidgetCreationParams.fromPlatformWebViewWidgetCreationParams(
+        params,
+        displayWithHybridComposition: false,
+      );
+    }
+    return params;
+  }
+
+  @override
+  void dispose() {
+    _readyFallbackTimer?.cancel();
+    _retryTimer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final hMarca = (widget.hints['marca'] ?? '').trim();
+    final hModelo = (widget.hints['modelo'] ?? '').trim();
+    final hAnio = (widget.hints['anio'] ?? '').trim();
+    final hintVehiculo = [hMarca, hModelo, hAnio].where((s) => s.isNotEmpty).join(' ');
+
+    return Scaffold(
+      backgroundColor: const Color(0xFF0F172A),
+      resizeToAvoidBottomInset: false,
+      appBar: AppBar(
+        backgroundColor: const Color(0xFF1E293B),
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Tasación SII — Portal Oficial',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white),
+            ),
+            Text(
+              'Patente: ${widget.targetPlate}',
+              style: const TextStyle(fontSize: 12, color: Color(0xFF34D399)),
+            ),
+          ],
+        ),
+        leading: IconButton(
+          icon: const Icon(Icons.close, color: Colors.white),
+          onPressed: () => Navigator.of(context).pop(),
+        ),
+      ),
+      body: Column(
+        children: [
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            color: const Color(0xFF1E293B),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(Icons.info_outline_rounded, color: Color(0xFF34D399), size: 16),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'El SII no consulta por patente: completa la búsqueda oficial '
+                        '(código SII del permiso de circulación, o marca/modelo/año). '
+                        'Al aparecer los resultados, la tasación se captura automáticamente.',
+                        style: TextStyle(color: Color(0xFFCBD5E1), fontSize: 12, height: 1.4),
+                      ),
+                    ),
+                  ],
+                ),
+                if (hintVehiculo.isNotEmpty) ...[
+                  const SizedBox(height: 6),
+                  Text(
+                    'Vehículo detectado: $hintVehiculo',
+                    style: const TextStyle(
+                      color: Color(0xFF34D399),
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          Expanded(
+            child: Stack(
+              children: [
+                const ColoredBox(color: Color(0xFF0B132B)),
+                WebViewWidget.fromPlatformCreationParams(params: _creationParams()),
+                if (!_isReady)
+                  const Positioned.fill(
+                    child: ColoredBox(
+                      color: Color(0xFF0B132B),
+                      child: Center(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            CircularProgressIndicator(color: Color(0xFF34D399)),
+                            SizedBox(height: 14),
+                            Text(
+                              'Preparando portal oficial del SII…',
+                              style: TextStyle(color: Colors.white70, fontSize: 13),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                if (_showRetryButton && !_isReady)
+                  Positioned(
+                    bottom: 20,
+                    left: 20,
+                    right: 20,
+                    child: ElevatedButton.icon(
+                      onPressed: () {
+                        setState(() => _showRetryButton = false);
+                        _controller.reload();
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF1E293B),
+                        foregroundColor: const Color(0xFF34D399),
+                      ),
+                      icon: const Icon(Icons.refresh),
+                      label: const Text('Reintentar carga'),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 
