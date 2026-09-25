@@ -2887,17 +2887,12 @@ class _SiiVerificationScreenState extends State<SiiVerificationScreen> {
     } catch (e) {
       debugPrint('[SII] error descargando interceptor: $e');
     }
-    // 2) Instalar el hook ANTES del documento (captura $http desde el inicio).
-    if (_injectedScript.isNotEmpty) {
-      try {
-        await _controller.addJavaScriptToRunOnDocumentStart(_injectedScript);
-      } catch (e) {
-        debugPrint('[SII] documentStart injection error: $e');
-      }
-    }
-    // 3) Cargar el portal oficial.
+    // 2) Cargar el portal oficial. El hook XHR/fetch se inyecta en
+    //    onPageFinished: la consulta de tasación (getAppraisalSearch) solo
+    //    se dispara cuando el humano resuelve el captcha y pulsa Buscar,
+    //    por lo que la inyección post-carga llega siempre a tiempo.
     await _controller.loadRequest(Uri.parse(_siiUrl));
-    // 4) Revelar el WebView como respaldo a los 8s aunque READY no llegue.
+    // 3) Revelar el WebView como respaldo a los 8s aunque READY no llegue.
     _readyFallbackTimer = Timer(const Duration(seconds: 8), () {
       if (mounted && !_isReady) setState(() => _isReady = true);
     });
