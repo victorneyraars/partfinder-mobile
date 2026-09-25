@@ -1,37 +1,27 @@
 import 'dart:convert';
 
-import 'package:flutter/widgets.dart';
 import 'package:http/http.dart' as http;
 
 import '../cache/provider_cache.dart';
 import 'vehicle_data_provider.dart';
 
-/// Caja SII (Tasación Fiscal Oficial — human-in-the-loop).
+/// Caja SII (Tasación Fiscal Oficial — motor local por Decreto Exento).
+///
+/// SIN modal ni scraping: el backend resuelve la tasación desde la tabla
+/// `sii_tasaciones` (archivos oficiales liv2026.xlsx / pes2026.xlsx del
+/// SII, normalizados sin tildes/uppercase).
 ///
 /// Flujo:
-///  1. Caché local aislada `sii_cache_<PLATE>.json`: hits positivos con TTL
-///     de 180 días (el avalúo fiscal y el permiso se fijan por decreto anual
-///     y no varían dentro del año calendario); negativos con TTL de 7 días.
-///  2. GET /api/patente/{PLATE}?provider=sii → si el backend ya tiene la
-///     tasación en su base histórica (tasacion_fiscal presente), retorna
-///     hit directo; además entrega `hints` (marca/modelo/año) del vehículo
-///     para guiar el modal.
-///  3. Si no hay dato (requiere_verificacion / 404), abre el modal WebView
-///     oficial del SII (vehiculospubui) vía [openModal]; el humano resuelve
-///     el captcha numérico del portal y el interceptor captura las filas de
-///     tasación (código SII, montos de tasación y permiso).
-///  4. Persiste en disco (ttlOverride 180d) y la capa superior sincroniza
-///     con el backend (POST /api/vehicle/cache) para la base centralizada.
+///  1. GET /api/patente/{PLATE}?provider=sii → el backend identifica
+///     marca/modelo/año (query → ficha base interna → Boostr) y consulta
+///     las tablas oficiales:
+///       - 1 fila  → exact_match: true  (montos + código exactos).
+///       - N filas → exact_match: false (rangos + lista de versiones).
+///       - 0 filas → 404 "Vehículo no tipificado en tablas oficiales SII".
+///  2. Caché local aislada `sii_cache_<PLATE>.json` con TTL de 180 días
+///     (el avalúo fiscal se fija por decreto anual); negativos 7 días.
+///     `invalidate()` soporta el refresco forzado desde la UI.
 class SiiDataProvider extends VehicleDataProvider {
-  SiiDataProvider({
-    Future<Map<String, dynamic>?> Function(
-            BuildContext context, String plate, Map<String, String> hints)?
-        openModal,
-  }) : _openModal = openModal;
-
-  final Future<Map<String, dynamic>?> Function(
-      BuildContext context, String plate, Map<String, String> hints)? _openModal;
-
   static const String _base = 'https://api.studiodigital360.com';
 
   @override
@@ -47,7 +37,7 @@ class SiiDataProvider extends VehicleDataProvider {
   static String _s(dynamic v) => (v ?? '').toString().trim();
 
   bool _hasTasacion(Map<String, dynamic> d) {
-    final t = _s(d['tasacion_fiscal'] ?? d['monto_tasacion'] ?? d['tasacion']);
+    final t = _s(d['tasacion_fiscal'] ?? d['monto_tasacion']);
     final digits = t.replaceAll(RegExp(r'[^0-9]'), '');
     return digits.isNotEmpty && int.tryParse(digits) != null;
   }
@@ -56,33 +46,22 @@ class SiiDataProvider extends VehicleDataProvider {
   Future<VehicleResult> fetch(String plate, {BuildContext? context}) async {
     final plateClean = plate.toUpperCase().trim();
 
-    // 1) Base histórica del backend + hints del vehículo.
-    final hints = <String, String>{};
+    http.Response resp;
     try {
-      final resp = await http
+      resp = await http
           .get(Uri.parse('$_base/api/patente/$plateClean?provider=sii'))
-          .timeout(const Duration(seconds: 12));
-      if (resp.statusCode == 200) {
+          .timeout(const Duration(seconds: 20));
+    } catch (e) {
+      throw ProviderException('SII: error de red ($e)');
+    }
+
+    switch (resp.statusCode) {
+      case 200:
         final raw = jsonDecode(resp.body) as Map<String, dynamic>;
         final data = (raw['data'] is Map)
             ? Map<String, dynamic>.from(raw['data'] as Map)
             : Map<String, dynamic>.from(raw);
-        hints['marca'] = _s(data['marca'] ?? data['make']);
-        hints['modelo'] = _s(data['modelo'] ?? data['model']);
-        hints['anio'] = _s(data['anio'] ?? data['year']);
-        if (_hasTasacion(data)) {
-          return VehicleResult(found: true, data: data, source: 'sii', status: 'hit');
-        }
-      }
-    } catch (_) {
-      // Red caída o backend lento: pasar al flujo human-in-the-loop.
-    }
-
-    // 2) Modal WebView oficial SII (captcha + interceptor de resultados).
-    if (context != null && _openModal != null) {
-      final raw = await _openModal!(context, plateClean, hints);
-      if (raw != null && (_hasTasacion(raw) || _hasFilaConTasacion(raw))) {
-        final unified = _unify(plateClean, raw);
+        final unified = _unify(plateClean, data);
         await cache.write(plateClean,
             found: true,
             data: unified,
@@ -90,67 +69,60 @@ class SiiDataProvider extends VehicleDataProvider {
             status: 'hit',
             ttlOverride: const Duration(days: 180));
         return VehicleResult(found: true, data: unified, source: 'sii', status: 'hit');
-      }
+      case 404:
+        return const VehicleResult(
+            found: false, data: <String, dynamic>{}, source: 'sii', status: 'not_found');
+      default:
+        throw ProviderException('SII: error del servicio (HTTP ${resp.statusCode})',
+            statusCode: resp.statusCode);
     }
-
-    return const VehicleResult(
-        found: false, data: <String, dynamic>{}, source: 'sii', status: 'not_found');
   }
 
-  bool _hasFilaConTasacion(Map<String, dynamic> raw) {
-    final filas = raw['filas'];
-    if (filas is! List || filas.isEmpty) return false;
-    for (final f in filas) {
-      if (f is Map) {
-        final t = _s(f['monto_tasacion']);
-        if (t.replaceAll(RegExp(r'[^0-9]'), '').isNotEmpty) return true;
-      }
-    }
-    return false;
-  }
-
-  /// Normaliza el payload crudo del interceptor al modelo unificado.
+  /// Normaliza la respuesta del motor local al modelo unificado, con los
+  /// campos ajenos al SII (RT, RNSTP/MTT) vacíos explícitos.
   static Map<String, dynamic> _unify(String plate, Map<String, dynamic> raw) {
-    Map<String, dynamic> row = <String, dynamic>{};
-    final filas = raw['filas'];
-    if (filas is List && filas.isNotEmpty && filas.first is Map) {
-      row = Map<String, dynamic>.from(filas.first as Map);
-    }
-    // El modal promueve la mejor fila a nivel superior: esos campos mandan.
-    for (final k in const [
-      'codigo', 'marca', 'modelo', 'version', 'anio', 'tipo',
-      'monto_tasacion', 'monto_permiso',
-    ]) {
-      if (raw[k] != null) row[k] = raw[k];
-    }
-    final marca = _s(row['marca'] ?? raw['marca']);
-    final modelo = _s(row['modelo'] ?? raw['modelo'] ?? raw['model']);
-    final version = _s(row['version'] ?? raw['version']);
-    final anio = _s(row['anio'] ?? raw['anio'] ?? raw['anio_tasacion']);
-    final tipo = _s(row['tipo'] ?? raw['tipo'] ?? raw['type']);
+    final versionesRaw = (raw['versiones'] is List)
+        ? List<dynamic>.from(raw['versiones'] as List)
+        : const <dynamic>[];
+    final homoRaw = (raw['datos_homologacion'] is Map)
+        ? Map<String, dynamic>.from(raw['datos_homologacion'] as Map)
+        : const <String, dynamic>{};
+    final marca = _s(raw['marca'] ?? homoRaw['marca']);
+    final modelo = _s(raw['modelo'] ?? homoRaw['modelo']);
+    final anio = _s(raw['anio'] ?? raw['anio_tasacion'] ?? homoRaw['anio']);
 
     return <String, dynamic>{
       'patente': plate,
       'fuente': 'SII',
-      'tasacion_fiscal': _s(row['monto_tasacion'] ?? raw['tasacion_fiscal']),
-      'permiso_circulacion': _s(row['monto_permiso'] ?? raw['permiso_circulacion']),
-      'codigo_sii': _s(row['codigo'] ?? raw['codigo_sii'] ?? raw['code']),
-      'anio_tasacion': anio,
+      'exact_match': raw['exact_match'] == true,
+      'tasacion_fiscal': _s(raw['tasacion_fiscal']),
+      'permiso_circulacion': _s(raw['permiso_circulacion']),
+      'codigo_sii': _s(raw['codigo_sii']),
+      'anio_tasacion': _s(raw['anio_tasacion'] ?? anio),
+      'anio_tributario': _s(raw['anio_tributario']),
+      'categoria': _s(raw['categoria']),
+      'rango_tasacion': (raw['rango_tasacion'] is Map)
+          ? Map<String, dynamic>.from(raw['rango_tasacion'] as Map)
+          : const <String, dynamic>{},
+      'rango_permiso': (raw['rango_permiso'] is Map)
+          ? Map<String, dynamic>.from(raw['rango_permiso'] as Map)
+          : const <String, dynamic>{},
+      'versiones': versionesRaw,
       'marca': marca,
       'modelo': modelo,
-      'version': version,
-      'tipo_vehiculo': tipo,
+      'version': _s(raw['version'] ?? homoRaw['version']),
+      'tipo_vehiculo': _s(raw['tipo_vehiculo']),
       'anio': anio,
       'datos_homologacion': <String, dynamic>{
         'marca': marca,
         'modelo': modelo,
-        'version': version,
+        'version': _s(homoRaw['version'] ?? raw['version']),
         'anio': anio,
-        'cilindrada': '',
-        'combustible': '',
-        'transmision': '',
+        'cilindrada': _s(homoRaw['cilindrada']),
+        'combustible': _s(homoRaw['combustible']),
+        'transmision': _s(homoRaw['transmision']),
       },
-      // Campos ajenos al SII (RT, RNSTP/MTT): vacíos explícitos.
+      // Campos ajenos al SII: vacíos explícitos.
       'rt_estado': '',
       'rt_vencimiento': '',
       'historial_rt': <dynamic>[],

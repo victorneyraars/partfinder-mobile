@@ -82,6 +82,8 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
   bool _isLoading = false;
   bool _isRefreshingMtt = false;
   bool _isRefreshingSii = false;
+  Map<String, dynamic>? _selectedSiiVersion;
+  int? _selectedSiiVersionIndex;
   Map<String, dynamic>? _siiData;
   bool _isLoadingSii = false;
 
@@ -114,7 +116,7 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
       'prt': PrtDataProvider(openModal: _openPrtModalAndAwait),
       'boostr': BoostrDataProvider(),
       'mtt': MttDataProvider(),
-      'sii': SiiDataProvider(openModal: _openSiiModalAndAwait),
+      'sii': SiiDataProvider(),
     };
     final initPlate = _getFreshRandomChileanPlate();
     _plateController.text = initPlate;
@@ -218,7 +220,11 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
           final v = Map<String, dynamic>.from(cached['data'] as Map? ?? const {});
           v['data_source'] = 'CACHE_LOCAL_${provider.id}';
           v['patente'] = v['patente'] ?? rawPlate;
-          setState(() => _vehicleData = v);
+          setState(() {
+            _selectedSiiVersion = null;
+            _selectedSiiVersionIndex = null;
+            _vehicleData = v;
+          });
           _fetchSiiTasacion(
             (v['marca'] ?? v['make'])?.toString(),
             (v['modelo'] ?? v['model'])?.toString(),
@@ -255,7 +261,11 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
           await provider.cache.write(rawPlate, found: true, data: v, source: result.source);
         }
 
-        setState(() => _vehicleData = v);
+        setState(() {
+          _selectedSiiVersion = null;
+          _selectedSiiVersionIndex = null;
+          _vehicleData = v;
+        });
         final sMarca = (v['marca'] ?? v['make'])?.toString();
         final sModelo = (v['modelo'] ?? v['model'])?.toString();
         final sAnio = v['anio'] ?? v['year'];
@@ -279,19 +289,11 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
         } else if (result.source == 'boostr') {
           _showSnack('Vehículo $rawPlate recuperado vía Boostr (RT no disponible)');
         } else if (result.source == 'sii') {
-          // Sincronizar la tasación con la base centralizada del backend.
-          try {
-            final res = await http.post(
-              Uri.parse('https://api.studiodigital360.com/api/vehicle/cache'),
-              headers: {'Content-Type': 'application/json'},
-              body: jsonEncode({'plate': rawPlate, 'data': v}),
-            );
-            if (res.statusCode == 200) {
-              _showSnack('Tasación SII de $rawPlate sincronizada en la base de datos');
-            }
-          } catch (e) {
-            debugPrint('Error persistiendo tasación SII en backend: $e');
-          }
+          // El backend ya persistió la tasación (merge en vehicle_cache)
+          // dentro del motor local: solo informar al usuario.
+          _showSnack(v['exact_match'] == true
+              ? 'Tasación fiscal oficial de $rawPlate obtenida (tablas SII)'
+              : 'Tasación con múltiples versiones: selecciona la tuya en la tarjeta');
         } else if (!forceNetwork) {
           _showSnack(v['isPublicTransport'] == true
               ? 'Vehículo $rawPlate inscrito como transporte público/escolar (MTT)'
@@ -348,28 +350,6 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
               );
             }
           },
-        ),
-      ),
-    );
-    if (result is Map<String, dynamic>) return result;
-    if (result is Map) return Map<String, dynamic>.from(result);
-    return null;
-  }
-
-  /// Abre el modal SII (human-in-the-loop) y devuelve el payload crudo del
-  /// interceptor (filas de tasación capturadas del portal oficial).
-  Future<Map<String, dynamic>?> _openSiiModalAndAwait(
-      BuildContext modalContext, String plate, Map<String, String> hints) async {
-    try { _focusNode.unfocus(); } catch (_) {}
-    try {
-      SystemChannels.textInput.invokeMethod<void>('TextInput.hide');
-    } catch (_) {}
-    final result = await Navigator.push<dynamic>(
-      context,
-      MaterialPageRoute(
-        builder: (_) => SiiVerificationScreen(
-          targetPlate: plate,
-          hints: hints,
         ),
       ),
     );
@@ -1993,25 +1973,79 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
   /// Tarjeta de resultado de la caja SII (Tasación Fiscal Oficial).
   /// Cabecera esmeralda/verde fiscal + tarjetas destacadas de montos y
   /// ficha técnica tributaria desde datos_homologacion.
+  /// Tarjeta de resultado de la caja SII (Tasación Fiscal Oficial).
+  /// Motor local por Decreto Exento: sin modal ni scraping.
+  ///
+  /// - exact_match == true  → montos y código exactos.
+  /// - exact_match == false → rangos ($MIN - $MAX) + selector desplegable
+  ///   de versiones: al elegir una, los montos y el código se actualizan
+  ///   al instante en pantalla.
   Widget _buildSiiCard() {
     const Color accent = Color(0xFF34D399);
+    final Map<String, dynamic> d = _vehicleData!;
     final String patente =
-        _sanitizeMttText(_vehicleData!['patente']?.toString() ?? '').toUpperCase();
-    final String tasacion = _sanitizeMttText(_vehicleData!['tasacion_fiscal']?.toString() ?? '');
-    final String permiso = _sanitizeMttText(_vehicleData!['permiso_circulacion']?.toString() ?? '');
-    final String codigo = _sanitizeMttText(_vehicleData!['codigo_sii']?.toString() ?? '');
-    final String anioTasacion = _sanitizeMttText(_vehicleData!['anio_tasacion']?.toString() ?? '');
-    final Map<String, dynamic> homo = (_vehicleData!['datos_homologacion'] is Map)
-        ? Map<String, dynamic>.from(_vehicleData!['datos_homologacion'] as Map)
-        : <String, dynamic>{
-            'marca': _vehicleData!['marca'] ?? '',
-            'modelo': _vehicleData!['modelo'] ?? '',
-            'version': _vehicleData!['version'] ?? '',
-            'anio': _vehicleData!['anio'] ?? '',
-            'cilindrada': '',
-            'combustible': '',
-            'transmision': '',
-          };
+        _sanitizeMttText(d['patente']?.toString() ?? '').toUpperCase();
+    final bool exact = d['exact_match'] == true;
+
+    // Versión seleccionada por el usuario (solo en modo rango).
+    final Map<String, dynamic>? sel = _selectedSiiVersion;
+
+    String _sv(String key, [String fallbackKey = '']) =>
+        _sanitizeMttText((sel != null ? (sel[key] ?? '') : (fallbackKey.isEmpty ? '' : d[fallbackKey]))?.toString() ?? '');
+
+    final String tasacion = _sv('tasacion', 'tasacion_fiscal');
+    final String permiso = _sv('permiso', 'permiso_circulacion');
+    final String codigo = _sv('codigo_sii', 'codigo_sii');
+    final String anioTasacion = _sanitizeMttText(
+        (sel != null ? (sel['anio'] ?? '') : d['anio_tasacion'])?.toString() ?? '');
+
+    final Map<String, dynamic> rangoT = (d['rango_tasacion'] is Map)
+        ? Map<String, dynamic>.from(d['rango_tasacion'] as Map)
+        : const <String, dynamic>{};
+    final Map<String, dynamic> rangoP = (d['rango_permiso'] is Map)
+        ? Map<String, dynamic>.from(d['rango_permiso'] as Map)
+        : const <String, dynamic>{};
+    final List<dynamic> versiones = (d['versiones'] is List)
+        ? List<dynamic>.from(d['versiones'] as List)
+        : const <dynamic>[];
+
+    final bool modoRango = !exact && versiones.isNotEmpty;
+    final String tMin = _sanitizeMttText(rangoT['min']?.toString() ?? '');
+    final String tMax = _sanitizeMttText(rangoT['max']?.toString() ?? '');
+    final String pMin = _sanitizeMttText(rangoP['min']?.toString() ?? '');
+    final String pMax = _sanitizeMttText(rangoP['max']?.toString() ?? '');
+
+    // Valor a mostrar: exacto si hay selección o exact_match; rango si no.
+    final String valorTasacion = (sel != null || exact)
+        ? _formatClp(tasacion)
+        : ((tMin.isNotEmpty && tMax.isNotEmpty)
+            ? '${_formatClp(tMin)} - ${_formatClp(tMax)}'
+            : '—');
+    final String valorPermiso = (sel != null || exact)
+        ? _formatClp(permiso)
+        : ((pMin.isNotEmpty && pMax.isNotEmpty)
+            ? '${_formatClp(pMin)} - ${_formatClp(pMax)}'
+            : '—');
+    final String codigoDisplay = codigo.isNotEmpty
+        ? codigo
+        : (modoRango ? 'SELECCIONA VERSIÓN' : '—');
+
+    // Ficha técnica: si hay versión seleccionada, sus datos mandan.
+    final Map<String, dynamic> homo = (d['datos_homologacion'] is Map)
+        ? Map<String, dynamic>.from(d['datos_homologacion'] as Map)
+        : <String, dynamic>{};
+    final String hVersion = sel != null
+        ? _sanitizeMttText(sel['version']?.toString() ?? '')
+        : _sanitizeMttText(homo['version']?.toString() ?? '');
+    final String hCilindrada = sel != null
+        ? _sanitizeMttText(sel['cilindrada']?.toString() ?? '')
+        : _sanitizeMttText(homo['cilindrada']?.toString() ?? '');
+    final String hCombustible = sel != null
+        ? _sanitizeMttText(sel['combustible']?.toString() ?? '')
+        : _sanitizeMttText(homo['combustible']?.toString() ?? '');
+    final String hTransmision = sel != null
+        ? _sanitizeMttText(sel['transmision']?.toString() ?? '')
+        : _sanitizeMttText(homo['transmision']?.toString() ?? '');
 
     return Container(
       width: double.infinity,
@@ -2114,19 +2148,20 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text(
-                        'AVALÚO FISCAL OFICIAL',
-                        style: TextStyle(color: Color(0xFF94A3B8), fontSize: 9, fontWeight: FontWeight.w800, letterSpacing: 0.6),
+                      Text(
+                        modoRango && sel == null ? 'AVALÚO FISCAL (RANGO)' : 'AVALÚO FISCAL OFICIAL',
+                        style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 9, fontWeight: FontWeight.w800, letterSpacing: 0.6),
                       ),
                       const SizedBox(height: 6),
                       Text(
-                        _formatClp(tasacion),
-                        style: const TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w900),
+                        valorTasacion,
+                        softWrap: true,
+                        style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w900),
                       ),
                       if (anioTasacion.isNotEmpty) ...[
                         const SizedBox(height: 4),
                         Text(
-                          'Año tributario: $anioTasacion',
+                          'Año: $anioTasacion',
                           style: const TextStyle(color: Color(0xFF6EE7B7), fontSize: 10, fontWeight: FontWeight.w600),
                         ),
                       ],
@@ -2146,14 +2181,15 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text(
-                        'VALOR PERMISO DE CIRCULACIÓN',
-                        style: TextStyle(color: Color(0xFF94A3B8), fontSize: 9, fontWeight: FontWeight.w800, letterSpacing: 0.6),
+                      Text(
+                        modoRango && sel == null ? 'PERMISO CIRCULACIÓN (RANGO)' : 'VALOR PERMISO DE CIRCULACIÓN',
+                        style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 9, fontWeight: FontWeight.w800, letterSpacing: 0.6),
                       ),
                       const SizedBox(height: 6),
                       Text(
-                        _formatClp(permiso),
-                        style: const TextStyle(color: Color(0xFF34D399), fontSize: 17, fontWeight: FontWeight.w900),
+                        valorPermiso,
+                        softWrap: true,
+                        style: const TextStyle(color: Color(0xFF34D399), fontSize: 15, fontWeight: FontWeight.w900),
                       ),
                       const SizedBox(height: 4),
                       const Text(
@@ -2190,10 +2226,10 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
                       ),
                       const SizedBox(height: 4),
                       SelectableText(
-                        codigo.isEmpty ? '—' : codigo,
+                        codigoDisplay,
                         style: TextStyle(
                           color: accent,
-                          fontSize: 16,
+                          fontSize: codigoDisplay == 'SELECCIONA VERSIÓN' ? 12 : 16,
                           fontWeight: FontWeight.w900,
                           fontFamily: 'monospace',
                           letterSpacing: 1.4,
@@ -2205,6 +2241,63 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
               ],
             ),
           ),
+          const SizedBox(height: 12),
+          // ===== Selector de versión (solo modo rango) =====
+          if (modoRango) ...[
+            const Text(
+              'Selecciona tu versión para ver el valor exacto:',
+              style: TextStyle(color: Color(0xFF94A3B8), fontSize: 11, fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 8),
+            DropdownButtonFormField<int>(
+              value: _selectedSiiVersionIndex,
+              isExpanded: true,
+              dropdownColor: const Color(0xFF1E293B),
+              iconEnabledColor: accent,
+              decoration: InputDecoration(
+                filled: true,
+                fillColor: const Color(0xFF1E293B),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  borderSide: BorderSide(color: accent.withOpacity(0.45), width: 1),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  borderSide: const BorderSide(color: accent, width: 1.2),
+                ),
+                hintText: 'Selecciona una versión (${versiones.length} opciones)',
+                hintStyle: const TextStyle(color: Color(0xFF64748B), fontSize: 12),
+              ),
+              style: const TextStyle(color: Colors.white, fontSize: 12),
+              items: [
+                for (int i = 0; i < versiones.length; i++)
+                  DropdownMenuItem<int>(
+                    value: i,
+                    child: Text(
+                      _versionLabel(versiones[i]),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+              ],
+              onChanged: (idx) {
+                if (idx == null) return;
+                setState(() {
+                  _selectedSiiVersionIndex = idx;
+                  _selectedSiiVersion = (versiones[idx] is Map)
+                      ? Map<String, dynamic>.from(versiones[idx] as Map)
+                      : <String, dynamic>{};
+                });
+              },
+            ),
+            if (_selectedSiiVersion != null) ...[
+              const SizedBox(height: 6),
+              Text(
+                'Versión seleccionada: ${_sanitizeMttText(_selectedSiiVersion!['version']?.toString() ?? '')}',
+                style: const TextStyle(color: accent, fontSize: 11, fontWeight: FontWeight.w800),
+              ),
+            ],
+          ],
           const SizedBox(height: 14),
           // ===== Ficha técnica tributaria =====
           Row(
@@ -2230,22 +2323,31 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
             _mttPairRow('MARCA', _sanitizeMttText(homo['marca']?.toString() ?? '')),
           if (_sanitizeMttText(homo['modelo']?.toString() ?? '').isNotEmpty)
             _mttPairRow('MODELO', _sanitizeMttText(homo['modelo']?.toString() ?? '')),
-          if (_sanitizeMttText(homo['version']?.toString() ?? '').isNotEmpty)
-            _mttPairRow('VERSIÓN', _sanitizeMttText(homo['version']?.toString() ?? '')),
+          if (hVersion.isNotEmpty) _mttPairRow('VERSIÓN', hVersion),
           if (_sanitizeMttText(homo['anio']?.toString() ?? '').isNotEmpty)
             _mttPairRow('AÑO', _sanitizeMttText(homo['anio']?.toString() ?? '')),
-          if (_sanitizeMttText(homo['cilindrada']?.toString() ?? '').isNotEmpty)
-            _mttPairRow('CILINDRADA', _sanitizeMttText(homo['cilindrada']?.toString() ?? '')),
-          if (_sanitizeMttText(homo['combustible']?.toString() ?? '').isNotEmpty)
-            _mttPairRow('TIPO DE COMBUSTIBLE', _sanitizeMttText(homo['combustible']?.toString() ?? '')),
-          if (_sanitizeMttText(homo['transmision']?.toString() ?? '').isNotEmpty)
-            _mttPairRow('TRANSMISIÓN', _sanitizeMttText(homo['transmision']?.toString() ?? '')),
-          if (tasacion.isEmpty && permiso.isEmpty && codigo.isEmpty)
+          if (hCilindrada.isNotEmpty) _mttPairRow('CILINDRADA', hCilindrada),
+          if (hCombustible.isNotEmpty) _mttPairRow('TIPO DE COMBUSTIBLE', hCombustible),
+          if (hTransmision.isNotEmpty) _mttPairRow('TRANSMISIÓN', hTransmision),
+          if (tasacion.isEmpty && permiso.isEmpty && codigo.isEmpty && tMin.isEmpty)
             _mttEmptyBadge('Sin tasación registrada: pulsa el botón de refresco'),
         ],
       ),
     );
   }
+
+  /// Etiqueta legible de una versión en el selector SII.
+  String _versionLabel(dynamic v) {
+    if (v is! Map) return v.toString();
+    final version = _sanitizeMttText(v['version']?.toString() ?? '');
+    final transmision = _sanitizeMttText(v['transmision']?.toString() ?? '');
+    final combustible = _sanitizeMttText(v['combustible']?.toString() ?? '');
+    final anio = _sanitizeMttText(v['anio']?.toString() ?? '');
+    final extras = [transmision, combustible].where((s) => s.isNotEmpty).join(' · ');
+    final base = [version, extras].where((s) => s.isNotEmpty).join(' — ');
+    return anio.isNotEmpty ? '$base ($anio)' : base;
+  }
+
 
   /// Sanitización profunda anti-mojibake (misma política que el backend):
   /// reemplazos explícitos + barrido genérico de pares 'Ã'+byte, para que
@@ -2813,321 +2915,6 @@ class PrtService {
     } catch (e) {
       debugPrint('[PRT-CACHE] error persistiendo: $e');
     }
-  }
-}
-
-/// Modal human-in-the-loop de la caja SII (Tasación Fiscal Oficial).
-///
-/// CONTRATO:
-///  - Entrada: [targetPlate] (patente normalizada) + [hints] (marca/modelo/
-///    año del vehículo si el backend ya lo conoce, para elegir la mejor fila).
-///  - Carga el portal oficial https://www4.sii.cl/vehiculospubui/#/searchtasacion
-///    en WebView; el humano resuelve el captcha numérico y ejecuta la consulta
-///    (por código SII del permiso de circulación o marca/modelo/año).
-///  - El interceptor dinámico (sii_injection.js, servido en caliente por
-///    /api/debug/sii-script.js) captura las filas de tasación vía hook de
-///    XHR/fetch + MutationObserver y las envía por el canal 'SiiBridge'.
-///  - Salida: Navigator.pop(context, payload) con las filas capturadas y la
-///    mejor fila promovida a nivel superior.
-class SiiVerificationScreen extends StatefulWidget {
-  final String targetPlate;
-  final Map<String, String> hints;
-
-  const SiiVerificationScreen({super.key, required this.targetPlate, required this.hints});
-
-  @override
-  State<SiiVerificationScreen> createState() => _SiiVerificationScreenState();
-}
-
-class _SiiVerificationScreenState extends State<SiiVerificationScreen> {
-  static const String _siiUrl = 'https://www4.sii.cl/vehiculospubui/#/searchtasacion';
-
-  late final WebViewController _controller;
-  bool _isReady = false;
-  bool _showRetryButton = false;
-  Timer? _readyFallbackTimer;
-  Timer? _retryTimer;
-  String _injectedScript = '';
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = WebViewController()
-      ..setJavaScriptMode(JavaScriptMode.unrestricted)
-      ..setBackgroundColor(const Color(0xFF0B132B))
-      ..setUserAgent('Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36')
-      ..enableZoom(false)
-      ..setNavigationDelegate(NavigationDelegate(
-        onPageFinished: (_) => _onPageLoaded(),
-        onWebResourceError: (e) => debugPrint('[SII] web error: ${e.description}'),
-      ))
-      ..addJavaScriptChannel(
-        'SiiBridge',
-        onMessageReceived: (JavaScriptMessage message) {
-          _onBridgeMessage(message.message);
-        },
-      );
-    _retryTimer = Timer(const Duration(seconds: 15), () {
-      if (mounted && !_isReady) setState(() => _showRetryButton = true);
-    });
-    _init();
-  }
-
-  Future<void> _init() async {
-    // 1) Descargar el interceptor dinámico (hot-served) y reemplazar la patente.
-    try {
-      final resp = await http
-          .get(Uri.parse('https://api.studiodigital360.com/api/debug/sii-script.js'))
-          .timeout(const Duration(seconds: 4));
-      if (resp.statusCode == 200) {
-        _injectedScript = utf8
-            .decode(resp.bodyBytes)
-            .replaceAll('{{PLATE}}', widget.targetPlate.trim().toUpperCase());
-      }
-    } catch (e) {
-      debugPrint('[SII] error descargando interceptor: $e');
-    }
-    // 2) Cargar el portal oficial. El hook XHR/fetch se inyecta en
-    //    onPageFinished: la consulta de tasación (getAppraisalSearch) solo
-    //    se dispara cuando el humano resuelve el captcha y pulsa Buscar,
-    //    por lo que la inyección post-carga llega siempre a tiempo.
-    await _controller.loadRequest(Uri.parse(_siiUrl));
-    // 3) Revelar el WebView como respaldo a los 8s aunque READY no llegue.
-    _readyFallbackTimer = Timer(const Duration(seconds: 8), () {
-      if (mounted && !_isReady) setState(() => _isReady = true);
-    });
-  }
-
-  Future<void> _onPageLoaded() async {
-    if (_injectedScript.isNotEmpty) {
-      try {
-        await _controller.runJavaScript(_injectedScript);
-      } catch (e) {
-        debugPrint('[SII] re-injection error: $e');
-      }
-    }
-  }
-
-  void _onBridgeMessage(String msg) {
-    if (msg == 'READY') {
-      _readyFallbackTimer?.cancel();
-      _retryTimer?.cancel();
-      if (mounted && !_isReady) setState(() => _isReady = true);
-      return;
-    }
-    if (msg.startsWith('LOG:')) {
-      debugPrint('[SII-LOG] ${msg.substring(4)}');
-      _sendRemoteLog('[SII] ${msg.substring(4)}');
-      return;
-    }
-    if (msg.startsWith('ERROR:')) {
-      debugPrint('[SII-ERROR] ${msg.substring(6)}');
-      return;
-    }
-    if (msg.startsWith('DATA:')) {
-      try {
-        final map = jsonDecode(msg.substring(5)) as Map<String, dynamic>;
-        final filasRaw = (map['filas'] is List) ? (map['filas'] as List) : const <dynamic>[];
-        final filas = filasRaw.whereType<Map>().map(Map<String, dynamic>.from).toList();
-        if (filas.isEmpty) return;
-        // Elegir la fila que mejor calce con los hints del vehículo.
-        final best = _pickBestRow(filas);
-        // Promover los campos de la mejor fila a nivel superior (el provider
-        // los unifica directamente).
-        final payload = <String, dynamic>{
-          'source': 'SII',
-          'plate': widget.targetPlate,
-          'filas': filas,
-          'codigo': best['codigo'] ?? '',
-          'marca': best['marca'] ?? '',
-          'modelo': best['modelo'] ?? '',
-          'version': best['version'] ?? '',
-          'anio': best['anio'] ?? '',
-          'tipo': best['tipo'] ?? '',
-          'monto_tasacion': best['monto_tasacion'] ?? '',
-          'monto_permiso': best['monto_permiso'] ?? '',
-        };
-        if (mounted) Navigator.of(context).pop(payload);
-      } catch (e) {
-        debugPrint('[SII] error parseando payload: $e');
-      }
-    }
-  }
-
-  Map<String, dynamic> _pickBestRow(List<Map<String, dynamic>> filas) {
-    Map<String, dynamic> best = filas.first;
-    final hMarca = (widget.hints['marca'] ?? '').toUpperCase();
-    final hModelo = (widget.hints['modelo'] ?? '').toUpperCase();
-    final hAnio = widget.hints['anio'] ?? '';
-    int score(Map<String, dynamic> r) {
-      int s = 0;
-      final m = (r['marca'] ?? '').toString().toUpperCase();
-      final mo = (r['modelo'] ?? '').toString().toUpperCase();
-      final a = (r['anio'] ?? '').toString();
-      if (hMarca.isNotEmpty && m.isNotEmpty && (m.contains(hMarca) || hMarca.contains(m))) s += 2;
-      if (hModelo.isNotEmpty && mo.isNotEmpty && (mo.contains(hModelo) || hModelo.contains(mo))) s += 2;
-      if (hAnio.isNotEmpty && a == hAnio) s += 1;
-      return s;
-    }
-
-    var bestScore = -1;
-    for (final f in filas) {
-      final sc = score(f);
-      if (sc > bestScore) {
-        bestScore = sc;
-        best = f;
-      }
-    }
-    return best;
-  }
-
-  Future<void> _sendRemoteLog(String message) async {
-    try {
-      await http.post(
-        Uri.parse('https://api.studiodigital360.com/api/debug/log'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'message': message}),
-      ).timeout(const Duration(seconds: 4));
-    } catch (_) {}
-  }
-
-  PlatformWebViewWidgetCreationParams _creationParams() {
-    PlatformWebViewWidgetCreationParams params = PlatformWebViewWidgetCreationParams(
-      controller: _controller.platform,
-      layoutDirection: TextDirection.ltr,
-    );
-    if (WebViewPlatform.instance is AndroidWebViewPlatform) {
-      params = AndroidWebViewWidgetCreationParams.fromPlatformWebViewWidgetCreationParams(
-        params,
-        displayWithHybridComposition: false,
-      );
-    }
-    return params;
-  }
-
-  @override
-  void dispose() {
-    _readyFallbackTimer?.cancel();
-    _retryTimer?.cancel();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final hMarca = (widget.hints['marca'] ?? '').trim();
-    final hModelo = (widget.hints['modelo'] ?? '').trim();
-    final hAnio = (widget.hints['anio'] ?? '').trim();
-    final hintVehiculo = [hMarca, hModelo, hAnio].where((s) => s.isNotEmpty).join(' ');
-
-    return Scaffold(
-      backgroundColor: const Color(0xFF0F172A),
-      resizeToAvoidBottomInset: false,
-      appBar: AppBar(
-        backgroundColor: const Color(0xFF1E293B),
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'Tasación SII — Portal Oficial',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white),
-            ),
-            Text(
-              'Patente: ${widget.targetPlate}',
-              style: const TextStyle(fontSize: 12, color: Color(0xFF34D399)),
-            ),
-          ],
-        ),
-        leading: IconButton(
-          icon: const Icon(Icons.close, color: Colors.white),
-          onPressed: () => Navigator.of(context).pop(),
-        ),
-      ),
-      body: Column(
-        children: [
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-            color: const Color(0xFF1E293B),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Icon(Icons.info_outline_rounded, color: Color(0xFF34D399), size: 16),
-                    SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        'El SII no consulta por patente: completa la búsqueda oficial '
-                        '(código SII del permiso de circulación, o marca/modelo/año). '
-                        'Al aparecer los resultados, la tasación se captura automáticamente.',
-                        style: TextStyle(color: Color(0xFFCBD5E1), fontSize: 12, height: 1.4),
-                      ),
-                    ),
-                  ],
-                ),
-                if (hintVehiculo.isNotEmpty) ...[
-                  const SizedBox(height: 6),
-                  Text(
-                    'Vehículo detectado: $hintVehiculo',
-                    style: const TextStyle(
-                      color: Color(0xFF34D399),
-                      fontSize: 11,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          ),
-          Expanded(
-            child: Stack(
-              children: [
-                const ColoredBox(color: Color(0xFF0B132B)),
-                WebViewWidget.fromPlatformCreationParams(params: _creationParams()),
-                if (!_isReady)
-                  const Positioned.fill(
-                    child: ColoredBox(
-                      color: Color(0xFF0B132B),
-                      child: Center(
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            CircularProgressIndicator(color: Color(0xFF34D399)),
-                            SizedBox(height: 14),
-                            Text(
-                              'Preparando portal oficial del SII…',
-                              style: TextStyle(color: Colors.white70, fontSize: 13),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                if (_showRetryButton && !_isReady)
-                  Positioned(
-                    bottom: 20,
-                    left: 20,
-                    right: 20,
-                    child: ElevatedButton.icon(
-                      onPressed: () {
-                        setState(() => _showRetryButton = false);
-                        _controller.reload();
-                      },
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF1E293B),
-                        foregroundColor: const Color(0xFF34D399),
-                      ),
-                      icon: const Icon(Icons.refresh),
-                      label: const Text('Reintentar carga'),
-                    ),
-                  ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
   }
 }
 
