@@ -1680,7 +1680,8 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
   Widget _buildMttCard() {
     final bool isPublic = _vehicleData!['isPublicTransport'] == true;
     final Color accent = isPublic ? const Color(0xFFF59E0B) : const Color(0xFF38BDF8);
-    final String patente = _vehicleData!['patente']?.toString().toUpperCase() ?? '';
+    final String patente =
+        _sanitizeMttText(_vehicleData!['patente']?.toString() ?? '').toUpperCase();
 
     return Container(
       width: double.infinity,
@@ -1808,6 +1809,59 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
     );
   }
 
+  /// Sanitización profunda anti-mojibake (misma política que el backend):
+  /// reemplazos explícitos + barrido genérico de pares 'Ã'+byte, para que
+  /// TODO texto se pinte con acentos y ñ perfectos aunque provenga de una
+  /// caché local vieja o de una respuesta corrupta.
+  String _sanitizeMttText(String text) {
+    var t = text;
+    const fixes = <String, String>{
+      '\u00c3\u008d': 'Í', // Ã + 0x8D (SHY invisible)
+      '\u00c3\u00cd': 'Í',
+      '\u00c3\u00ed': 'í',
+      '\u00c3\u009a': 'Ú', // Ã + 0x9A
+      '\u00c3\u0161': 'Ú', // Ã + š (cp1252)
+      '\u00c3\u00da': 'Ú',
+      '\u00c3\u00fa': 'ú',
+      '\u00c3\u0081': 'Á', // Ã + 0x81
+      '\u00c3\u00a1': 'á',
+      '\u00c3\u2030': 'É', // Ã + ‰ (cp1252)
+      '\u00c3\u00c9': 'É',
+      '\u00c3\u00e9': 'é',
+      '\u00c3\u201c': 'Ó', // Ã + “ (cp1252)
+      '\u00c3\u00d3': 'Ó',
+      '\u00c3\u00f3': 'ó',
+      '\u00c3\u2018': 'Ñ', // Ã + ‘ (cp1252)
+      '\u00c3\u00d1': 'Ñ',
+      '\u00c3\u00f1': 'ñ',
+      'P\u00c3\u0161BLICO': 'PÚBLICO',
+      'P\u00c3\u009aBLICO': 'PÚBLICO',
+      'B\u00c3\u0081SICO': 'BÁSICO',
+      'B\u00c3\u00a1SICO': 'BÁSICO',
+      'VEH\u00c3\u008dCULO': 'VEHÍCULO',
+      'VEH\u00c3\u00cdCULO': 'VEHÍCULO',
+      'ACOMPA\u00c3\u2018ANTES': 'ACOMPAÑANTES',
+      'ACOMPA\u00c3\u0091ANTES': 'ACOMPAÑANTES',
+    };
+    fixes.forEach((k, v) {
+      t = t.replaceAll(k, v);
+    });
+    // Barrido genérico: par 'Ã' + byte-latino → carácter correcto vía
+    // round-trip latin-1 → utf-8 (p. ej. 'RegiÃ³n' → 'Región').
+    t = t.replaceAllMapped(
+      RegExp(r'Ã[\x80-\xbf\u0161\u2030\u201c\u201d\u2018\u2019\u2122\u017d\u017e\u0152\u0153\u009a]'),
+      (m) {
+        final pair = m.group(0)!;
+        try {
+          return utf8.decode(latin1.encode(pair));
+        } catch (_) {
+          return pair;
+        }
+      },
+    );
+    return t.trim();
+  }
+
   /// Normaliza la estructura dinámica de secciones que entrega el backend
   /// (`secciones: [{titulo, tipo: pares|lista, items: [...]}]`).
   /// Si la entrada de caché local es antigua (solo campos planos), sintetiza
@@ -1817,7 +1871,7 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
     if (raw is List && raw.isNotEmpty) return raw;
     final pairs = <Map<String, String>>[];
     void add(String key, dynamic v) {
-      final s = v?.toString().trim() ?? '';
+      final s = _sanitizeMttText(v?.toString() ?? '');
       if (s.isNotEmpty) pairs.add({'etiqueta': key, 'valor': s});
     }
 
@@ -1843,7 +1897,8 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
     }
     for (final sec in secciones) {
       if (sec is! Map) continue;
-      final titulo = (sec['titulo']?.toString() ?? 'INFORMACIÓN').toUpperCase();
+      final titulo =
+          _sanitizeMttText(sec['titulo']?.toString() ?? 'INFORMACIÓN').toUpperCase();
       final tipo = (sec['tipo']?.toString() ?? 'pares').toLowerCase();
       final rawItems = (sec['items'] is List) ? (sec['items'] as List) : const <dynamic>[];
 
@@ -1856,9 +1911,9 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
       }
       if (tipo == 'lista') {
         for (final it in rawItems) {
-          var txt = it is Map
-              ? (it['valor'] ?? it['texto'] ?? '').toString().trim()
-              : it.toString().trim();
+          var txt = _sanitizeMttText(it is Map
+              ? (it['valor'] ?? it['texto'] ?? '').toString()
+              : it.toString());
           // Limpieza defensiva para entradas de caché antiguas: quitar el
           // título de sección repetido y conceptos ya presentes en el
           // encabezado (misma política que el backend).
@@ -1878,8 +1933,10 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
         }
       } else {
         for (final it in rawItems) {
-          final label = it is Map ? (it['etiqueta']?.toString().trim() ?? 'Dato') : 'Dato';
-          final value = it is Map ? (it['valor']?.toString().trim() ?? '') : it.toString().trim();
+          final label = _sanitizeMttText(
+              it is Map ? (it['etiqueta']?.toString() ?? 'Dato') : 'Dato');
+          final value = _sanitizeMttText(
+              it is Map ? (it['valor']?.toString() ?? '') : it.toString());
           widgets.add(_mttPairRow(label, value));
         }
       }
