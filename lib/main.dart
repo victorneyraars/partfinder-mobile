@@ -1128,259 +1128,12 @@ Future<void> _searchPlateLegacy({bool forceNetwork = false, String? plateOverrid
             color: Color(0xFF64748B),
           ),
         ),
-        _buildBoostrTelemetryHud(),
-              _buildEngineSelector(),
       ],
     );
   }
 
 
   
-  Widget _buildEngineSelector() {
-    return Container(
-      constraints: const BoxConstraints(maxWidth: 360),
-      margin: const EdgeInsets.only(top: 8, bottom: 8),
-      padding: const EdgeInsets.all(4),
-      decoration: BoxDecoration(
-        color: const Color(0xFF0F172A),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0xFF1E293B)),
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            child: GestureDetector(
-              onTap: () => _selectEngine('boostr'),
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 200),
-                padding: const EdgeInsets.symmetric(vertical: 8),
-                decoration: BoxDecoration(
-                  color: _selectedEngine == 'boostr' ? const Color(0xFF1E293B) : Colors.transparent,
-                  borderRadius: BorderRadius.circular(8),
-                  border: _selectedEngine == 'boostr' ? Border.all(color: const Color(0xFF38BDF8), width: 1.2) : null,
-                ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const Icon(Icons.bolt, size: 16, color: Color(0xFF38BDF8)),
-                    const SizedBox(width: 6),
-                    Flexible(
-                      child: FittedBox(
-                        fit: BoxFit.scaleDown,
-                        child: Text(
-                          'Boostr API',
-                          style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
-                        ),
-                      ),
-                    ),
-                    if (_dashboardOk['boostr'] == true) ...[
-                      const SizedBox(width: 4),
-                      const Icon(Icons.check_circle, size: 12, color: Color(0xFF10B981)),
-                    ],
-                  ],
-                ),
-              ),
-            ),
-          ),
-          Expanded(
-            child: GestureDetector(
-              onTap: () => _selectEngine('prt'),
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 200),
-                padding: const EdgeInsets.symmetric(vertical: 8),
-                decoration: BoxDecoration(
-                  color: _selectedEngine == 'prt' ? const Color(0xFF1E293B) : Colors.transparent,
-                  borderRadius: BorderRadius.circular(8),
-                  border: _selectedEngine == 'prt' ? Border.all(color: const Color(0xFF10B981), width: 1.2) : null,
-                ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const Icon(Icons.precision_manufacturing, size: 16, color: Color(0xFF10B981)),
-                    const SizedBox(width: 6),
-                    Flexible(
-                      child: FittedBox(
-                        fit: BoxFit.scaleDown,
-                        child: Text(
-                          'Motor PRT',
-                          style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
-                        ),
-                      ),
-                    ),
-                    if (_dashboardOk['prt'] == true) ...[
-                      const SizedBox(width: 4),
-                      const Icon(Icons.check_circle, size: 12, color: Color(0xFF10B981)),
-                    ],
-                  ],
-                ),
-              ),
-            ),
-          ),
-          Expanded(
-            child: GestureDetector(
-              onTap: () => _selectEngine('mtt'),
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 200),
-                padding: const EdgeInsets.symmetric(vertical: 8),
-                decoration: BoxDecoration(
-                  color: _selectedEngine == 'mtt' ? const Color(0xFF1E293B) : Colors.transparent,
-                  borderRadius: BorderRadius.circular(8),
-                  border: _selectedEngine == 'mtt' ? Border.all(color: const Color(0xFFF59E0B), width: 1.2) : null,
-                ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const Icon(Icons.directions_bus_filled_rounded, size: 16, color: Color(0xFFF59E0B)),
-                    const SizedBox(width: 6),
-                    Flexible(
-                      child: FittedBox(
-                        fit: BoxFit.scaleDown,
-                        child: Text(
-                          'MTT Transporte',
-                          style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
-                        ),
-                      ),
-                    ),
-                    if (_dashboardOk['mtt'] == true) ...[
-                      const SizedBox(width: 4),
-                      const Icon(Icons.check_circle, size: 12, color: Color(0xFF10B981)),
-                    ],
-                  ],
-                ),
-              ),
-            ),
-          ),
-          Expanded(
-            child: GestureDetector(
-              onTap: () => _selectEngine('sii'),
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 200),
-                padding: const EdgeInsets.symmetric(vertical: 8),
-                decoration: BoxDecoration(
-                  color: _selectedEngine == 'sii' ? const Color(0xFF1E293B) : Colors.transparent,
-                  borderRadius: BorderRadius.circular(8),
-                  border: _selectedEngine == 'sii' ? Border.all(color: const Color(0xFF34D399), width: 1.2) : null,
-                ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const Icon(Icons.account_balance_rounded, size: 16, color: Color(0xFF34D399)),
-                    const SizedBox(width: 6),
-                    Flexible(
-                      child: FittedBox(
-                        fit: BoxFit.scaleDown,
-                        child: Text(
-                          'SII Tasación',
-                          style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
-                        ),
-                      ),
-                    ),
-                    if (_dashboardOk['sii'] == true) ...[
-                      const SizedBox(width: 4),
-                      const Icon(Icons.check_circle, size: 12, color: Color(0xFF10B981)),
-                    ],
-                  ],
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-    Widget _buildBoostrTelemetryHud() {
-    final bool isBoostr = _selectedEngine == 'boostr';
-    final bool isMtt = _selectedEngine == 'mtt';
-    final bool isSii = _selectedEngine == 'sii';
-    final bool isOnline = _boostrStatus?['status'] == 'ONLINE';
-    final String plan = _boostrStatus?['plan']?.toString().toUpperCase() ?? 'PRO';
-    final String dailyLimit = _boostrStatus?['daily_limit']?.toString() ?? '100';
-    final String remaining = _boostrStatus?['remaining']?.toString() ?? dailyLimit;
-    final String cached = _boostrStatus?['cached_plates']?.toString() ?? '0';
-
-    final Color accentColor = isBoostr
-        ? const Color(0xFF38BDF8)
-        : (isMtt
-            ? const Color(0xFFF59E0B)
-            : (isSii ? const Color(0xFF34D399) : const Color(0xFF10B981)));
-    final Color dotColor = isBoostr 
-        ? (isOnline ? const Color(0xFF10B981) : const Color(0xFFF59E0B))
-        : const Color(0xFF10B981);
-
-    final String titleText = isBoostr 
-        ? 'BOOSTR API $plan: ${isOnline ? "ONLINE" : "CONECTANDO"}'
-        : (isMtt
-            ? 'MTT RNSTP: CONSULTA WEB OFICIAL'
-            : (isSii ? 'SII TASACIÓN: AVALÚO FISCAL OFICIAL' : 'MOTOR PRT CHILE: ACTIVO'));
-
-    final String metricsText = isBoostr
-        ? 'Cuota: $remaining/$dailyLimit   •   Caché: $cached'
-        : (isMtt
-            ? 'Transporte Público / Escolar / Particular'
-            : (isSii
-                ? 'Permiso de Circulación • Código SII • Caché 180 días'
-                : 'Modo: Directo (P2P)   •   Caché: $cached'));
-
-    return Container(
-      constraints: const BoxConstraints(maxWidth: 360),
-      margin: const EdgeInsets.only(top: 10, bottom: 4),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-      decoration: BoxDecoration(
-        color: const Color(0xFF0F172A).withOpacity(0.85),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: accentColor.withOpacity(0.35), width: 1),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 9,
-            height: 9,
-            decoration: BoxDecoration(
-              color: dotColor,
-              shape: BoxShape.circle,
-              boxShadow: [
-                BoxShadow(
-                  color: dotColor.withOpacity(0.6),
-                  blurRadius: 6,
-                  spreadRadius: 2,
-                )
-              ],
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  titleText,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: 0.8,
-                  ),
-                ),
-                const SizedBox(height: 3),
-                Text(
-                  metricsText,
-                  style: TextStyle(
-                    color: accentColor,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                    letterSpacing: 0.3,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget _buildPhysicalPlate() {
 
     return Container(
@@ -1739,9 +1492,17 @@ Future<void> _searchPlateLegacy({bool forceNetwork = false, String? plateOverrid
 
   
   Widget _buildSiiEstimateCard() {
-    // Limpieza de banner residual: si el dashboard SII ya entregó 1 o más
-    // variantes válidas (p. ej. las 8 del Morning 2022), ocultar por
-    // completo la tarjeta de "no disponible".
+    // 1) Estado IDLE (sin consulta activa): no pintar absolutamente nada.
+    if (_vehicleData == null && _dashboard == null) {
+      return const SizedBox.shrink();
+    }
+    // 2) Consulta en curso: no mostrar avisos prematuros.
+    if (_isLoading) {
+      return const SizedBox.shrink();
+    }
+    // 3) Limpieza de banner residual: si el dashboard SII ya entregó 1 o
+    //    más variantes válidas (p. ej. las 8 del Morning 2022), ocultar por
+    //    completo la tarjeta de "no disponible".
     if (_dashboardMode && _dashboard != null) {
       final siiVersiones = _dashboard!['sii']?['versiones'];
       if (siiVersiones is List && siiVersiones.isNotEmpty) {
@@ -4077,20 +3838,7 @@ Future<void> _searchPlateLegacy({bool forceNetwork = false, String? plateOverrid
 
   /// Selección de motor: si el dashboard ya cargó esa fuente, la muestra al
   /// instante (vista segmentada); si no, dispara el flujo clásico del motor.
-  void _selectEngine(String engine) {
-    setState(() {
-      _selectedEngine = engine;
-      _dashboardMode = false;
-      if (_dashboard != null && _dashboardOk[engine] == true) {
-        _vehicleData = _dashboard![engine];
-      } else {
-        _vehicleData = null;
-      }
-    });
-    if (_dashboard == null || _dashboardOk[engine] != true) {
-      _searchPlateLegacy();
-    }
-  }
+
 
 
   /// Sanitización profunda anti-mojibake (misma política que el backend):
