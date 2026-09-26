@@ -96,6 +96,12 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
   bool _isRefreshingBoostr = false;
   bool _isRefreshingPrt = false;
   Map<String, dynamic>? _siiData;
+
+  // ===== DASHBOARD MULTIPROVEEDOR (consulta simultánea) =====
+  Map<String, Map<String, dynamic>>? _dashboard;
+  Map<String, bool> _dashboardOk = const {};
+  bool _dashboardQueued = false;
+  bool _dashboardMode = false;
   bool _isLoadingSii = false;
 
   Map<String, dynamic>? _vehicleData;
@@ -226,7 +232,114 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
     setState(() => _isLoadingSii = false);
   }
 
-  Future<void> _searchPlate({bool forceNetwork = false, String? plateOverride}) async {
+    /// CONSULTA MULTIPROVEEDOR SIMULTÁNEA (Dashboard Unificado).
+  /// Al pulsar "CONSULTAR VEHÍCULO" invoca GET /api/patente/{PLATE}/full
+  /// (PRT + Boostr + MTT + SII en paralelo) y despliega las tarjetas de
+  /// todas las fuentes disponibles en una vista continua. Si ninguna fuente
+  /// responde, cae al flujo segmentado clásico del motor seleccionado.
+  Future<void> _searchPlate() async {
+    final rawPlate = _plateController.text.replaceAll(RegExp(r'[^A-Za-z0-9]'), '').toUpperCase();
+    if (rawPlate.length < 5) {
+      HapticFeedback.heavyImpact();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          backgroundColor: Color(0xFFEF4444),
+          content: Text('Por favor ingrese una patente válida de Chile', style: TextStyle(fontWeight: FontWeight.bold)),
+        ),
+      );
+      return;
+    }
+
+    FocusScope.of(context).unfocus();
+    HapticFeedback.lightImpact();
+
+    setState(() {
+      _isLoading = true;
+      _vehicleData = null;
+      _dashboard = null;
+      _dashboardOk = const {};
+      _dashboardQueued = false;
+      _dashboardMode = false;
+    });
+    _scannerController.repeat(reverse: true);
+
+    try {
+      final res = await http
+          .get(Uri.parse('https://api.studiodigital360.com/api/patente/$rawPlate/full'))
+          .timeout(const Duration(seconds: 35));
+
+      if (res.statusCode == 200) {
+        final full = jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
+        final dash = <String, Map<String, dynamic>>{};
+        final ok = <String, bool>{};
+
+        void add(String key, dynamic block) {
+          if (block is! Map) {
+            ok[key] = false;
+            return;
+          }
+          final status = (block['status'] ?? 'error').toString();
+          final data = (block['data'] is Map)
+              ? Map<String, dynamic>.from(block['data'] as Map)
+              : <String, dynamic>{};
+          dash[key] = data;
+          ok[key] = status == 'ok';
+        }
+
+        add('prt', full['prt']);
+        add('boostr', full['boostr']);
+        add('mtt', full['mtt']);
+        add('sii', full['sii']);
+
+        if (!ok.containsValue(true)) {
+          // Ninguna fuente con datos: flujo segmentado clásico (p. ej.
+          // modal reCAPTCHA PRT desde el motor seleccionado).
+          await _searchPlateLegacy();
+          return;
+        }
+
+        Map<String, dynamic>? first;
+        for (final k in const ['prt', 'boostr', 'mtt', 'sii']) {
+          if (ok[k] == true) {
+            first = dash[k];
+            break;
+          }
+        }
+
+        setState(() {
+          _dashboard = dash;
+          _dashboardOk = ok;
+          _dashboardQueued = (full['boostr'] is Map) &&
+              ((full['boostr'] as Map)['status'] == 'queued' ||
+                  (full['boostr'] as Map)['status'] == 'exhausted');
+          _dashboardMode = true;
+          _vehicleData = first;
+        });
+
+        final firstD = first ?? const <String, dynamic>{};
+        _fetchSiiTasacion(
+          (firstD['marca'] ?? firstD['make'])?.toString(),
+          (firstD['modelo'] ?? firstD['model'])?.toString(),
+          firstD['anio'] ?? firstD['year'],
+        );
+        _fetchBoostrTelemetry();
+        _showSnack('Consulta multiproveedor completada para $rawPlate');
+        return;
+      }
+      _showSnack('Error en la consulta unificada (HTTP ${res.statusCode})');
+    } catch (e) {
+      _showSnack('Error de conexión con el servidor ($e)');
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+        _scannerController.stop();
+        _scannerController.reset();
+        HapticFeedback.mediumImpact();
+      }
+    }
+  }
+
+Future<void> _searchPlateLegacy({bool forceNetwork = false, String? plateOverride}) async {
     final rawPlate = (plateOverride ?? _plateController.text)
         .replaceAll(RegExp(r'[^A-Za-z0-9]'), '')
         .toUpperCase();
@@ -778,15 +891,17 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
                 _buildScanButton(),
                 const SizedBox(height: 28),
                 if (_vehicleData != null)
-                  _isMttResult
-                      ? _buildMttCard()
-                      : (_isSiiResult
-                          ? _buildSiiCard()
-                          : (_isBoostrResult
-                              ? _buildBoostrCard()
-                              : (_isPrtResult
-                                  ? _buildPrtCard()
-                                  : _buildVehicleSpecsCard()))),
+                  (_dashboardMode && _dashboard != null)
+                      ? _buildDashboard()
+                      : (_isMttResult
+                          ? _buildMttCard()
+                          : (_isSiiResult
+                              ? _buildSiiCard()
+                              : (_isBoostrResult
+                                  ? _buildBoostrCard()
+                                  : (_isPrtResult
+                                      ? _buildPrtCard()
+                                      : _buildVehicleSpecsCard())))),
             _buildSiiEstimateCard(),
               ],
             ),
@@ -860,7 +975,7 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
         children: [
           Expanded(
             child: GestureDetector(
-              onTap: () => setState(() => _selectedEngine = 'boostr'),
+              onTap: () => _selectEngine('boostr'),
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 200),
                 padding: const EdgeInsets.symmetric(vertical: 8),
@@ -871,9 +986,9 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
                 ),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
-                  children: const [
-                    Icon(Icons.bolt, size: 16, color: Color(0xFF38BDF8)),
-                    SizedBox(width: 6),
+                  children: [
+                    const Icon(Icons.bolt, size: 16, color: Color(0xFF38BDF8)),
+                    const SizedBox(width: 6),
                     Flexible(
                       child: FittedBox(
                         fit: BoxFit.scaleDown,
@@ -883,6 +998,10 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
                         ),
                       ),
                     ),
+                    if (_dashboardOk['boostr'] == true) ...[
+                      const SizedBox(width: 4),
+                      const Icon(Icons.check_circle, size: 12, color: Color(0xFF10B981)),
+                    ],
                   ],
                 ),
               ),
@@ -890,7 +1009,7 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
           ),
           Expanded(
             child: GestureDetector(
-              onTap: () => setState(() => _selectedEngine = 'prt'),
+              onTap: () => _selectEngine('prt'),
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 200),
                 padding: const EdgeInsets.symmetric(vertical: 8),
@@ -901,9 +1020,9 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
                 ),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
-                  children: const [
-                    Icon(Icons.precision_manufacturing, size: 16, color: Color(0xFF10B981)),
-                    SizedBox(width: 6),
+                  children: [
+                    const Icon(Icons.precision_manufacturing, size: 16, color: Color(0xFF10B981)),
+                    const SizedBox(width: 6),
                     Flexible(
                       child: FittedBox(
                         fit: BoxFit.scaleDown,
@@ -913,6 +1032,10 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
                         ),
                       ),
                     ),
+                    if (_dashboardOk['prt'] == true) ...[
+                      const SizedBox(width: 4),
+                      const Icon(Icons.check_circle, size: 12, color: Color(0xFF10B981)),
+                    ],
                   ],
                 ),
               ),
@@ -920,7 +1043,7 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
           ),
           Expanded(
             child: GestureDetector(
-              onTap: () => setState(() => _selectedEngine = 'mtt'),
+              onTap: () => _selectEngine('mtt'),
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 200),
                 padding: const EdgeInsets.symmetric(vertical: 8),
@@ -931,9 +1054,9 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
                 ),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
-                  children: const [
-                    Icon(Icons.directions_bus_filled_rounded, size: 16, color: Color(0xFFF59E0B)),
-                    SizedBox(width: 6),
+                  children: [
+                    const Icon(Icons.directions_bus_filled_rounded, size: 16, color: Color(0xFFF59E0B)),
+                    const SizedBox(width: 6),
                     Flexible(
                       child: FittedBox(
                         fit: BoxFit.scaleDown,
@@ -943,6 +1066,10 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
                         ),
                       ),
                     ),
+                    if (_dashboardOk['mtt'] == true) ...[
+                      const SizedBox(width: 4),
+                      const Icon(Icons.check_circle, size: 12, color: Color(0xFF10B981)),
+                    ],
                   ],
                 ),
               ),
@@ -950,7 +1077,7 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
           ),
           Expanded(
             child: GestureDetector(
-              onTap: () => setState(() => _selectedEngine = 'sii'),
+              onTap: () => _selectEngine('sii'),
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 200),
                 padding: const EdgeInsets.symmetric(vertical: 8),
@@ -961,9 +1088,9 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
                 ),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
-                  children: const [
-                    Icon(Icons.account_balance_rounded, size: 16, color: Color(0xFF34D399)),
-                    SizedBox(width: 6),
+                  children: [
+                    const Icon(Icons.account_balance_rounded, size: 16, color: Color(0xFF34D399)),
+                    const SizedBox(width: 6),
                     Flexible(
                       child: FittedBox(
                         fit: BoxFit.scaleDown,
@@ -973,6 +1100,10 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
                         ),
                       ),
                     ),
+                    if (_dashboardOk['sii'] == true) ...[
+                      const SizedBox(width: 4),
+                      const Icon(Icons.check_circle, size: 12, color: Color(0xFF10B981)),
+                    ],
                   ],
                 ),
               ),
@@ -1841,7 +1972,7 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
                     const SizedBox(width: 10),
                     Expanded(
                       child: Text(
-                        _vehicleData!['repuestos_compatibles'] ?? 'Ver catálogo de repuestos compatibles',
+                        d['repuestos_compatibles'] ?? 'Ver catálogo de repuestos compatibles',
                         style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: Color(0xFFE2E8F0)),
                       ),
                     ),
@@ -1867,11 +1998,12 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
   /// Tarjeta de resultado del Registro Nacional de Servicios de Transporte
   /// de Pasajeros y Escolar (RNSTP - MTT). Reemplaza la tarjeta de
   /// especificaciones cuando la caja activa es MTT.
-  Widget _buildMttCard() {
-    final bool isPublic = _vehicleData!['isPublicTransport'] == true;
+  Widget _buildMttCard({Map<String, dynamic>? data}) {
+    final Map<String, dynamic> d = data ?? _vehicleData!;
+    final bool isPublic = d['isPublicTransport'] == true;
     final Color accent = isPublic ? const Color(0xFFF59E0B) : const Color(0xFF38BDF8);
     final String patente =
-        _sanitizeMttText(_vehicleData!['patente']?.toString() ?? '').toUpperCase();
+        _sanitizeMttText(d['patente']?.toString() ?? '').toUpperCase();
 
     return Container(
       width: double.infinity,
@@ -1994,7 +2126,7 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
           ),
           const SizedBox(height: 12),
           if (isPublic)
-            ..._buildMttSections()
+            ..._buildMttSections(data: d)
           else ...[
             Text(
               'El vehículo no pertenece al Registro Nacional de Servicios de '
@@ -2040,7 +2172,7 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
       if (provider != null) {
         await provider.cache.invalidate(plate);
       }
-      await _searchPlate(forceNetwork: true, plateOverride: plate);
+      await _searchPlateLegacy(forceNetwork: true, plateOverride: plate);
       if (mounted) {
         _showSnack('Datos de MTT actualizados exitosamente');
       }
@@ -2091,7 +2223,7 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
       } catch (e) {
         debugPrint('PRT: error invalidando caché backend: $e');
       }
-      await _searchPlate(forceNetwork: true, plateOverride: plate);
+      await _searchPlateLegacy(forceNetwork: true, plateOverride: plate);
       if (mounted) {
         _showSnack('Datos de PRT actualizados exitosamente');
       }
@@ -2118,7 +2250,7 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
       } catch (e) {
         debugPrint('Boostr: error invalidando caché backend: $e');
       }
-      await _searchPlate(forceNetwork: true, plateOverride: plate);
+      await _searchPlateLegacy(forceNetwork: true, plateOverride: plate);
       if (mounted) {
         _showSnack('Datos de Boostr actualizados exitosamente');
       }
@@ -2154,7 +2286,7 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
       if (provider != null) {
         await provider.cache.invalidate(plate);
       }
-      await _searchPlate(forceNetwork: true, plateOverride: plate);
+      await _searchPlateLegacy(forceNetwork: true, plateOverride: plate);
       if (mounted) {
         _showSnack('Datos de SII actualizados exitosamente');
       }
@@ -2181,9 +2313,9 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
   ///   individuales por versión homologada (código, especificaciones,
   ///   equipamiento, tasación y permiso).
   /// - 0 variantes → estado informativo con botón de reintento.
-  Widget _buildSiiCard() {
+  Widget _buildSiiCard({Map<String, dynamic>? data}) {
     const Color accent = Color(0xFF34D399);
-    final Map<String, dynamic> d = _vehicleData!;
+    final Map<String, dynamic> d = data ?? _vehicleData!;
     final String patente =
         _sanitizeMttText(d['patente']?.toString() ?? '').toUpperCase();
     final bool exact = d['exact_match'] == true;
@@ -2649,9 +2781,10 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
   ///  C) Motor, Combustible y Desgaste
   ///  D) Fabricación y Procedencia
   /// Layout responsivo (Wrap/Expanded + softWrap), sin truncar texto.
-  Widget _buildBoostrCard() {
+  Widget _buildBoostrCard({Map<String, dynamic>? data}) {
     const Color accent = Color(0xFF38BDF8);
-    final VehicleBaseModel v = VehicleBaseModel.fromJson(_vehicleData!);
+    final Map<String, dynamic> d = data ?? _vehicleData!;
+    final VehicleBaseModel v = VehicleBaseModel.fromJson(d);
     final String plateDv = [
       v.plate ?? '',
       if ((v.dv ?? '').isNotEmpty) v.dv!,
@@ -3034,9 +3167,10 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
   /// "No informado" (nunca "Tipo"), el combustible vacío como "No
   /// registrado" (nunca una fecha) y la fecha de vencimiento general se
   /// muestra en su tarjeta destacada de vigencia oficial.
-  Widget _buildPrtCard() {
+  Widget _buildPrtCard({Map<String, dynamic>? data}) {
     const Color accent = Color(0xFF10B981);
-    final PrtVehicleData v = PrtVehicleData.fromJson(_vehicleData!);
+    final Map<String, dynamic> d = data ?? _vehicleData!;
+    final PrtVehicleData v = PrtVehicleData.fromJson(d);
     final String patente = v.patente.toUpperCase();
 
     final String vinTxt = v.vinSeguro;
@@ -3255,7 +3389,7 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
                     const SizedBox(width: 10),
                     Expanded(
                       child: Text(
-                        _vehicleData!['repuestos_compatibles'] ?? 'Ver catálogo de repuestos compatibles',
+                        d['repuestos_compatibles'] ?? 'Ver catálogo de repuestos compatibles',
                         softWrap: true,
                         style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: Color(0xFFE2E8F0)),
                       ),
@@ -3493,6 +3627,179 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
   }
 
 
+
+  /// Dashboard unificado: tarjetas continuas de las 4 fuentes oficiales
+  /// (PRT → Boostr → MTT → SII) con transiciones suaves y estados por
+  /// fuente (ok / queued / no disponible).
+  Widget _buildDashboard() {
+    final dash = _dashboard!;
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 350),
+      switchInCurve: Curves.easeOut,
+      switchOutCurve: Curves.easeIn,
+      child: Column(
+        key: ValueKey('dash-${_vehicleData?['patente'] ?? 'empty'}'),
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Container(
+            width: double.infinity,
+            constraints: const BoxConstraints(maxWidth: 380),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            decoration: BoxDecoration(
+              color: const Color(0xFF0F172A).withOpacity(0.85),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: const Color(0xFF00E5FF).withOpacity(0.35), width: 1),
+            ),
+            child: const Row(
+              children: [
+                Icon(Icons.dashboard_rounded, color: Color(0xFF00E5FF), size: 18),
+                SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'DASHBOARD MULTIPROVEEDOR — 4 FUENTES OFICIALES',
+                    softWrap: true,
+                    style: TextStyle(color: Color(0xFF00E5FF), fontSize: 11.5, fontWeight: FontWeight.w900, letterSpacing: 0.8),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 14),
+          if (_dashboardOk['prt'] == true) ...[
+            _buildPrtCard(data: dash['prt']),
+            const SizedBox(height: 16),
+          ] else
+            _dashSourceTile('prt'),
+          if (_dashboardOk['boostr'] == true) ...[
+            _buildBoostrCard(data: dash['boostr']),
+            const SizedBox(height: 16),
+          ] else if (_dashboardQueued)
+            _boostrQueueBanner()
+          else
+            _dashSourceTile('boostr'),
+          if (_dashboardOk['mtt'] == true) ...[
+            _buildMttCard(data: dash['mtt']),
+            const SizedBox(height: 16),
+          ] else
+            _dashSourceTile('mtt'),
+          if (_dashboardOk['sii'] == true) ...[
+            _buildSiiCard(data: dash['sii']),
+            const SizedBox(height: 16),
+          ] else
+            _dashSourceTile('sii'),
+          const SizedBox(height: 8),
+        ],
+      ),
+    );
+  }
+
+  /// Tile compacto de fuente no disponible (con acción de reintento por
+  /// motor: PRT reabre el flujo reCAPTCHA; las demás re-consultan).
+  Widget _dashSourceTile(String engine) {
+    const names = {
+      'prt': 'PRT (Revisión Técnica)',
+      'boostr': 'BOOSTR (Padrón Civil)',
+      'mtt': 'MTT (Transporte Público / RNSTP)',
+      'sii': 'SII (Tasación Fiscal)',
+    };
+    return Container(
+      width: double.infinity,
+      constraints: const BoxConstraints(maxWidth: 380),
+      margin: const EdgeInsets.only(bottom: 14),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: const Color(0xFF0F172A).withOpacity(0.7),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFF334155), width: 0.9),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.cloud_off_rounded, color: Color(0xFF64748B), size: 20),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              '${names[engine] ?? engine.toUpperCase()}: fuente no disponible',
+              softWrap: true,
+              style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 12, fontWeight: FontWeight.w600),
+            ),
+          ),
+          TextButton(
+            onPressed: () {
+              setState(() {
+                _selectedEngine = engine;
+                _dashboardMode = false;
+                _vehicleData = null;
+              });
+              _searchPlateLegacy();
+            },
+            style: TextButton.styleFrom(
+              foregroundColor: const Color(0xFF00E5FF),
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+            ),
+            child: const Text('REINTENTAR', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w900, letterSpacing: 0.6)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Banner interactivo ámbar de cuota Boostr agotada (patente en cola).
+  Widget _boostrQueueBanner() {
+    return Container(
+      width: double.infinity,
+      constraints: const BoxConstraints(maxWidth: 380),
+      margin: const EdgeInsets.only(bottom: 14),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF59E0B).withOpacity(0.10),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFF59E0B).withOpacity(0.55), width: 1),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(Icons.hourglass_bottom_rounded, color: Color(0xFFF59E0B), size: 20),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'BOOSTR / PADRÓN CIVIL — EN COLA',
+                  style: TextStyle(color: Color(0xFFF59E0B), fontSize: 10, fontWeight: FontWeight.w900, letterSpacing: 0.6),
+                ),
+                const SizedBox(height: 4),
+                const Text(
+                  'Cuota mensual de padrón en espera de renovación. Patente agendada para sincronización automática.',
+                  softWrap: true,
+                  style: TextStyle(color: Color(0xFFE2E8F0), fontSize: 12, height: 1.4, fontWeight: FontWeight.w600),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Selección de motor: si el dashboard ya cargó esa fuente, la muestra al
+  /// instante (vista segmentada); si no, dispara el flujo clásico del motor.
+  void _selectEngine(String engine) {
+    setState(() {
+      _selectedEngine = engine;
+      _dashboardMode = false;
+      if (_dashboard != null && _dashboardOk[engine] == true) {
+        _vehicleData = _dashboard![engine];
+      } else {
+        _vehicleData = null;
+      }
+    });
+    if (_dashboard == null || _dashboardOk[engine] != true) {
+      _searchPlateLegacy();
+    }
+  }
+
+
   /// Sanitización profunda anti-mojibake (misma política que el backend):
   /// reemplazos explícitos + barrido genérico de pares 'Ã'+byte, para que
   /// TODO texto se pinte con acentos y ñ perfectos aunque provenga de una
@@ -3550,8 +3857,9 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
   /// (`secciones: [{titulo, tipo: pares|lista, items: [...]}]`).
   /// Si la entrada de caché local es antigua (solo campos planos), sintetiza
   /// una sección de pares para mantener la UI uniforme.
-  List<dynamic> _mttSections() {
-    final raw = _vehicleData!['secciones'];
+  List<dynamic> _mttSections({Map<String, dynamic>? data}) {
+    final Map<String, dynamic> d = data ?? _vehicleData!;
+    final raw = d['secciones'];
     if (raw is List && raw.isNotEmpty) return raw;
     final pairs = <Map<String, String>>[];
     void add(String key, dynamic v) {
@@ -3559,11 +3867,11 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
       if (s.isNotEmpty) pairs.add({'etiqueta': key, 'valor': s});
     }
 
-    add('Tipo de Servicio', _vehicleData!['tipo_servicio']);
-    add('Estado del Servicio', _vehicleData!['estado_servicio']);
-    add('Región', _vehicleData!['region']);
-    add('Folio Flota', _vehicleData!['folio_flota']);
-    add('Vencimiento Permiso', _vehicleData!['fecha_vencimiento_permiso']);
+    add('Tipo de Servicio', d['tipo_servicio']);
+    add('Estado del Servicio', d['estado_servicio']);
+    add('Región', d['region']);
+    add('Folio Flota', d['folio_flota']);
+    add('Vencimiento Permiso', d['fecha_vencimiento_permiso']);
     if (pairs.isEmpty) return const <dynamic>[];
     return <dynamic>[
       <String, dynamic>{'titulo': 'DATOS DEL SERVICIO', 'tipo': 'pares', 'items': pairs},
@@ -3572,9 +3880,10 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
 
   /// Renderizado 100% dinámico de `secciones`: títulos en ámbar, pares
   /// etiqueta/valor sin truncar (softWrap) y listas como tarjetas destacadas.
-  List<Widget> _buildMttSections() {
+  List<Widget> _buildMttSections({Map<String, dynamic>? data}) {
+    final Map<String, dynamic> d = data ?? _vehicleData!;
     final widgets = <Widget>[];
-    final secciones = _mttSections();
+    final secciones = _mttSections(data: d);
     if (secciones.isEmpty) {
       widgets.add(_mttEmptyBadge('No registra datos'));
       return widgets;
