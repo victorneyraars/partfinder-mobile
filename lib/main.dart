@@ -324,6 +324,14 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
         );
         _fetchBoostrTelemetry();
         _showSnack('Consulta multiproveedor completada para $rawPlate');
+        // Si PRT no respondió (patente fuera de caché local), asegurar la
+        // apertura secuencial del modal reCAPTCHA para no dejar la fuente
+        // como "no disponible".
+        if (ok['prt'] != true) {
+          unawaited(Future<void>.delayed(const Duration(milliseconds: 600), () {
+            _solvePrtForDashboard(rawPlate);
+          }));
+        }
         return;
       }
       _showSnack('Error en la consulta unificada (HTTP ${res.statusCode})');
@@ -3725,6 +3733,11 @@ Future<void> _searchPlateLegacy({bool forceNetwork = false, String? plateOverrid
           ),
           TextButton(
             onPressed: () {
+              if (engine == 'prt') {
+                // PRT: abrir directamente el modal reCAPTCHA (human-in-the-loop).
+                unawaited(_solvePrtForDashboard(_currentPlateValue()));
+                return;
+              }
               setState(() {
                 _selectedEngine = engine;
                 _dashboardMode = false;
@@ -3780,6 +3793,38 @@ Future<void> _searchPlateLegacy({bool forceNetwork = false, String? plateOverrid
         ],
       ),
     );
+  }
+
+  /// Patente normalizada actual (ficha visible o input).
+  String _currentPlateValue() {
+    final fromData = (_vehicleData?['patente'] ?? _vehicleData?['plate'])?.toString().trim() ?? '';
+    if (fromData.isNotEmpty) return fromData.toUpperCase();
+    return _plateController.text.replaceAll(RegExp(r'[^A-Za-z0-9]'), '').toUpperCase();
+  }
+
+  /// Resuelve la fuente PRT dentro del dashboard: ejecuta el flujo P2P
+  /// (modal reCAPTCHA) con la patente actual e integra el resultado en la
+  /// tarjeta PRT del dashboard sin salir de la vista unificada.
+  Future<void> _solvePrtForDashboard(String plate) async {
+    if (plate.isEmpty) return;
+    try {
+      final provider = _providers['prt'];
+      if (provider == null) return;
+      final result = await provider.fetch(plate, context: context);
+      if (!mounted) return;
+      if (result.found) {
+        setState(() {
+          _dashboard?['prt'] = Map<String, dynamic>.from(result.data);
+          _dashboardOk['prt'] = true;
+          _vehicleData ??= result.data;
+        });
+        _showSnack('Datos PRT integrados al dashboard');
+      } else {
+        _showSnack('PRT: sin datos disponibles para $plate');
+      }
+    } catch (e) {
+      debugPrint('[PRT-DASH] $e');
+    }
   }
 
   /// Selección de motor: si el dashboard ya cargó esa fuente, la muestra al
