@@ -108,8 +108,9 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
   // Estados formales del pipeline estricto PRT-FIRST:
   //  · _prtSinRegistro: el sistema ministerial respondió SIN historial de
   //    revisiones (homologado/exento) — tile formal, no es fallo de red.
-  //  · _prtOmitido: el usuario descartó el modal, pulsó CONTINUAR SIN PRT
-  //    o se agotó el timeout humano — tile de verificación pendiente.
+  //  · _prtOmitido: estado defensivo residual (modal abortado/descartado);
+  //    con el bloqueo estricto actual el dashboard solo avanza con
+  //    respuesta oficial de PRT ('ok' o 'sin_registro').
   bool _prtSinRegistro = false;
   bool _prtOmitido = false;
   bool _isLoadingSii = false;
@@ -242,22 +243,26 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
     setState(() => _isLoadingSii = false);
   }
 
-  /// CONSULTA MULTIPROVEEDOR — PIPELINE SECUENCIAL ESTRICTO "PRT-FIRST".
+  /// CONSULTA MULTIPROVEEDOR — PIPELINE SECUENCIAL ESTRICTO "PRT-FIRST"
+  /// (ZERO-BYPASS).
   ///
-  /// Al pulsar CONSULTAR VEHÍCULO (única entrada; sin tarjetas intermedias):
+  /// Al pulsar CONSULTAR VEHÍCULO (única entrada; sin botones de bypass):
   ///  A. PASO OBLIGATORIO — PRT PRIMERO:
   ///     1) Si existe historial PRT válido (caché local con revisiones o
   ///        backend vigente) se usa directamente, SIN abrir el modal.
   ///     2) Si NO existe: se abre DE INMEDIATO el modal interactivo P2P de
   ///        PRT y se espera su resolución explícita:
   ///        · Éxito con inspecciones → estado 'ok' (tarjeta PRT + Timeline).
-  ///        · "Sin registro" (PRT responde sin historial) → estado
+  ///        · "Sin registro" oficial (NOT_FOUND ministerial) → estado
   ///          'sin_registro' (tile formal ministerial).
-  ///        · Descartar / CONTINUAR SIN PRT / timeout → estado 'omitido'
-  ///          (tile de verificación pendiente con reintento).
-  ///  B. SOLO DESPUÉS de resolver el paso A, se disparan EN PARALELO
-  ///     Boostr + MTT + SII (endpoint /full) y se renderiza el dashboard
-  ///     integrado UNA sola vez.
+  ///        · X / retroceso / CANCELAR → PRT_ABORTED: se aborta TODO (sin
+  ///          dashboard, sin Boostr/MTT/SII, vuelta al inicio limpio).
+  ///        · Timeout / cuota excedida / error de conexión → diálogo nativo
+  ///          estricto dentro del modal: REINTENTAR recarga el WebView con
+  ///          la patente; CANCELAR aborta. NUNCA se avanza al dashboard.
+  ///  B. SOLO con respuesta oficial PRT ('ok' o 'sin_registro') se disparan
+  ///     EN PARALELO Boostr + MTT + SII (endpoint /full) y se renderiza el
+  ///     dashboard integrado UNA sola vez.
   Future<void> _searchPlate() async {
     final rawPlate = _plateController.text.replaceAll(RegExp(r'[^A-Za-z0-9]'), '').toUpperCase();
     if (rawPlate.length < 5) {
@@ -339,11 +344,28 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
             }
           } catch (e) {
             debugPrint('[PRT-FIRST] $e');
-            prtStatus = 'omitido';
+            prtStatus = 'sin_respuesta';
           }
         }
       } else {
-        prtStatus = 'omitido';
+        prtStatus = 'sin_respuesta';
+      }
+
+      // ===== BLOQUEO ESTRICTO (ZERO-BYPASS): sin respuesta oficial de PRT
+      // NO hay dashboard ni fuentes secundarias =====
+      if (prtStatus == 'abort') {
+        _showSnack('Consulta cancelada — dashboard sin cambios');
+        return;
+      }
+      if (prtStatus != 'ok' && prtStatus != 'sin_registro') {
+        // Timeout / cuota / error de conexión / sin respuesta oficial.
+        final retry = await _showPrtUnavailablePageDialog();
+        if (retry == true && mounted) {
+          await _searchPlate();
+        } else {
+          _showSnack('Consulta cancelada — dashboard sin cambios');
+        }
+        return;
       }
 
       // A3) Persistir en el backend el historial recién extraído (async).
@@ -440,16 +462,87 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
 
   /// Mapea el evento del modal PRT al estado formal del pipeline PRT-First.
   /// 'sin_registro' solo cuando el sistema ministerial respondió sin
-  /// historial; descartes, timeouts y cuotas degradan a 'omitido'.
+  /// historial; 'abort' cuando el usuario cerró el modal (X/retroceso);
+  /// todo lo demás es 'sin_respuesta' (bloqueo estricto: sin dashboard).
   String _prtEventToStatus(String? evt) {
     switch (evt) {
       case 'PRT_SIN_REGISTRO':
         return 'sin_registro';
+      case 'PRT_ABORTED':
+        return 'abort';
       case 'RECAPTCHA_TIMEOUT':
       case 'RECAPTCHA_QUOTA_EXCEEDED':
       default:
-        return 'omitido';
+        return 'sin_respuesta';
     }
+  }
+
+  /// Diálogo nativo a nivel de pipeline cuando PRT no entregó respuesta
+  /// oficial (evento residual fuera del modal: timeout/cuota/error de
+  /// conexión). REINTENTAR re-ejecuta la consulta completa; CANCELAR
+  /// devuelve a la pantalla de inicio sin dashboard.
+  Future<bool> _showPrtUnavailablePageDialog() async {
+    final result = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF0F172A),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(14),
+          side: const BorderSide(color: Color(0xFFF59E0B), width: 1),
+        ),
+        title: const Row(
+          children: [
+            Icon(Icons.gavel_rounded, color: Color(0xFFF59E0B), size: 22),
+            SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                'Portal oficial PRT sin respuesta',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 0.4,
+                ),
+              ),
+            ),
+          ],
+        ),
+        content: const Text(
+          'No se pudo obtener respuesta del portal oficial PRT. El dashboard no avanzará sin la confirmación ministerial.',
+          style: TextStyle(
+            color: Color(0xFFCBD5E1),
+            fontSize: 13.5,
+            height: 1.45,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            style: TextButton.styleFrom(foregroundColor: const Color(0xFF94A3B8)),
+            child: const Text(
+              'CANCELAR',
+              style: TextStyle(fontWeight: FontWeight.w900, letterSpacing: 0.6),
+            ),
+          ),
+          ElevatedButton.icon(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFF59E0B).withOpacity(0.15),
+              foregroundColor: const Color(0xFFF59E0B),
+              side: const BorderSide(color: Color(0xFFF59E0B), width: 1),
+            ),
+            icon: const Icon(Icons.refresh, size: 16),
+            label: const Text(
+              'REINTENTAR CONSULTA',
+              style: TextStyle(fontWeight: FontWeight.w900, letterSpacing: 0.6),
+            ),
+          ),
+        ],
+      ),
+    );
+    return result == true;
   }
 
   /// Persiste en el backend el historial PRT recién extraído del modal
@@ -3807,10 +3900,9 @@ Future<void> _searchPlateLegacy({bool forceNetwork = false, String? plateOverrid
       );
     }
 
-    // PRT-FIRST — estado 'omitido': el usuario descartó el modal, pulsó
-    // CONTINUAR SIN PRT o se agotó el timeout humano. Tile neutro de
-    // verificación pendiente con reintento explícito (sin penalizar el
-    // resto del dashboard).
+    // PRT-FIRST — estado defensivo 'omitido' (residual: modal abortado o
+    // descartado). Con el bloqueo estricto actual el dashboard solo avanza
+    // con respuesta oficial; este tile es red de seguridad con reintento.
     if (engine == 'prt' && _prtOmitido) {
       return Container(
         width: double.infinity,
@@ -3993,6 +4085,10 @@ Future<void> _searchPlateLegacy({bool forceNetwork = false, String? plateOverrid
       if (!mounted) return;
       final evt = _lastPrtEvent;
       _lastPrtEvent = null;
+      if (evt == 'PRT_ABORTED') {
+        _showSnack('Consulta PRT cancelada — dashboard sin cambios');
+        return;
+      }
       if (evt == 'RECAPTCHA_QUOTA_EXCEEDED') {
         setState(() {
           _prtQuotaExceeded = true;
@@ -4036,12 +4132,12 @@ Future<void> _searchPlateLegacy({bool forceNetwork = false, String? plateOverrid
         // Fallback sin inspecciones: NO se marca como completado.
         _showSnack('PRT: la fuente no entregó revisiones — reintenta la verificación P2P');
       } else {
-        // Modal descartado voluntariamente (X / CONTINUAR SIN PRT).
+        // Modal descartado/abortado (X / retroceso / sin respuesta).
         setState(() {
           _prtSinRegistro = false;
           _prtOmitido = true;
         });
-        _showSnack('PRT: verificación descartada — reintenta desde la tarjeta');
+        _showSnack('PRT: consulta cancelada — reintenta desde la tarjeta');
       }
     } catch (e) {
       debugPrint('[PRT-DASH] $e');
@@ -4687,6 +4783,8 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
   bool _showRetryButton = false;
   // Evita que el timeout humano cierre un modal que ya emitió DATA/ERROR.
   bool _dataOrErrorSent = false;
+  // Evita la superposición doble del diálogo estricto "sin respuesta PRT".
+  bool _dialogVisible = false;
 
   @override
   void initState() {
@@ -4704,18 +4802,22 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
       }
     });
     // Timeout humano de 45s: si el modal sigue abierto sin DATA/ERROR, se
-    // cierra con el evento RECAPTCHA_TIMEOUT (degrada con elegancia).
+    // muestra el diálogo estricto de "sin respuesta oficial" (REINTENTAR /
+    // CANCELAR). NUNCA se cierra solo ni avanza al dashboard sin PRT.
     _humanTimeout = Timer(const Duration(seconds: 45), () {
       if (mounted && !_dataOrErrorSent) {
         try {
-          Navigator.of(context).pop(<String, dynamic>{
-            '__prtEvent': 'RECAPTCHA_TIMEOUT',
-          });
+          _showPrtNoResponseDialog();
         } catch (_) {}
       }
     });
     // Crear el WebView con el modo de composición híbrido clásico forzado más
     // abajo (en el widget), que evita el lienzo en blanco del SurfaceTexture.
+    // BLOQUEO RÍGIDO DE ZOOM NATIVO: enableZoom(false) mapea en Android a
+    // WebSettings.setSupportZoom(false) — sin pellizco-zoom ni doble tap de
+    // zoom. El congelamiento de scroll se completa con CSS (html/body fijos
+    // + overflow hidden + touch-action none) inyectado por prt_injection.js
+    // y el meta viewport maximum-scale=1 / user-scalable=no.
     _controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..setBackgroundColor(const Color(0xFF0B132B))
@@ -4729,11 +4831,12 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             try {
               final obj = jsonDecode(msg);
               if (obj is Map && obj['type'] == 'RECAPTCHA_QUOTA_EXCEEDED') {
+                // Cuota Google excedida en prt.cl: diálogo estricto dentro
+                // del modal (REINTENTAR recarga / CANCELAR aborta). NUNCA
+                // avanza al dashboard sin respuesta oficial.
                 _humanTimeout?.cancel();
                 if (mounted) {
-                  Navigator.of(context).pop(<String, dynamic>{
-                    '__prtEvent': 'RECAPTCHA_QUOTA_EXCEEDED',
-                  });
+                  _showPrtNoResponseDialog();
                 }
               }
             } catch (_) {}
@@ -4871,12 +4974,13 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
               }
             }
             // Temporizador de seguridad: si en 12s no llega DATA/ERROR,
-            // cerrar el modal (nunca quedar congelado en la animación).
+            // mostrar el diálogo estricto de "sin respuesta oficial"
+            // (nunca quedar congelado ni cerrar en silencio).
             _postbackSafetyTimer?.cancel();
             _postbackSafetyTimer = Timer(const Duration(seconds: 12), () {
               if (mounted) {
-                debugPrint('[PRT] timeout de seguridad del postback: cerrando modal');
-                Navigator.of(context).pop();
+                debugPrint('[PRT] timeout de seguridad del postback');
+                _showPrtNoResponseDialog();
               }
             });
           } else if (msg == 'ERROR:NOT_FOUND') {
@@ -4893,21 +4997,12 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             }
           } else if (msg == 'ERROR:RATE_LIMIT') {
             // Google limitó temporalmente las verificaciones reCAPTCHA
-            // ("Vuelve a intentarlo más tarde"): informar amigablemente y
-            // cerrar de inmediato, sin dejar al usuario esperando.
+            // ("Vuelve a intentarlo más tarde"): diálogo estricto de sin
+            // respuesta oficial (REINTENTAR recarga / CANCELAR aborta).
             _postbackSafetyTimer?.cancel();
+            _humanTimeout?.cancel();
             if (mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  backgroundColor: Color(0xFF1E293B),
-                  content: Text(
-                    'Google limitó temporalmente la verificación. Activa modo avión unos segundos o cambia de red e intenta nuevamente.',
-                    style: TextStyle(color: Colors.white, fontSize: 14),
-                  ),
-                  duration: Duration(seconds: 5),
-                ),
-              );
-              Navigator.of(context).pop();
+              _showPrtNoResponseDialog();
             }
           }
         },
@@ -5782,49 +5877,44 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: const Color(0xFF0F172A),
-      // La pantalla de verificación NUNCA redimensiona su viewport ante la
-      // presencia del teclado: el IME no puede desplazar ni invadir el layout.
-      resizeToAvoidBottomInset: false,
-      appBar: AppBar(
-        backgroundColor: const Color(0xFF1E293B),
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'Consulta Técnica PRT',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white),
-            ),
-            Text(
-              'Patente: ' + widget.targetPlate,
-              style: const TextStyle(fontSize: 12, color: Color(0xFF38BDF8)),
-            ),
-          ],
-        ),
-        leading: IconButton(
-          icon: const Icon(Icons.close, color: Colors.white),
-          onPressed: () => Navigator.of(context).pop(),
-        ),
-        // Botón secundario visible: omitir la verificación sin demoras.
-        actions: [
-          Padding(
-            padding: const EdgeInsets.only(right: 8),
-            child: TextButton(
-              onPressed: () => Navigator.of(context).pop(null),
-              style: TextButton.styleFrom(
-                foregroundColor: const Color(0xFF94A3B8),
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+    // BLOQUEO ESTRICTO (zero-bypass): el retroceso del sistema NO cierra el
+    // modal con null — aborta la consulta completa con PRT_ABORTED.
+    return PopScope(
+      canPop: false,
+      onPopInvoked: (didPop) {
+        if (!didPop) {
+          _abortPrtModal();
+        }
+      },
+      child: Scaffold(
+        backgroundColor: const Color(0xFF0F172A),
+        // La pantalla de verificación NUNCA redimensiona su viewport ante la
+        // presencia del teclado: el IME no puede desplazar ni invadir el layout.
+        resizeToAvoidBottomInset: false,
+        appBar: AppBar(
+          backgroundColor: const Color(0xFF1E293B),
+          automaticallyImplyLeading: false,
+          title: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Consulta Técnica PRT',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white),
               ),
-              child: const Text(
-                'CONTINUAR SIN PRT',
-                style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w800, letterSpacing: 0.6),
+              Text(
+                'Patente: ' + widget.targetPlate,
+                style: const TextStyle(fontSize: 12, color: Color(0xFF38BDF8)),
               ),
-            ),
+            ],
           ),
-        ],
-      ),
-      body: Stack(
+          // ÚNICA vía de salida: ABORTA la consulta completa (sin dashboard
+          // ni Boostr/MTT/SII). No existe botón de bypass.
+          leading: IconButton(
+            icon: const Icon(Icons.close, color: Colors.white),
+            onPressed: _abortPrtModal,
+          ),
+        ),
+        body: Stack(
         children: [
           // Fondo nativo del modal.
           const ColoredBox(color: Color(0xFF0B132B)),
@@ -5928,6 +6018,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
           ),
         ],
       ),
+      ),
     );
   }
 
@@ -5945,11 +6036,135 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
     } catch (e) {
       debugPrint('Error reintentando: $e');
     }
-    // Reiniciar el temporizador de reintento.
     _readyFallbackTimer?.cancel();
     _readyFallbackTimer = Timer(const Duration(seconds: 15), () {
       if (mounted && !_isReady) {
         setState(() => _showRetryButton = true);
+      }
+    });
+  }
+
+  /// Diálogo nativo ESTRICTO cuando PRT no entrega respuesta oficial
+  /// (timeout humano, cuota Google excedida, rate-limit, postback sin
+  /// respuesta). NO cierra el modal por sí solo: REINTENTAR recarga el
+  /// WebView con la patente para forzar la respuesta; CANCELAR aborta la
+  /// consulta completa (PRT_ABORTED) sin pasar al dashboard.
+  void _showPrtNoResponseDialog() {
+    if (!mounted || _dialogVisible) return;
+    _dialogVisible = true;
+    _humanTimeout?.cancel();
+    _postbackSafetyTimer?.cancel();
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF0F172A),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(14),
+          side: const BorderSide(color: Color(0xFFF59E0B), width: 1),
+        ),
+        title: const Row(
+          children: [
+            Icon(Icons.gavel_rounded, color: Color(0xFFF59E0B), size: 22),
+            SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                'Portal oficial PRT sin respuesta',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 0.4,
+                ),
+              ),
+            ),
+          ],
+        ),
+        content: const Text(
+          'No se pudo obtener respuesta del portal oficial PRT. El dashboard no avanzará sin la confirmación ministerial.',
+          style: TextStyle(
+            color: Color(0xFFCBD5E1),
+            fontSize: 13.5,
+            height: 1.45,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              _dialogVisible = false;
+              _abortPrtModal();
+            },
+            style: TextButton.styleFrom(foregroundColor: const Color(0xFF94A3B8)),
+            child: const Text(
+              'CANCELAR',
+              style: TextStyle(fontWeight: FontWeight.w900, letterSpacing: 0.6),
+            ),
+          ),
+          ElevatedButton.icon(
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              _dialogVisible = false;
+              _retryPrtLoad();
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFF59E0B).withOpacity(0.15),
+              foregroundColor: const Color(0xFFF59E0B),
+              side: const BorderSide(color: Color(0xFFF59E0B), width: 1),
+            ),
+            icon: const Icon(Icons.refresh, size: 16),
+            label: const Text(
+              'REINTENTAR CONSULTA',
+              style: TextStyle(fontWeight: FontWeight.w900, letterSpacing: 0.6),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Aborta la consulta completa (CANCELAR / botón X / retroceso del
+  /// sistema): cierra el modal con PRT_ABORTED. El pipeline NO ejecuta
+  /// Boostr/MTT/SII y devuelve al usuario a la pantalla de inicio limpia.
+  void _abortPrtModal() {
+    if (!mounted) return;
+    _humanTimeout?.cancel();
+    _postbackSafetyTimer?.cancel();
+    _dataOrErrorSent = true;
+    Navigator.of(context).pop(<String, dynamic>{
+      '__prtEvent': 'PRT_ABORTED',
+    });
+  }
+
+  /// REINTENTAR CONSULTA: recarga el WebView con la patente y rearma todos
+  /// los temporizadores para forzar la respuesta oficial de PRT.
+  void _retryPrtLoad() {
+    if (!mounted) return;
+    _dataOrErrorSent = false;
+    _dialogVisible = false;
+    _postbackSafetyTimer?.cancel();
+    _humanTimeout?.cancel();
+    _humanTimeout = Timer(const Duration(seconds: 45), () {
+      if (mounted && !_dataOrErrorSent) {
+        try {
+          _showPrtNoResponseDialog();
+        } catch (_) {}
+      }
+    });
+    setState(() {
+      _isReady = false;
+      _pageLoaded = false;
+      _showRetryButton = false;
+      _challengeOpen = false;
+      _isProcessingPostback = true;
+    });
+    _retryLoad();
+    // Soltar el blindaje del postback a los 2.5s: para entonces el READY ya
+    // llegó (y cubre con su overlay inicial) o el watchdog está rearmado.
+    Future.delayed(const Duration(milliseconds: 2500), () {
+      if (mounted && _isProcessingPostback) {
+        setState(() => _isProcessingPostback = false);
       }
     });
   }
