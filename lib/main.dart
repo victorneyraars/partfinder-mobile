@@ -5613,6 +5613,23 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
           icon: const Icon(Icons.close, color: Colors.white),
           onPressed: () => Navigator.of(context).pop(),
         ),
+        // Botón secundario visible: omitir la verificación sin demoras.
+        actions: [
+          Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: TextButton(
+              onPressed: () => Navigator.of(context).pop(null),
+              style: TextButton.styleFrom(
+                foregroundColor: const Color(0xFF94A3B8),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              ),
+              child: const Text(
+                'CONTINUAR SIN PRT',
+                style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w800, letterSpacing: 0.6),
+              ),
+            ),
+          ),
+        ],
       ),
       body: Stack(
         children: [
