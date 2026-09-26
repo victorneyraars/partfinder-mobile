@@ -237,6 +237,17 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
   /// (PRT + Boostr + MTT + SII en paralelo) y despliega las tarjetas de
   /// todas las fuentes disponibles en una vista continua. Si ninguna fuente
   /// responde, cae al flujo segmentado clásico del motor seleccionado.
+  /// CONSULTA MULTIPROVEEDOR — FLUJO "PRT P2P FIRST".
+  ///
+  /// 1) Si existe caché local VÁLIDA de PRT (con revisiones/inspecciones):
+  ///    el dashboard se renderiza al instante desde caché y las demás
+  ///    fuentes se actualizan en segundo plano.
+  /// 2) Si NO existe caché PRT (o está vacía/sin revisiones):
+  ///    se abre DE INMEDIATO el modal reCAPTCHA/WebView P2P de PRT (sin
+  ///    retardos ni espera al backend) y, EN PARALELO, se disparan las
+  ///    consultas de Boostr, MTT y SII. Al resolver el reCAPTCHA el scraper
+  ///    guarda en caché local + backend, y el Dashboard se renderiza con
+  ///    las 4 fuentes resueltas al 100%.
   Future<void> _searchPlate() async {
     final rawPlate = _plateController.text.replaceAll(RegExp(r'[^A-Za-z0-9]'), '').toUpperCase();
     if (rawPlate.length < 5) {
@@ -264,15 +275,69 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
     _scannerController.repeat(reverse: true);
 
     try {
-      final res = await http
-          .get(Uri.parse('https://api.studiodigital360.com/api/patente/$rawPlate/full'))
-          .timeout(const Duration(seconds: 35));
+      // ===== 1) Caché local VÁLIDA de PRT (con revisiones reales) =====
+      final prtProvider = _providers['prt'];
+      Map<String, dynamic>? cachedPrtMap;
+      if (prtProvider != null) {
+        final cached = await prtProvider.cache.read(rawPlate);
+        if (cached != null && cached['found'] == true && cached['data'] is Map) {
+          final map = Map<String, dynamic>.from(cached['data'] as Map);
+          if (_prtDataCompleto(map)) cachedPrtMap = map;
+        }
+      }
 
-      if (res.statusCode == 200) {
-        final full = jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
-        final dash = <String, Map<String, dynamic>>{};
-        final ok = <String, bool>{};
+      if (cachedPrtMap != null) {
+        // ===== 3) Dashboard instantáneo desde caché + background =====
+        cachedPrtMap['data_source'] = 'CACHE_LOCAL_prt';
+        setState(() {
+          _vehicleData = cachedPrtMap;
+          _dashboard = <String, Map<String, dynamic>>{'prt': cachedPrtMap!};
+          _dashboardOk = <String, bool>{'prt': true};
+          _dashboardQueued = false;
+          _dashboardMode = true;
+        });
+        _fetchBoostrTelemetry();
+        _showSnack('Dashboard cargado desde caché PRT — actualizando fuentes en segundo plano');
+        unawaited(_refreshDashboardSources(rawPlate));
+        return;
+      }
 
+      // ===== 2) PRT P2P FIRST: modal inmediato + backend en paralelo =====
+      final fullFuture = _fetchFullDashboard(rawPlate);
+
+      // Abrir el flujo PRT de INMEDIATO (caché del backend → si está vigente
+      // retorna directo; si no, abre el modal reCAPTCHA sin esperas).
+      final prtProvider2 = _providers['prt'];
+      Map<String, dynamic>? prtData;
+      if (prtProvider2 != null) {
+        try {
+          final prtResult = await prtProvider2.fetch(rawPlate, context: context);
+          if (prtResult.found && _prtDataCompleto(prtResult.data)) {
+            prtData = Map<String, dynamic>.from(prtResult.data);
+            // Guardar en caché local y sincronizar con el backend.
+            await prtProvider2.cache.write(rawPlate,
+                found: true, data: prtData!, source: 'prt', status: 'hit');
+            try {
+              await http.post(
+                Uri.parse('https://api.studiodigital360.com/api/vehicle/cache'),
+                headers: {'Content-Type': 'application/json'},
+                body: jsonEncode({'plate': rawPlate, 'data': prtData}),
+              ).timeout(const Duration(seconds: 8));
+            } catch (e) {
+              debugPrint('PRT: error sincronizando backend: $e');
+            }
+          }
+        } catch (e) {
+          debugPrint('[PRT-FIRST] $e');
+        }
+      }
+
+      // Esperar el dashboard paralelo (Boostr + MTT + SII).
+      final full = await fullFuture;
+      final dash = <String, Map<String, dynamic>>{};
+      final ok = <String, bool>{};
+
+      if (full != null) {
         void add(String key, dynamic block) {
           if (block is! Map) {
             ok[key] = false;
@@ -286,55 +351,68 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
           ok[key] = status == 'ok';
         }
 
-        add('prt', full['prt']);
         add('boostr', full['boostr']);
         add('mtt', full['mtt']);
         add('sii', full['sii']);
-
-        if (!ok.containsValue(true)) {
-          // Ninguna fuente con datos: flujo segmentado clásico (p. ej.
-          // modal reCAPTCHA PRT desde el motor seleccionado).
-          await _searchPlateLegacy();
-          return;
+        // PRT del backend solo cuenta si trae revisiones reales (evita el
+        // falso positivo "Sin registro" del fallback sin inspecciones).
+        if (full['prt'] is Map) {
+          final prtBlock = full['prt'] as Map;
+          final prtStatus = (prtBlock['status'] ?? 'error').toString();
+          final prtPayload = (prtBlock['data'] is Map)
+              ? Map<String, dynamic>.from(prtBlock['data'] as Map)
+              : <String, dynamic>{};
+          dash['prt'] = prtPayload;
+          ok['prt'] = prtStatus == 'ok' && _prtDataCompleto(prtPayload);
+        } else {
+          ok['prt'] = false;
         }
+      } else {
+        ok['boostr'] = false;
+        ok['mtt'] = false;
+        ok['sii'] = false;
+        ok['prt'] = false;
+      }
 
-        Map<String, dynamic>? first;
-        for (final k in const ['prt', 'boostr', 'mtt', 'sii']) {
-          if (ok[k] == true) {
-            first = dash[k];
-            break;
-          }
-        }
+      // El resultado P2P fresco manda sobre el del backend.
+      if (prtData != null) {
+        dash['prt'] = prtData;
+        ok['prt'] = true;
+      }
 
-        setState(() {
-          _dashboard = dash;
-          _dashboardOk = ok;
-          _dashboardQueued = (full['boostr'] is Map) &&
-              ((full['boostr'] as Map)['status'] == 'queued' ||
-                  (full['boostr'] as Map)['status'] == 'exhausted');
-          _dashboardMode = true;
-          _vehicleData = first;
-        });
-
-        final firstD = first ?? const <String, dynamic>{};
-        _fetchSiiTasacion(
-          (firstD['marca'] ?? firstD['make'])?.toString(),
-          (firstD['modelo'] ?? firstD['model'])?.toString(),
-          firstD['anio'] ?? firstD['year'],
-        );
-        _fetchBoostrTelemetry();
-        _showSnack('Consulta multiproveedor completada para $rawPlate');
-        // Si PRT no respondió (patente fuera de caché local), asegurar la
-        // apertura secuencial del modal reCAPTCHA para no dejar la fuente
-        // como "no disponible".
-        if (ok['prt'] != true) {
-          unawaited(Future<void>.delayed(const Duration(milliseconds: 600), () {
-            _solvePrtForDashboard(rawPlate);
-          }));
-        }
+      if (!ok.containsValue(true)) {
+        // Sin fuentes: flujo segmentado clásico (permite reintentar P2P).
+        await _searchPlateLegacy();
         return;
       }
-      _showSnack('Error en la consulta unificada (HTTP ${res.statusCode})');
+
+      Map<String, dynamic>? first;
+      for (final k in const ['prt', 'boostr', 'mtt', 'sii']) {
+        if (ok[k] == true) {
+          first = dash[k];
+          break;
+        }
+      }
+
+      setState(() {
+        _dashboard = dash;
+        _dashboardOk = ok;
+        _dashboardQueued = full != null &&
+            full['boostr'] is Map &&
+            (((full['boostr'] as Map)['status'] == 'queued') ||
+                ((full['boostr'] as Map)['status'] == 'exhausted'));
+        _dashboardMode = true;
+        _vehicleData = first;
+      });
+
+      final firstD = first ?? const <String, dynamic>{};
+      _fetchSiiTasacion(
+        (firstD['marca'] ?? firstD['make'])?.toString(),
+        (firstD['modelo'] ?? firstD['model'])?.toString(),
+        firstD['anio'] ?? firstD['year'],
+      );
+      _fetchBoostrTelemetry();
+      _showSnack('Consulta multiproveedor completada para $rawPlate');
     } catch (e) {
       _showSnack('Error de conexión con el servidor ($e)');
     } finally {
@@ -346,6 +424,74 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
       }
     }
   }
+
+  /// PRT "completo": tiene historial de revisiones o estado/vigencia reales.
+  /// Evita el falso positivo "Sin registro" del fallback sin inspecciones.
+  bool _prtDataCompleto(Map<String, dynamic> d) {
+    final hist = d['historial_rt'];
+    final hasHist = hist is List && hist.isNotEmpty;
+    final hasEstado = (d['rt_estado']?.toString().trim().isNotEmpty ?? false) ||
+        (d['rt_vencimiento']?.toString().trim().isNotEmpty ?? false);
+    return hasHist || hasEstado;
+  }
+
+  /// Descarga el dashboard agregado (/full) para Boostr/MTT/SII en paralelo.
+  Future<Map<String, dynamic>?> _fetchFullDashboard(String rawPlate) async {
+    try {
+      final res = await http
+          .get(Uri.parse('https://api.studiodigital360.com/api/patente/$rawPlate/full'))
+          .timeout(const Duration(seconds: 35));
+      if (res.statusCode == 200) {
+        return jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
+      }
+    } catch (e) {
+      debugPrint('[DASH-FULL] $e');
+    }
+    return null;
+  }
+
+  /// Actualización en segundo plano de las fuentes (tras renderizar desde
+  /// caché PRT): completa el dashboard sin tocar la tarjeta PRT de caché.
+  Future<void> _refreshDashboardSources(String rawPlate) async {
+    final full = await _fetchFullDashboard(rawPlate);
+    if (!mounted || full == null || _dashboard == null) return;
+    setState(() {
+      void add(String key, dynamic block) {
+        if (block is! Map) {
+          _dashboardOk[key] = false;
+          return;
+        }
+        final status = (block['status'] ?? 'error').toString();
+        final data = (block['data'] is Map)
+            ? Map<String, dynamic>.from(block['data'] as Map)
+            : <String, dynamic>{};
+        if (status == 'ok') {
+          _dashboard![key] = data;
+          _dashboardOk[key] = true;
+        }
+      }
+
+      add('boostr', full['boostr']);
+      add('mtt', full['mtt']);
+      add('sii', full['sii']);
+      if (full['prt'] is Map) {
+        final prtBlock = full['prt'] as Map;
+        final prtStatus = (prtBlock['status'] ?? 'error').toString();
+        final prtPayload = (prtBlock['data'] is Map)
+            ? Map<String, dynamic>.from(prtBlock['data'] as Map)
+            : <String, dynamic>{};
+        // Nunca reemplazar la caché local PRT por un fallback sin revisiones.
+        if (prtStatus == 'ok' && _prtDataCompleto(prtPayload)) {
+          _dashboard!['prt'] = prtPayload;
+          _dashboardOk['prt'] = true;
+        }
+      }
+      _dashboardQueued = full['boostr'] is Map &&
+          (((full['boostr'] as Map)['status'] == 'queued') ||
+              ((full['boostr'] as Map)['status'] == 'exhausted'));
+    });
+  }
+
 
 Future<void> _searchPlateLegacy({bool forceNetwork = false, String? plateOverride}) async {
     final rawPlate = (plateOverride ?? _plateController.text)
@@ -1572,6 +1718,15 @@ Future<void> _searchPlateLegacy({bool forceNetwork = false, String? plateOverrid
 
   
   Widget _buildSiiEstimateCard() {
+    // Limpieza de banner residual: si el dashboard SII ya entregó 1 o más
+    // variantes válidas (p. ej. las 8 del Morning 2022), ocultar por
+    // completo la tarjeta de "no disponible".
+    if (_dashboardMode && _dashboard != null) {
+      final siiVersiones = _dashboard!['sii']?['versiones'];
+      if (siiVersiones is List && siiVersiones.isNotEmpty) {
+        return const SizedBox.shrink();
+      }
+    }
     final sii = _vehicleData?["sii"] ??
         _siiData?["summary"] ??
         (_siiData?["data"] is Map ? _siiData?["data"]?["summary"] : null);
@@ -3812,13 +3967,16 @@ Future<void> _searchPlateLegacy({bool forceNetwork = false, String? plateOverrid
       if (provider == null) return;
       final result = await provider.fetch(plate, context: context);
       if (!mounted) return;
-      if (result.found) {
+      if (result.found && _prtDataCompleto(result.data)) {
         setState(() {
           _dashboard?['prt'] = Map<String, dynamic>.from(result.data);
           _dashboardOk['prt'] = true;
           _vehicleData ??= result.data;
         });
         _showSnack('Datos PRT integrados al dashboard');
+      } else if (result.found) {
+        // Fallback sin inspecciones: NO se marca como completado.
+        _showSnack('PRT: la fuente no entregó revisiones — reintenta la verificación P2P');
       } else {
         _showSnack('PRT: sin datos disponibles para $plate');
       }
