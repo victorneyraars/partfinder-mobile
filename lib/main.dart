@@ -1972,7 +1972,7 @@ Future<void> _searchPlateLegacy({bool forceNetwork = false, String? plateOverrid
                     const SizedBox(width: 10),
                     Expanded(
                       child: Text(
-                        d['repuestos_compatibles'] ?? 'Ver catálogo de repuestos compatibles',
+                        _vehicleData!['repuestos_compatibles'] ?? 'Ver catálogo de repuestos compatibles',
                         style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: Color(0xFFE2E8F0)),
                       ),
                     ),
