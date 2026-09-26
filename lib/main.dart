@@ -105,6 +105,13 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
   // Degradación elegante de PRT (reCAPTCHA Enterprise saturado / timeout).
   String? _lastPrtEvent;
   bool _prtQuotaExceeded = false;
+  // Estados formales del pipeline estricto PRT-FIRST:
+  //  · _prtSinRegistro: el sistema ministerial respondió SIN historial de
+  //    revisiones (homologado/exento) — tile formal, no es fallo de red.
+  //  · _prtOmitido: el usuario descartó el modal, pulsó CONTINUAR SIN PRT
+  //    o se agotó el timeout humano — tile de verificación pendiente.
+  bool _prtSinRegistro = false;
+  bool _prtOmitido = false;
   bool _isLoadingSii = false;
 
   Map<String, dynamic>? _vehicleData;
@@ -235,33 +242,22 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
     setState(() => _isLoadingSii = false);
   }
 
-    /// CONSULTA MULTIPROVEEDOR SIMULTÁNEA (Dashboard Unificado).
-  /// Al pulsar "CONSULTAR VEHÍCULO" invoca GET /api/patente/{PLATE}/full
-  /// (PRT + Boostr + MTT + SII en paralelo) y despliega las tarjetas de
-  /// todas las fuentes disponibles en una vista continua. Si ninguna fuente
-  /// responde, cae al flujo segmentado clásico del motor seleccionado.
-  /// CONSULTA MULTIPROVEEDOR — FLUJO "PRT P2P FIRST".
+  /// CONSULTA MULTIPROVEEDOR — PIPELINE SECUENCIAL ESTRICTO "PRT-FIRST".
   ///
-  /// 1) Si existe caché local VÁLIDA de PRT (con revisiones/inspecciones):
-  ///    el dashboard se renderiza al instante desde caché y las demás
-  ///    fuentes se actualizan en segundo plano.
-  /// 2) Si NO existe caché PRT (o está vacía/sin revisiones):
-  ///    se abre DE INMEDIATO el modal reCAPTCHA/WebView P2P de PRT (sin
-  ///    retardos ni espera al backend) y, EN PARALELO, se disparan las
-  ///    consultas de Boostr, MTT y SII. Al resolver el reCAPTCHA el scraper
-  ///    guarda en caché local + backend, y el Dashboard se renderiza con
-  ///    las 4 fuentes resueltas al 100%.
-  /// CONSULTA MULTIPROVEEDOR — CERO FRICCIÓN ("PRT BAJO DEMANDA").
-  ///
-  /// Al pulsar CONSULTAR VEHÍCULO:
-  ///  1. NUNCA se abre automáticamente el modal reCAPTCHA ni se bloquea la
-  ///     pantalla.
-  ///  2. Se ejecutan en paralelo Boostr, MTT y SII (endpoint /full).
-  ///  3. Se consulta la caché local/backend por datos históricos previos de
-  ///     PRT para la patente.
-  ///  4. El Dashboard se renderiza DE INMEDIATO con todas las fuentes que no
-  ///     requieren captcha; la tarjeta PRT queda "bajo demanda" (botón
-  ///     VERIFICAR Y CARGAR HISTORIAL PRT) si no hay histórico.
+  /// Al pulsar CONSULTAR VEHÍCULO (única entrada; sin tarjetas intermedias):
+  ///  A. PASO OBLIGATORIO — PRT PRIMERO:
+  ///     1) Si existe historial PRT válido (caché local con revisiones o
+  ///        backend vigente) se usa directamente, SIN abrir el modal.
+  ///     2) Si NO existe: se abre DE INMEDIATO el modal interactivo P2P de
+  ///        PRT y se espera su resolución explícita:
+  ///        · Éxito con inspecciones → estado 'ok' (tarjeta PRT + Timeline).
+  ///        · "Sin registro" (PRT responde sin historial) → estado
+  ///          'sin_registro' (tile formal ministerial).
+  ///        · Descartar / CONTINUAR SIN PRT / timeout → estado 'omitido'
+  ///          (tile de verificación pendiente con reintento).
+  ///  B. SOLO DESPUÉS de resolver el paso A, se disparan EN PARALELO
+  ///     Boostr + MTT + SII (endpoint /full) y se renderiza el dashboard
+  ///     integrado UNA sola vez.
   Future<void> _searchPlate() async {
     final rawPlate = _plateController.text.replaceAll(RegExp(r'[^A-Za-z0-9]'), '').toUpperCase();
     if (rawPlate.length < 5) {
@@ -286,24 +282,76 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
       _dashboardQueued = false;
       _dashboardMode = false;
       _prtQuotaExceeded = false;
+      _prtSinRegistro = false;
+      _prtOmitido = false;
       _lastPrtEvent = null;
     });
     _scannerController.repeat(reverse: true);
 
     try {
-      // ===== 1) Caché local VÁLIDA de PRT (histórico previo) =====
+      // ===== A) PASO OBLIGATORIO: PRT-FIRST =====
       final prtProvider = _providers['prt'];
-      Map<String, dynamic>? cachedPrtMap;
+      String prtStatus = 'pendiente';
+      Map<String, dynamic>? prtPayload;
+      bool prtQuota = false;
+
       if (prtProvider != null) {
+        // A1) Caché local válida con revisiones (histórico previo).
         final cached = await prtProvider.cache.read(rawPlate);
         if (cached != null && cached['found'] == true && cached['data'] is Map) {
           final map = Map<String, dynamic>.from(cached['data'] as Map);
-          if (_prtDataCompleto(map)) cachedPrtMap = map;
+          if (_prtDataCompleto(map)) {
+            prtPayload = map;
+            prtStatus = 'ok';
+          }
         }
+
+        if (prtStatus != 'ok') {
+          try {
+            // A2) Caché del backend con política de vigencia; si no hay
+            //     registro vigente, el proveedor abre EL MODAL P2P en esta
+            //     misma llamada (sin banners ni pasos intermedios).
+            final result = await prtProvider.fetch(rawPlate, context: context);
+            if (result.found && _prtDataCompleto(result.data)) {
+              prtPayload = Map<String, dynamic>.from(result.data);
+              prtStatus = 'ok';
+              await prtProvider.cache.write(rawPlate, found: true, data: prtPayload, source: 'prt');
+            } else if (result.found) {
+              // El backend entregó ficha SIN revisiones (falso positivo
+              // prohibido): forzar la verificación P2P directa.
+              final raw = await _openPrtModalAndAwait(context, rawPlate);
+              final evt = _lastPrtEvent;
+              _lastPrtEvent = null;
+              if (raw != null && _prtDataCompleto(raw)) {
+                prtPayload = raw;
+                prtStatus = 'ok';
+                await prtProvider.cache.write(rawPlate, found: true, data: prtPayload, source: 'prt');
+              } else {
+                prtStatus = _prtEventToStatus(evt);
+                prtQuota = evt == 'RECAPTCHA_QUOTA_EXCEEDED';
+              }
+            } else {
+              // El modal ya se resolvió dentro de fetch(): mapear su evento.
+              final evt = _lastPrtEvent;
+              _lastPrtEvent = null;
+              prtStatus = _prtEventToStatus(evt);
+              prtQuota = evt == 'RECAPTCHA_QUOTA_EXCEEDED';
+            }
+          } catch (e) {
+            debugPrint('[PRT-FIRST] $e');
+            prtStatus = 'omitido';
+          }
+        }
+      } else {
+        prtStatus = 'omitido';
       }
 
-      // ===== 2) Fuentes SIN captcha en paralelo (Boostr/MTT/SII + PRT
-      //         histórico del backend). NUNCA abre modal. =====
+      // A3) Persistir en el backend el historial recién extraído (async).
+      if (prtStatus == 'ok' && prtPayload != null) {
+        _persistPrtToBackend(rawPlate, prtPayload);
+      }
+
+      // ===== B) FUENTES SECUNDARIAS EN PARALELO (Boostr + MTT + SII) =====
       final full = await _fetchFullDashboard(rawPlate);
 
       final dash = <String, Map<String, dynamic>>{};
@@ -326,28 +374,19 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
         add('boostr', full['boostr']);
         add('mtt', full['mtt']);
         add('sii', full['sii']);
-        if (full['prt'] is Map) {
-          final prtBlock = full['prt'] as Map;
-          final prtStatus = (prtBlock['status'] ?? 'error').toString();
-          final prtPayload = (prtBlock['data'] is Map)
-              ? Map<String, dynamic>.from(prtBlock['data'] as Map)
-              : <String, dynamic>{};
-          dash['prt'] = prtPayload;
-          ok['prt'] = prtStatus == 'ok' && _prtDataCompleto(prtPayload);
-        } else {
-          ok['prt'] = false;
-        }
       } else {
         ok['boostr'] = false;
         ok['mtt'] = false;
         ok['sii'] = false;
-        ok['prt'] = false;
       }
 
-      // ===== 3) La caché local PRT prevalece sobre el backend =====
-      if (cachedPrtMap != null) {
-        dash['prt'] = cachedPrtMap;
+      // PRT: SOLO manda el resultado del pipeline PRT-First (paso A).
+      if (prtStatus == 'ok' && prtPayload != null) {
+        dash['prt'] = prtPayload;
         ok['prt'] = true;
+      } else {
+        dash['prt'] = const {};
+        ok['prt'] = false;
       }
 
       Map<String, dynamic>? first;
@@ -365,6 +404,9 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
             full['boostr'] is Map &&
             (((full['boostr'] as Map)['status'] == 'queued') ||
                 ((full['boostr'] as Map)['status'] == 'exhausted'));
+        _prtQuotaExceeded = prtQuota;
+        _prtSinRegistro = prtStatus == 'sin_registro';
+        _prtOmitido = prtStatus == 'omitido';
         _dashboardMode = true;
         _vehicleData = first;
       });
@@ -378,9 +420,12 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
         );
       }
       _fetchBoostrTelemetry();
-      _showSnack(ok.containsValue(true)
-          ? 'Consulta multiproveedor completada para $rawPlate'
-          : 'Sin registros automáticos para $rawPlate — usa "VERIFICAR Y CARGAR HISTORIAL PRT" si lo necesitas');
+      final snack = switch (prtStatus) {
+        'ok' => 'Auditoría completa para $rawPlate: PRT verificado + Padrón, MTT y SII',
+        'sin_registro' => 'PRT sin revisiones registradas para $rawPlate — fuentes secundarias cargadas',
+        _ => 'PRT omitido para $rawPlate — reintenta la verificación desde la tarjeta',
+      };
+      _showSnack(snack);
     } catch (e) {
       _showSnack('Error de conexión con el servidor ($e)');
     } finally {
@@ -391,6 +436,39 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
         HapticFeedback.mediumImpact();
       }
     }
+  }
+
+  /// Mapea el evento del modal PRT al estado formal del pipeline PRT-First.
+  /// 'sin_registro' solo cuando el sistema ministerial respondió sin
+  /// historial; descartes, timeouts y cuotas degradan a 'omitido'.
+  String _prtEventToStatus(String? evt) {
+    switch (evt) {
+      case 'PRT_SIN_REGISTRO':
+        return 'sin_registro';
+      case 'RECAPTCHA_TIMEOUT':
+      case 'RECAPTCHA_QUOTA_EXCEEDED':
+      default:
+        return 'omitido';
+    }
+  }
+
+  /// Persiste en el backend el historial PRT recién extraído del modal
+  /// (fire-and-forget: un fallo aquí no bloquea el dashboard).
+  void _persistPrtToBackend(String plate, Map<String, dynamic> data) {
+    unawaited(() async {
+      try {
+        final res = await http
+            .post(
+              Uri.parse('https://api.studiodigital360.com/api/vehicle/cache'),
+              headers: {'Content-Type': 'application/json'},
+              body: jsonEncode({'plate': plate, 'data': data}),
+            )
+            .timeout(const Duration(seconds: 8));
+        debugPrint('[PRT-FIRST] persistencia backend: ${res.statusCode}');
+      } catch (e) {
+        debugPrint('[PRT-FIRST] persistencia backend error: $e');
+      }
+    }());
   }
 
 
@@ -3593,81 +3671,6 @@ Future<void> _searchPlateLegacy({bool forceNetwork = false, String? plateOverrid
   /// Tile compacto de fuente no disponible (con acción de reintento por
   /// motor: PRT reabre el flujo reCAPTCHA; las demás re-consultan).
   Widget _dashSourceTile(String engine) {
-    // PRT BAJO DEMANDA (Case B): tarjeta elegante con borde azul neutro.
-    // El modal reCAPTCHA SOLO se abre al pulsar el botón de acción.
-    if (engine == 'prt' && !_prtQuotaExceeded) {
-      return Container(
-        width: double.infinity,
-        constraints: const BoxConstraints(maxWidth: 380),
-        margin: const EdgeInsets.only(bottom: 14),
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: const Color(0xFF0F172A).withOpacity(0.75),
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: const Color(0xFF3B82F6).withOpacity(0.45), width: 1.1),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Icon(Icons.verified_user_outlined, color: Color(0xFF3B82F6), size: 22),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        'REVISIÓN TÉCNICA Y GASES (PRT OFICIAL)',
-                        softWrap: true,
-                        style: TextStyle(
-                          color: Color(0xFF3B82F6),
-                          fontSize: 12,
-                          fontWeight: FontWeight.w900,
-                          letterSpacing: 0.7,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      const Text(
-                        'Requiere verificación puntual con el servidor del Ministerio de Transportes.',
-                        softWrap: true,
-                        style: TextStyle(
-                          color: Color(0xFF94A3B8),
-                          fontSize: 11.5,
-                          height: 1.4,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            SizedBox(
-              width: double.infinity,
-              height: 44,
-              child: ElevatedButton.icon(
-                onPressed: () => unawaited(_solvePrtForDashboard(_currentPlateValue())),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF3B82F6).withOpacity(0.15),
-                  foregroundColor: const Color(0xFF3B82F6),
-                  side: const BorderSide(color: Color(0xFF3B82F6), width: 1.2),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                ),
-                icon: const Icon(Icons.gavel_rounded, size: 17),
-                label: const Text(
-                  'VERIFICAR Y CARGAR HISTORIAL PRT',
-                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w900, letterSpacing: 0.6),
-                ),
-              ),
-            ),
-          ],
-        ),
-      );
-    }
-
     // Degradación elegante: PRT saturado por cuota reCAPTCHA Enterprise.
     if (engine == 'prt' && _prtQuotaExceeded) {
       return Container(
@@ -3728,6 +3731,158 @@ Future<void> _searchPlateLegacy({bool forceNetwork = false, String? plateOverrid
         ),
       );
     }
+
+    // PRT-FIRST — estado formal "SIN REGISTRO": la verificación ministerial
+    // respondió sin historial de revisiones (homologado o exento). No es un
+    // fallo de red: es un resultado oficial del pipeline.
+    if (engine == 'prt' && _prtSinRegistro) {
+      return Container(
+        width: double.infinity,
+        constraints: const BoxConstraints(maxWidth: 380),
+        margin: const EdgeInsets.only(bottom: 14),
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: const Color(0xFF0F172A).withOpacity(0.75),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: const Color(0xFF64748B).withOpacity(0.65), width: 1.1),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Icon(Icons.verified_user_rounded, color: Color(0xFF94A3B8), size: 22),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        '[ PRT: SIN REVISIONES REGISTRADAS ]',
+                        softWrap: true,
+                        style: TextStyle(
+                          color: Color(0xFFE2E8F0),
+                          fontSize: 12,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: 0.7,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      const Text(
+                        'Vehículo sin historial de revisiones técnicas en el sistema ministerial (homologado o exento).',
+                        softWrap: true,
+                        style: TextStyle(
+                          color: Color(0xFF94A3B8),
+                          fontSize: 11.5,
+                          height: 1.4,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              height: 38,
+              child: OutlinedButton.icon(
+                onPressed: () => unawaited(_solvePrtForDashboard(_currentPlateValue())),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: const Color(0xFF94A3B8),
+                  side: const BorderSide(color: Color(0xFF64748B), width: 1),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                ),
+                icon: const Icon(Icons.replay_rounded, size: 16),
+                label: const Text(
+                  'REINTENTAR VERIFICACIÓN',
+                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.w900, letterSpacing: 0.6),
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    // PRT-FIRST — estado 'omitido': el usuario descartó el modal, pulsó
+    // CONTINUAR SIN PRT o se agotó el timeout humano. Tile neutro de
+    // verificación pendiente con reintento explícito (sin penalizar el
+    // resto del dashboard).
+    if (engine == 'prt' && _prtOmitido) {
+      return Container(
+        width: double.infinity,
+        constraints: const BoxConstraints(maxWidth: 380),
+        margin: const EdgeInsets.only(bottom: 14),
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: const Color(0xFF0F172A).withOpacity(0.75),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: const Color(0xFF475569).withOpacity(0.8), width: 1.1),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Icon(Icons.hourglass_empty_rounded, color: Color(0xFF00E5FF), size: 22),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        '[ PRT: VERIFICACIÓN PENDIENTE ]',
+                        softWrap: true,
+                        style: TextStyle(
+                          color: Color(0xFFE2E8F0),
+                          fontSize: 12,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: 0.7,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      const Text(
+                        'Se omitió la verificación ministerial para esta patente. Puedes ejecutar la auditoría PRT completa cuando quieras.',
+                        softWrap: true,
+                        style: TextStyle(
+                          color: Color(0xFF94A3B8),
+                          fontSize: 11.5,
+                          height: 1.4,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              height: 40,
+              child: OutlinedButton.icon(
+                onPressed: () => unawaited(_solvePrtForDashboard(_currentPlateValue())),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: const Color(0xFF00E5FF),
+                  side: const BorderSide(color: Color(0xFF00E5FF), width: 1),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                ),
+                icon: const Icon(Icons.gavel_rounded, size: 16),
+                label: const Text(
+                  'REINTENTAR PRT',
+                  style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w900, letterSpacing: 0.6),
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
     const names = {
       'prt': 'PRT (Revisión Técnica)',
       'boostr': 'BOOSTR (Padrón Civil)',
@@ -3838,15 +3993,40 @@ Future<void> _searchPlateLegacy({bool forceNetwork = false, String? plateOverrid
       if (!mounted) return;
       final evt = _lastPrtEvent;
       _lastPrtEvent = null;
-      if (evt == 'RECAPTCHA_QUOTA_EXCEEDED' || evt == 'RECAPTCHA_TIMEOUT') {
-        setState(() => _prtQuotaExceeded = true);
+      if (evt == 'RECAPTCHA_QUOTA_EXCEEDED') {
+        setState(() {
+          _prtQuotaExceeded = true;
+          _prtSinRegistro = false;
+          _prtOmitido = true;
+        });
         _showSnack(
             'Portal oficial de PRT temporalmente saturado (límite de cuota Google excedido en prt.cl). Mostrando datos de Padrón, MTT y SII.');
+        return;
+      }
+      if (evt == 'RECAPTCHA_TIMEOUT') {
+        setState(() {
+          _prtQuotaExceeded = false;
+          _prtSinRegistro = false;
+          _prtOmitido = true;
+        });
+        _showSnack('Verificación PRT agotada por tiempo. Reintenta la auditoría cuando quieras.');
+        return;
+      }
+      if (evt == 'PRT_SIN_REGISTRO') {
+        setState(() {
+          _prtQuotaExceeded = false;
+          _prtSinRegistro = true;
+          _prtOmitido = false;
+        });
+        _showSnack(
+            'PRT: sin revisiones técnicas registradas para esta patente (homologado o exento).');
         return;
       }
       if (result.found && _prtDataCompleto(result.data)) {
         setState(() {
           _prtQuotaExceeded = false;
+          _prtSinRegistro = false;
+          _prtOmitido = false;
           _dashboard?['prt'] = Map<String, dynamic>.from(result.data);
           _dashboardOk['prt'] = true;
           _vehicleData ??= result.data;
@@ -3856,7 +4036,12 @@ Future<void> _searchPlateLegacy({bool forceNetwork = false, String? plateOverrid
         // Fallback sin inspecciones: NO se marca como completado.
         _showSnack('PRT: la fuente no entregó revisiones — reintenta la verificación P2P');
       } else {
-        _showSnack('PRT: sin datos disponibles para $plate');
+        // Modal descartado voluntariamente (X / CONTINUAR SIN PRT).
+        setState(() {
+          _prtSinRegistro = false;
+          _prtOmitido = true;
+        });
+        _showSnack('PRT: verificación descartada — reintenta desde la tarjeta');
       }
     } catch (e) {
       debugPrint('[PRT-DASH] $e');
@@ -4484,9 +4669,6 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
   // Popup de imágenes de Google abierto: oculta temporalmente la tarjeta de
   // la placa para que el desafío tenga todo el alto sin solaparse.
   bool _challengeOpen = false;
-  // Fallback Boostr en curso: la telemetría muestra la transición fluida
-  // 'Recuperando datos del vehículo vía Boostr...'.
-  bool _boostrRecovery = false;
   // Temporizador de seguridad: si pasan 12s desde POSTBACK_START sin
   // respuesta (DATA/ERROR), cierra el modal. La app jamás queda congelada.
   Timer? _postbackSafetyTimer;
@@ -4592,14 +4774,20 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
               final jsonStr = msg.substring(5);
               final map = jsonDecode(jsonStr) as Map<String, dynamic>;
 
-              // ===== VALIDACIÓN DE CONTENIDO + FALLBACK BOOSTR =====
+              // ===== VALIDACIÓN DE CONTENIDO → SIN REGISTRO =====
               // Si el payload PRT llega sin datos de vehículo (marca/modelo
-              // vacíos), no se falla bruscamente: transición fluida a Boostr.
+              // vacíos), el sistema ministerial no registra la patente:
+              // estado formal 'sin_registro' del pipeline PRT-First.
               final marca = (map['marca'] ?? '').toString().trim();
               final modelo = (map['modelo'] ?? '').toString().trim();
               if (marca.isEmpty && modelo.isEmpty) {
-                debugPrint('[PRT] DATA sin datos de vehículo → fallback Boostr');
-                _boostrFallback();
+                debugPrint('[PRT] DATA sin datos de vehículo → sin registro');
+                _humanTimeout?.cancel();
+                if (mounted) {
+                  Navigator.of(context).pop(<String, dynamic>{
+                    '__prtEvent': 'PRT_SIN_REGISTRO',
+                  });
+                }
                 return;
               }
 
@@ -4692,12 +4880,17 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
               }
             });
           } else if (msg == 'ERROR:NOT_FOUND') {
-            // Patente no existe en PRT: transición fluida al fallback Boostr
-            // (la telemetría cambia a 'Recuperando datos del vehículo vía
-            // Boostr...'). Si Boostr tampoco tiene datos, recién entonces se
-            // avisa al usuario y se devuelve el foco al input.
+            // Patente sin historial en el sistema ministerial PRT: cerrar el
+            // modal con el estado formal 'sin_registro' (tile ministerial
+            // del pipeline PRT-First).
             _postbackSafetyTimer?.cancel();
-            _boostrFallback();
+            _dataOrErrorSent = true;
+            _humanTimeout?.cancel();
+            if (mounted) {
+              Navigator.of(context).pop(<String, dynamic>{
+                '__prtEvent': 'PRT_SIN_REGISTRO',
+              });
+            }
           } else if (msg == 'ERROR:RATE_LIMIT') {
             // Google limitó temporalmente las verificaciones reCAPTCHA
             // ("Vuelve a intentarlo más tarde"): informar amigablemente y
@@ -5713,14 +5906,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
           // la recarga completa de página. Hace físicamente imposible ver
           // la web de PRT o el teclado durante la transición. El interior es
           // la telemetría ejecutiva premium (pulso cian/verde + estados).
-          // En modo fallback Boostr muestra la transición fluida dedicada.
-          if (_isProcessingPostback)
-            _boostrRecovery
-                ? const _ExecutiveTelemetryOverlay(
-                    states: ['Recuperando datos del vehículo vía Boostr...'],
-                    rotateStates: false,
-                  )
-                : const _ExecutiveTelemetryOverlay(),
+          if (_isProcessingPostback) const _ExecutiveTelemetryOverlay(),
 
           // Capa de carga inicial (telemetría premium) que se DESVANECE por
           // encima del WebView al recibir READY: fundido suave de 350ms sin
@@ -5766,60 +5952,6 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
         setState(() => _showRetryButton = true);
       }
     });
-  }
-
-  /// Fallback automático a Boostr: si PRT no tiene datos (o la patente no
-  /// existe), se recupera la ficha del vehículo vía Boostr con transición
-  /// fluida (telemetría 'Recuperando datos del vehículo vía Boostr...').
-  /// Si Boostr tampoco tiene datos, recién entonces se ejecuta el flujo de
-  /// no-encontrada (SnackBar + refoco del input).
-  Future<void> _boostrFallback() async {
-    if (mounted) {
-      setState(() {
-        _isProcessingPostback = true;
-        _boostrRecovery = true;
-      });
-    }
-    _postbackSafetyTimer?.cancel();
-
-    Map<String, dynamic>? boostrData;
-    try {
-      final resp = await http
-          .post(
-            Uri.parse('https://api.studiodigital360.com/api/patente/fallback-boostr'),
-            headers: {'Content-Type': 'application/json'},
-            body: jsonEncode({'patente': widget.targetPlate}),
-          )
-          .timeout(const Duration(seconds: 20));
-      if (resp.statusCode == 200) {
-        final raw = jsonDecode(resp.body) as Map<String, dynamic>;
-        final data = (raw['data'] is Map<String, dynamic>)
-            ? Map<String, dynamic>.from(raw['data'] as Map)
-            : Map<String, dynamic>.from(raw);
-        final marca = (data['marca'] ?? data['make'] ?? '').toString().trim();
-        final modelo = (data['modelo'] ?? data['model'] ?? '').toString().trim();
-        if (marca.isNotEmpty || modelo.isNotEmpty) {
-          boostrData = data;
-        }
-      }
-    } catch (e) {
-      debugPrint('[PRT] fallback Boostr error: $e');
-    }
-
-    if (!mounted) return;
-    if (boostrData != null) {
-      debugPrint('[PRT] Boostr OK: ${boostrData!['marca']} ${boostrData['modelo']}');
-      if (widget.onVehicleSaved != null) {
-        widget.onVehicleSaved!(boostrData!);
-      }
-      Navigator.of(context).pop(boostrData);
-      return;
-    }
-    // Boostr tampoco tiene datos → flujo de no encontrada.
-    if (widget.onErrorNotFound != null) {
-      widget.onErrorNotFound!();
-    }
-    Navigator.of(context).pop();
   }
 
   /// Watchdog de 6 segundos para 'READY': si el script dinámico no ha
