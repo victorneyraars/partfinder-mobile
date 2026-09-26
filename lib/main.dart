@@ -102,6 +102,9 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
   Map<String, bool> _dashboardOk = const {};
   bool _dashboardQueued = false;
   bool _dashboardMode = false;
+  // Degradación elegante de PRT (reCAPTCHA Enterprise saturado / timeout).
+  String? _lastPrtEvent;
+  bool _prtQuotaExceeded = false;
   bool _isLoadingSii = false;
 
   Map<String, dynamic>? _vehicleData;
@@ -271,6 +274,8 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
       _dashboardOk = const {};
       _dashboardQueued = false;
       _dashboardMode = false;
+      _prtQuotaExceeded = false;
+      _lastPrtEvent = null;
     });
     _scannerController.repeat(reverse: true);
 
@@ -330,6 +335,13 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
         } catch (e) {
           debugPrint('[PRT-FIRST] $e');
         }
+      }
+
+      // Procesar evento del modal PRT (cuota excedida / timeout humano).
+      final evt = _lastPrtEvent;
+      _lastPrtEvent = null;
+      if (evt == 'RECAPTCHA_QUOTA_EXCEEDED' || evt == 'RECAPTCHA_TIMEOUT') {
+        _prtQuotaExceeded = true;
       }
 
       // Esperar el dashboard paralelo (Boostr + MTT + SII).
@@ -412,7 +424,12 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
         firstD['anio'] ?? firstD['year'],
       );
       _fetchBoostrTelemetry();
-      _showSnack('Consulta multiproveedor completada para $rawPlate');
+      if (_prtQuotaExceeded) {
+        _showSnack(
+            'Portal oficial de PRT temporalmente saturado (límite de cuota Google excedido en prt.cl). Mostrando datos de Padrón, MTT y SII.');
+      } else {
+        _showSnack('Consulta multiproveedor completada para $rawPlate');
+      }
     } catch (e) {
       _showSnack('Error de conexión con el servidor ($e)');
     } finally {
@@ -660,8 +677,12 @@ Future<void> _searchPlateLegacy({bool forceNetwork = false, String? plateOverrid
         ),
       ),
     );
+    if (result is Map) {
+      final evt = result['__prtEvent'];
+      if (evt is String) _lastPrtEvent = evt;
+      return Map<String, dynamic>.from(result);
+    }
     if (result is Map<String, dynamic>) return result;
-    if (result is Map) return Map<String, dynamic>.from(result);
     return null;
   }
 
@@ -3859,6 +3880,66 @@ Future<void> _searchPlateLegacy({bool forceNetwork = false, String? plateOverrid
   /// Tile compacto de fuente no disponible (con acción de reintento por
   /// motor: PRT reabre el flujo reCAPTCHA; las demás re-consultan).
   Widget _dashSourceTile(String engine) {
+    // Degradación elegante: PRT saturado por cuota reCAPTCHA Enterprise.
+    if (engine == 'prt' && _prtQuotaExceeded) {
+      return Container(
+        width: double.infinity,
+        constraints: const BoxConstraints(maxWidth: 380),
+        margin: const EdgeInsets.only(bottom: 14),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          color: const Color(0xFFF59E0B).withOpacity(0.08),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: const Color(0xFFF59E0B).withOpacity(0.5), width: 1),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.cloud_off_rounded, color: Color(0xFFF59E0B), size: 18),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    '[ PRT: SERVIDOR OFICIAL SATURADO ]',
+                    softWrap: true,
+                    style: const TextStyle(
+                      color: Color(0xFFF59E0B),
+                      fontSize: 10.5,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: 0.6,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            const Text(
+              'La plataforma ministerial prt.cl presenta congestión en su verificador. El resto de las fuentes opera normalmente.',
+              softWrap: true,
+              style: TextStyle(color: Color(0xFFE2E8F0), fontSize: 12, height: 1.4, fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              height: 38,
+              child: ElevatedButton.icon(
+                onPressed: () => unawaited(_solvePrtForDashboard(_currentPlateValue())),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFFF59E0B).withOpacity(0.15),
+                  foregroundColor: const Color(0xFFF59E0B),
+                  side: const BorderSide(color: Color(0xFFF59E0B), width: 1),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                ),
+                icon: const Icon(Icons.refresh, size: 16),
+                label: const Text('REINTENTAR',
+                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.w900, letterSpacing: 0.6)),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
     const names = {
       'prt': 'PRT (Revisión Técnica)',
       'boostr': 'BOOSTR (Padrón Civil)',
@@ -3967,8 +4048,17 @@ Future<void> _searchPlateLegacy({bool forceNetwork = false, String? plateOverrid
       if (provider == null) return;
       final result = await provider.fetch(plate, context: context);
       if (!mounted) return;
+      final evt = _lastPrtEvent;
+      _lastPrtEvent = null;
+      if (evt == 'RECAPTCHA_QUOTA_EXCEEDED' || evt == 'RECAPTCHA_TIMEOUT') {
+        setState(() => _prtQuotaExceeded = true);
+        _showSnack(
+            'Portal oficial de PRT temporalmente saturado (límite de cuota Google excedido en prt.cl). Mostrando datos de Padrón, MTT y SII.');
+        return;
+      }
       if (result.found && _prtDataCompleto(result.data)) {
         setState(() {
+          _prtQuotaExceeded = false;
           _dashboard?['prt'] = Map<String, dynamic>.from(result.data);
           _dashboardOk['prt'] = true;
           _vehicleData ??= result.data;
@@ -4626,6 +4716,9 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
   // respuesta (DATA/ERROR), cierra el modal. La app jamás queda congelada.
   Timer? _postbackSafetyTimer;
   Timer? _readyFallbackTimer;
+  // TIMEOUT DE SEGURIDAD humano: 45s sin resolución exitosa del reCAPTCHA
+  // (bucles infinitos de imágenes de Google) → emitir RECAPTCHA_TIMEOUT.
+  Timer? _humanTimeout;
   // Watchdog de 6s para 'READY': si el script dinámico no completa el
   // aislamiento (CSS anti-flicker + isolateForm) y despacha 'READY', se
   // reintenta inyección/recarga automáticamente (máx. 2); si todo falla,
@@ -4635,6 +4728,8 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
   int _readyReloads = 0;
   // Tras 15s sin READY, muestra botón de reintentar (no expone pantalla en blanco).
   bool _showRetryButton = false;
+  // Evita que el timeout humano cierre un modal que ya emitió DATA/ERROR.
+  bool _dataOrErrorSent = false;
 
   @override
   void initState() {
@@ -4651,6 +4746,17 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
         setState(() => _showRetryButton = true);
       }
     });
+    // Timeout humano de 45s: si el modal sigue abierto sin DATA/ERROR, se
+    // cierra con el evento RECAPTCHA_TIMEOUT (degrada con elegancia).
+    _humanTimeout = Timer(const Duration(seconds: 45), () {
+      if (mounted && !_dataOrErrorSent) {
+        try {
+          Navigator.of(context).pop(<String, dynamic>{
+            '__prtEvent': 'RECAPTCHA_TIMEOUT',
+          });
+        } catch (_) {}
+      }
+    });
     // Crear el WebView con el modo de composición híbrido clásico forzado más
     // abajo (en el widget), que evita el lienzo en blanco del SurfaceTexture.
     _controller = WebViewController()
@@ -4662,8 +4768,22 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
         'PrtBridge',
         onMessageReceived: (JavaScriptMessage message) {
           final msg = message.message;
-          if (msg.startsWith('DATA:')) {
+          if (msg.startsWith('{')) {
             try {
+              final obj = jsonDecode(msg);
+              if (obj is Map && obj['type'] == 'RECAPTCHA_QUOTA_EXCEEDED') {
+                _humanTimeout?.cancel();
+                if (mounted) {
+                  Navigator.of(context).pop(<String, dynamic>{
+                    '__prtEvent': 'RECAPTCHA_QUOTA_EXCEEDED',
+                  });
+                }
+              }
+            } catch (_) {}
+          } else if (msg.startsWith('DATA:')) {
+            try {
+              _dataOrErrorSent = true;
+              _humanTimeout?.cancel();
               _postbackSafetyTimer?.cancel();
               // Cierre OBLIGATORIO del teclado del SO antes de cerrar el
               // modal: el autofocus nativo de PRT puede levantar el teclado
@@ -4717,6 +4837,10 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             } catch (e) {
               debugPrint('Error parsing PRT payload: $e');
             }
+          } else if (msg.startsWith('ERROR:')) {
+            _dataOrErrorSent = true;
+            _humanTimeout?.cancel();
+            debugPrint('[PRT] ${msg}');
           } else if (msg.startsWith('DEBUG:')) {
             // Reporte de depuración desde el JS inyectado (cross-frame prefill).
             debugPrint('[PRT-PREFILL] ${msg.substring(6)}');
@@ -4954,7 +5078,8 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
   Future<void> _fetchAndInjectDynamicScript() async {
     try {
       final resp = await http
-          .get(Uri.parse('https://api.studiodigital360.com/api/debug/prt-script.js'))
+          .get(Uri.parse(
+              'https://api.studiodigital360.com/api/debug/prt-script.js?v=${DateTime.now().millisecondsSinceEpoch}'))
           .timeout(const Duration(seconds: 2));
       if (resp.statusCode == 200) {
         final script = utf8.decode(resp.bodyBytes);
@@ -5663,6 +5788,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
   @override
   void dispose() {
     _readyFallbackTimer?.cancel();
+    _humanTimeout?.cancel();
     _readyWatchdog?.cancel();
     _postbackSafetyTimer?.cancel();
     super.dispose();
