@@ -117,6 +117,10 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
   bool _prtOmitido = false;
   // Estado global cuando NINGUNA fuente (PRT ni Boostr) tiene datos.
   bool _globalNoData = false;
+  // MTT respondió OK pero con descarte "vehículo particular / no RNSTP":
+  // NO cuenta como dato vehicular real (no bloquea _globalNoData), pero SÍ
+  // debe renderizar su tarjeta informativa en lugar del tile "no disponible".
+  bool _mttHasResponse = false;
   bool _isLoadingSii = false;
 
   Map<String, dynamic>? _vehicleData;
@@ -296,6 +300,7 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
       _prtNoEncontrado = false;
       _prtOmitido = false;
       _globalNoData = false;
+      _mttHasResponse = false;
       _lastPrtEvent = null;
     });
     _scannerController.repeat(reverse: true);
@@ -391,6 +396,8 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
 
       final dash = <String, Map<String, dynamic>>{};
       final ok = <String, bool>{};
+      // MTT respondió OK pero con descarte "particular / no RNSTP".
+      var mttHasResponse = false;
 
       void add(String key, dynamic block) {
         if (block is! Map) {
@@ -410,6 +417,8 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
         // == false y sin datos reales de flota/servicio). Ese resultado se
         // trata como NEUTRO (no-data): no debe impedir el estado global
         // "_globalNoData" cuando PRT y Boostr ya confirmaron 'not_found'.
+        // PERO la tarjeta MTT SÍ debe renderizarse (informando "Vehículo
+        // Particular") cuando hay otras fuentes con datos.
         if (key == 'mtt' && status == 'ok') {
           final isPublic = data['es_transporte_publico'] == true ||
               data['isPublicTransport'] == true;
@@ -420,8 +429,10 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
               (data['folio_flota']?.toString().trim().isNotEmpty ?? false) ||
               (data['fecha_vencimiento_permiso']?.toString().trim().isNotEmpty ?? false);
           if (!isPublic && !hasServiceData) {
-            // Descarte negativo por defecto: neutralizar para el global.
+            // Descarte negativo por defecto: neutralizar para el global,
+            // pero recordar que MTT SÍ entregó una respuesta válida.
             ok['mtt'] = false;
+            mttHasResponse = true;
           }
         }
       }
@@ -474,6 +485,7 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
         _prtNoEncontrado = prtStatus == 'not_found';
         _prtOmitido = prtStatus == 'omitido';
         _globalNoData = globalNoData;
+        _mttHasResponse = mttHasResponse;
         _dashboardMode = true;
         _vehicleData = first;
       });
@@ -2134,7 +2146,10 @@ Future<void> _searchPlateLegacy({bool forceNetwork = false, String? plateOverrid
   /// especificaciones cuando la caja activa es MTT.
   Widget _buildMttCard({Map<String, dynamic>? data}) {
     final Map<String, dynamic> d = data ?? _vehicleData!;
-    final bool isPublic = d['isPublicTransport'] == true;
+    // Tolerar ambos esquemas: el provider emite 'isPublicTransport' (camel),
+    // el endpoint /full emite 'es_transporte_publico' (snake).
+    final bool isPublic = d['isPublicTransport'] == true ||
+        d['es_transporte_publico'] == true;
     final Color accent = isPublic ? const Color(0xFFF59E0B) : const Color(0xFF38BDF8);
     final String patente =
         _sanitizeMttText(d['patente']?.toString() ?? '').toUpperCase();
@@ -2300,6 +2315,12 @@ Future<void> _searchPlateLegacy({bool forceNetwork = false, String? plateOverrid
   /// al instante.
   Future<void> _refreshMttData(String plate) async {
     if (_isRefreshingMtt) return;
+    // En modo dashboard, el refresco de MTT es AISLADO: solo actualiza el
+    // bloque MTT sin mutar PRT/Boostr/SII ni el estado global de la vista.
+    if (_dashboardMode) {
+      await _retryDashboardSource('mtt');
+      return;
+    }
     setState(() => _isRefreshingMtt = true);
     try {
       final provider = _providers['mtt'];
@@ -2312,6 +2333,75 @@ Future<void> _searchPlateLegacy({bool forceNetwork = false, String? plateOverrid
       }
     } finally {
       if (mounted) setState(() => _isRefreshingMtt = false);
+    }
+  }
+
+  /// REINTENTO AISLADO de un bloque individual del dashboard (mtt/boostr/sii):
+  /// refetch local de UNA fuente SIN mutar el estado global de la vista. Las
+  /// tarjetas ya cargadas permanecen intactas; solo el bloque objetivo muestra
+  /// spinner y se actualiza exclusivamente a sí mismo al finalizar.
+  Future<void> _retryDashboardSource(String engine) async {
+    final isMtt = engine == 'mtt';
+    final isBoostr = engine == 'boostr';
+    if ((isMtt && _isRefreshingMtt) || (isBoostr && _isRefreshingBoostr) || _isRefreshingSii) return;
+    final plate = _currentPlateValue();
+    if (plate.isEmpty) return;
+    setState(() {
+      if (isMtt) _isRefreshingMtt = true;
+      else if (isBoostr) _isRefreshingBoostr = true;
+      else _isRefreshingSii = true;
+    });
+    try {
+      final full = await _fetchFullDashboard(plate);
+      if (!mounted || full == null || _dashboard == null) return;
+      final block = full[engine];
+      setState(() {
+        if (block is Map) {
+          final status = (block['status'] ?? 'error').toString();
+          final data = (block['data'] is Map)
+              ? Map<String, dynamic>.from(block['data'] as Map)
+              : <String, dynamic>{};
+          _dashboard![engine] = data;
+          if (status == 'ok') {
+            if (isMtt) {
+              final isPublic = data['es_transporte_publico'] == true ||
+                  data['isPublicTransport'] == true;
+              final hasServiceData = (data['tipo_servicio']?.toString().trim().isNotEmpty ?? false) ||
+                  (data['region']?.toString().trim().isNotEmpty ?? false) ||
+                  (data['folio_flota']?.toString().trim().isNotEmpty ?? false) ||
+                  (data['fecha_vencimiento_permiso']?.toString().trim().isNotEmpty ?? false);
+              if (isPublic || hasServiceData) {
+                _dashboardOk['mtt'] = true;
+                _mttHasResponse = false;
+              } else {
+                // Descrte particular: MTT respondió pero sin dato útil.
+                _dashboardOk['mtt'] = false;
+                _mttHasResponse = true;
+              }
+            } else {
+              _dashboardOk[engine] = true;
+            }
+          } else {
+            _dashboardOk[engine] = false;
+            if (isMtt) _mttHasResponse = false;
+          }
+        } else {
+          _dashboardOk[engine] = false;
+          if (isMtt) _mttHasResponse = false;
+        }
+      });
+      _showSnack('${engine.toUpperCase()} re-consultado');
+    } catch (e) {
+      debugPrint('[$engine-RETRY] $e');
+      if (mounted) _showSnack('Error re-consultando ${engine.toUpperCase()} ($e)');
+    } finally {
+      if (mounted) {
+        setState(() {
+          if (isMtt) _isRefreshingMtt = false;
+          else if (isBoostr) _isRefreshingBoostr = false;
+          else _isRefreshingSii = false;
+        });
+      }
     }
   }
 
@@ -3845,7 +3935,7 @@ Future<void> _searchPlateLegacy({bool forceNetwork = false, String? plateOverrid
               _boostrQueueBanner()
             else
               _dashSourceTile('boostr'),
-            if (_dashboardOk['mtt'] == true) ...[
+            if (_dashboardOk['mtt'] == true || _mttHasResponse) ...[
               _buildMttCard(data: dash['mtt']),
               const SizedBox(height: 16),
             ] else
@@ -4225,12 +4315,9 @@ Future<void> _searchPlateLegacy({bool forceNetwork = false, String? plateOverrid
                 unawaited(_solvePrtForDashboard(_currentPlateValue()));
                 return;
               }
-              setState(() {
-                _selectedEngine = engine;
-                _dashboardMode = false;
-                _vehicleData = null;
-              });
-              _searchPlateLegacy();
+              // mtt/boostr/sii: REINTENTO AISLADO — no resetea el dashboard,
+              // solo re-consulta esa fuente con spinner local.
+              unawaited(_retryDashboardSource(engine));
             },
             style: TextButton.styleFrom(
               foregroundColor: const Color(0xFF00E5FF),
