@@ -4801,10 +4801,14 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
         setState(() => _showRetryButton = true);
       }
     });
-    // Timeout humano de 45s: si el modal sigue abierto sin DATA/ERROR, se
+    // Timeout humano de 90s: si el modal sigue abierto sin DATA/ERROR, se
     // muestra el diálogo estricto de "sin respuesta oficial" (REINTENTAR /
     // CANCELAR). NUNCA se cierra solo ni avanza al dashboard sin PRT.
-    _humanTimeout = Timer(const Duration(seconds: 45), () {
+    // Mientras el reto de imágenes esté ABIERTO, este temporizador queda
+    // CONGELADO (CHALLENGE_OPEN lo cancela y CHALLENGE_CLOSE lo rearma):
+    // un humano resolviendo el grid puede tardar más de un minuto y Flutter
+    // jamás debe cortarle la sesión a mitad del desafío.
+    _humanTimeout = Timer(const Duration(seconds: 90), () {
       if (mounted && !_dataOrErrorSent) {
         try {
           _showPrtNoResponseDialog();
@@ -4815,9 +4819,8 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
     // abajo (en el widget), que evita el lienzo en blanco del SurfaceTexture.
     // BLOQUEO RÍGIDO DE ZOOM NATIVO: enableZoom(false) mapea en Android a
     // WebSettings.setSupportZoom(false) — sin pellizco-zoom ni doble tap de
-    // zoom. El congelamiento de scroll se completa con CSS (html/body fijos
-    // + overflow hidden + touch-action none) inyectado por prt_injection.js
-    // y el meta viewport maximum-scale=1 / user-scalable=no.
+    // zoom. El resto del layout reCAPTCHA es 100% nativo (Opción 1: el
+    // script inyectado ya no aplica CSS de scroll/posición sobre iframes).
     _controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..setBackgroundColor(const Color(0xFF0B132B))
@@ -4924,14 +4927,28 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             }
           } else if (msg == 'CHALLENGE_OPEN') {
             // Desafío de fotos abierto: ocultar la placa nativa (todo el
-            // alto disponible para el popup de Google).
+            // alto disponible para el popup de Google) y CONGELAR el
+            // timeout humano: mientras el usuario resuelve el grid, Flutter
+            // jamás debe mostrar el diálogo de "sin respuesta".
             if (mounted && !_challengeOpen) {
+              _humanTimeout?.cancel();
+              _humanTimeout = null;
               setState(() => _challengeOpen = true);
             }
           } else if (msg == 'CHALLENGE_CLOSE') {
-            if (mounted && _challengeOpen) {
+            if (mounted) {
               setState(() => _challengeOpen = false);
             }
+            // Rearmar el timeout humano con margen holgado (60s) para el
+            // postback del portal ministerial tras cerrarse el reto.
+            _humanTimeout?.cancel();
+            _humanTimeout = Timer(const Duration(seconds: 60), () {
+              if (mounted && !_dataOrErrorSent) {
+                try {
+                  _showPrtNoResponseDialog();
+                } catch (_) {}
+              }
+            });
           } else if (msg.startsWith('DISCOVER_IFRAME:')) {
             // Auto-descubrimiento de iframes del formulario PRT.
             final iframeUrl = msg.substring('DISCOVER_IFRAME:'.length).trim();
@@ -4973,11 +4990,13 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
                 debugPrint('requestFocus error: $e');
               }
             }
-            // Temporizador de seguridad: si en 12s no llega DATA/ERROR,
+            // Temporizador de seguridad: si en 25s no llega DATA/ERROR,
             // mostrar el diálogo estricto de "sin respuesta oficial"
-            // (nunca quedar congelado ni cerrar en silencio).
+            // (nunca quedar congelado ni cerrar en silencio). 25s da margen
+            // holgado al postback lento del portal ministerial (el scraper
+            // emite su propio ERROR:NOT_FOUND a los ~11s si el envío muere).
             _postbackSafetyTimer?.cancel();
-            _postbackSafetyTimer = Timer(const Duration(seconds: 12), () {
+            _postbackSafetyTimer = Timer(const Duration(seconds: 25), () {
               if (mounted) {
                 debugPrint('[PRT] timeout de seguridad del postback');
                 _showPrtNoResponseDialog();
@@ -6145,7 +6164,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
     _dialogVisible = false;
     _postbackSafetyTimer?.cancel();
     _humanTimeout?.cancel();
-    _humanTimeout = Timer(const Duration(seconds: 45), () {
+    _humanTimeout = Timer(const Duration(seconds: 90), () {
       if (mounted && !_dataOrErrorSent) {
         try {
           _showPrtNoResponseDialog();
