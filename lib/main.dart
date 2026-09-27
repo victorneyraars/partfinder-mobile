@@ -126,6 +126,10 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
   // tarjeta informativa "[ SIN TASACIÓN REGISTRADA ]" — NO el tile de error
   // "fuente no disponible".
   bool _siiSinTasacion = false;
+  // 3CV / Eficiencia Energética respondió OK pero sin ficha de homologación
+  // (not_found): tarjeta informativa "[ 3CV: SIN REGISTRO HOMOLOGADO ]",
+  // NO el tile de error "fuente no disponible".
+  bool _fuelEfficiencyNoRegistro = false;
   bool _isLoadingSii = false;
 
   Map<String, dynamic>? _vehicleData;
@@ -307,6 +311,7 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
       _globalNoData = false;
       _mttHasResponse = false;
       _siiSinTasacion = false;
+      _fuelEfficiencyNoRegistro = false;
       _lastPrtEvent = null;
     });
     _scannerController.repeat(reverse: true);
@@ -464,16 +469,37 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
             }
           }
         }
+
+        // ===== COMPUERTA 3CV / EFICIENCIA ENERGÉTICA: 'not_found' (respuesta
+        // válida sin ficha de homologación) NO es fallo de servicio. Se marca
+        // para renderizar "[ 3CV: SIN REGISTRO HOMOLOGADO ]".
+        if (key == 'fuel_efficiency') {
+          if (status == 'ok') {
+            final registros = (data['registros'] is List)
+                ? List<dynamic>.from(data['registros'] as List)
+                : const <dynamic>[];
+            ok['fuel_efficiency'] = registros.isNotEmpty;
+            _fuelEfficiencyNoRegistro = registros.isEmpty;
+          } else if (status == 'not_found') {
+            ok['fuel_efficiency'] = false;
+            _fuelEfficiencyNoRegistro = true;
+          } else {
+            ok['fuel_efficiency'] = false;
+            _fuelEfficiencyNoRegistro = false;
+          }
+        }
       }
 
       if (full != null) {
         add('boostr', full['boostr']);
         add('mtt', full['mtt']);
         add('sii', full['sii']);
+        add('fuel_efficiency', full['fuel_efficiency']);
       } else {
         ok['boostr'] = false;
         ok['mtt'] = false;
         ok['sii'] = false;
+        ok['fuel_efficiency'] = false;
       }
 
       // PRT: SOLO manda el resultado del pipeline PRT-First (paso A).
@@ -496,11 +522,14 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
       // ¿Sin datos reales de vehículo? → estado global "No encontramos
       // información para esta patente".
       // CRITERIO CASO B: basta con que las fuentes principales de datos del
-      // vehículo (PRT y Boostr) confirmen 'not_found' — el descarte genérico
-      // de MTT ("particular / no pertenece al RNSTP", ya neutralizado en
-      // add()) y el SII sin tasación NO deben impedirlo. Se exige además que
-      // ninguna fuente aporte datos reales (ok).
-      final globalNoData = ok.values.every((v) => v == false);
+      // vehículo (PRT y Boostr) confirmen 'not_found'. El descarte neutro de
+      // MTT y el SII sin tasación NO deben impedirlo. La fuente 3CV (fuel_
+      // efficiency) es SUPLEMENTARIA: una ficha de consumo no identifica por
+      // sí sola el vehículo, así que no la excluye (pero si PRT+Boostr están
+      // vacíos y todo lo demás también, el global se activa igual).
+      final globalNoData = (ok['prt'] != true && ok['boostr'] != true) &&
+          ok['mtt'] != true &&
+          ok['sii'] != true;
 
       setState(() {
         _dashboard = dash;
@@ -2418,6 +2447,18 @@ Future<void> _searchPlateLegacy({bool forceNetwork = false, String? plateOverrid
                 _dashboardOk['sii'] = true;
                 _siiSinTasacion = false;
               }
+            } else if (engine == 'fuel_efficiency') {
+              // 3CV 'ok' → con registros; sin registros → sin homologación.
+              final registros = (data['registros'] is List)
+                  ? List<dynamic>.from(data['registros'] as List)
+                  : const <dynamic>[];
+              if (registros.isEmpty) {
+                _dashboardOk['fuel_efficiency'] = false;
+                _fuelEfficiencyNoRegistro = true;
+              } else {
+                _dashboardOk['fuel_efficiency'] = true;
+                _fuelEfficiencyNoRegistro = false;
+              }
             } else {
               _dashboardOk[engine] = true;
             }
@@ -2425,15 +2466,21 @@ Future<void> _searchPlateLegacy({bool forceNetwork = false, String? plateOverrid
             // SII válido sin tasación: tarjeta informativa, no tile de falla.
             _dashboardOk['sii'] = false;
             _siiSinTasacion = true;
+          } else if (engine == 'fuel_efficiency' && status == 'not_found') {
+            // 3CV válido sin ficha de homologación: tarjeta informativa.
+            _dashboardOk['fuel_efficiency'] = false;
+            _fuelEfficiencyNoRegistro = true;
           } else {
             _dashboardOk[engine] = false;
             if (isMtt) _mttHasResponse = false;
             if (engine == 'sii') _siiSinTasacion = false;
+            if (engine == 'fuel_efficiency') _fuelEfficiencyNoRegistro = false;
           }
         } else {
           _dashboardOk[engine] = false;
           if (isMtt) _mttHasResponse = false;
           if (engine == 'sii') _siiSinTasacion = false;
+          if (engine == 'fuel_efficiency') _fuelEfficiencyNoRegistro = false;
         }
       });
       _showSnack('${engine.toUpperCase()} re-consultado');
@@ -3993,6 +4040,13 @@ Future<void> _searchPlateLegacy({bool forceNetwork = false, String? plateOverrid
               _buildSiiSinTasacionCard()
             else
               _dashSourceTile('sii'),
+            if (_dashboardOk['fuel_efficiency'] == true) ...[
+              _buildFuelEfficiencyCard(data: dash['fuel_efficiency']),
+              const SizedBox(height: 16),
+            ] else if (_fuelEfficiencyNoRegistro)
+              _buildFuelEfficiencyNoRegistroCard()
+            else
+              _dashSourceTile('fuel_efficiency'),
           ],
           const SizedBox(height: 8),
         ],
@@ -4064,6 +4118,248 @@ Future<void> _searchPlateLegacy({bool forceNetwork = false, String? plateOverrid
               fontSize: 11.5,
               height: 1.5,
               fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Tarjeta 3CV / HOMOLOGACIÓN Y RENDIMIENTO: indicadores de consumo
+  /// (Urbano / Carretera / Mixto en km/l) + badge de emisiones (Norma Euro
+  /// y CO2 g/km). Si hay más de una variante homologada, muestra la primera
+  /// (mayor coincidencia) e indica el total de variantes.
+  Widget _buildFuelEfficiencyCard({Map<String, dynamic>? data}) {
+    const Color accent = Color(0xFF38BDF8);
+    final Map<String, dynamic> d = data ?? _vehicleData!;
+    final List<dynamic> registros = (d['registros'] is List)
+        ? List<dynamic>.from(d['registros'] as List)
+        : const <dynamic>[];
+    if (registros.isEmpty) {
+      return _buildFuelEfficiencyNoRegistroCard();
+    }
+    final Map<String, dynamic> r = (registros.first is Map)
+        ? Map<String, dynamic>.from(registros.first as Map)
+        : const <String, dynamic>{};
+    final int nVariantes = registros.length;
+
+    String kml(dynamic v) {
+      if (v == null) return 'N/D';
+      final n = double.tryParse(v.toString());
+      if (n == null) return v.toString();
+      return n.toStringAsFixed(1);
+    }
+
+    final String urban = kml(r['urban']);
+    final String road = kml(r['road']);
+    final String mix = kml(r['mix']);
+    final String norma = (r['norma']?.toString().trim().isNotEmpty ?? false)
+        ? r['norma'].toString().trim().toUpperCase()
+        : 'N/D';
+    final String co2 = (r['co2']?.toString().trim().isNotEmpty ?? false)
+        ? '${r['co2']} g/km'
+        : 'N/D';
+
+    return Container(
+      width: double.infinity,
+      constraints: const BoxConstraints(maxWidth: 380),
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: const Color(0xFF0F172A).withOpacity(0.85),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: accent.withOpacity(0.45), width: 1.5),
+        boxShadow: [
+          BoxShadow(
+            color: accent.withOpacity(0.10),
+            blurRadius: 20,
+            spreadRadius: 4,
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Expanded(
+                child: Row(
+                  children: [
+                    const Icon(Icons.speed_rounded, color: accent, size: 22),
+                    const SizedBox(width: 8),
+                    const Expanded(
+                      child: Text(
+                        '3CV / HOMOLOGACIÓN Y RENDIMIENTO',
+                        softWrap: true,
+                        style: TextStyle(
+                          color: Color(0xFFE2E8F0),
+                          fontSize: 12,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: 0.6,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (nVariantes > 1)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: accent.withOpacity(0.12),
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: accent.withOpacity(0.45), width: 0.9),
+                  ),
+                  child: Text(
+                    '$nVariantes VARIANTES',
+                    style: const TextStyle(
+                      color: accent,
+                      fontSize: 9.5,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: 0.5,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          // Tres indicadores de consumo en km/l.
+          Row(
+            children: [
+              _fuelMetric('URBANO', urban, 'km/l'),
+              const SizedBox(width: 10),
+              _fuelMetric('CARRETERA', road, 'km/l'),
+              const SizedBox(width: 10),
+              _fuelMetric('MIXTO', mix, 'km/l'),
+            ],
+          ),
+          const SizedBox(height: 14),
+          // Badge de emisiones: norma Euro + CO2.
+          Row(
+            children: [
+              _fuelBadge('NORMA $norma'),
+              const SizedBox(width: 8),
+              _fuelBadge('CO₂ $co2'),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Métrica individual de consumo (label grande + unidad).
+  Widget _fuelMetric(String label, String value, String unit) {
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 6),
+        decoration: BoxDecoration(
+          color: const Color(0xFF1E293B).withOpacity(0.7),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: const Color(0xFF38BDF8).withOpacity(0.25), width: 1),
+        ),
+        child: Column(
+          children: [
+            Text(
+              label,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                color: Color(0xFF94A3B8),
+                fontSize: 9,
+                fontWeight: FontWeight.w800,
+                letterSpacing: 0.5,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              value,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                color: Color(0xFFE2E8F0),
+                fontSize: 18,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+            Text(
+              unit,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                color: Color(0xFF64748B),
+                fontSize: 9,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Badge de emisiones (norma Euro / CO2).
+  Widget _fuelBadge(String text) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: const Color(0xFF22D3EE).withOpacity(0.12),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: const Color(0xFF22D3EE).withOpacity(0.45), width: 0.9),
+      ),
+      child: Text(
+        text,
+        style: const TextStyle(
+          color: Color(0xFF22D3EE),
+          fontSize: 10.5,
+          fontWeight: FontWeight.w900,
+          letterSpacing: 0.5,
+        ),
+      ),
+    );
+  }
+
+  /// Tarjeta informativa 3CV cuando NO hay ficha de homologación de consumo
+  /// (respuesta válida sin registros). NO es un fallo de servicio.
+  Widget _buildFuelEfficiencyNoRegistroCard() {
+    const Color accent = Color(0xFF38BDF8);
+    return Container(
+      width: double.infinity,
+      constraints: const BoxConstraints(maxWidth: 380),
+      margin: const EdgeInsets.only(bottom: 14),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFF0F172A).withOpacity(0.8),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: accent.withOpacity(0.35), width: 1.1),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(Icons.speed_rounded, color: accent, size: 20),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  '[ 3CV: SIN REGISTRO HOMOLOGADO ]',
+                  softWrap: true,
+                  style: TextStyle(
+                    color: Color(0xFFE2E8F0),
+                    fontSize: 12,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 0.7,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                const Text(
+                  'Este modelo o año no cuenta con ficha de homologación de consumo registrada en el 3CV (MTT/Ministerio de Energía).',
+                  softWrap: true,
+                  style: TextStyle(
+                    color: Color(0xFF94A3B8),
+                    fontSize: 11.5,
+                    height: 1.5,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
             ),
           ),
         ],
@@ -4405,6 +4701,7 @@ Future<void> _searchPlateLegacy({bool forceNetwork = false, String? plateOverrid
       'boostr': 'BOOSTR (Padrón Civil)',
       'mtt': 'MTT (Transporte Público / RNSTP)',
       'sii': 'SII (Tasación Fiscal)',
+      'fuel_efficiency': '3CV (Homologación y Rendimiento)',
     };
     return Container(
       width: double.infinity,
