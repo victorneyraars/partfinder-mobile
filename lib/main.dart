@@ -121,6 +121,11 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
   // NO cuenta como dato vehicular real (no bloquea _globalNoData), pero SÍ
   // debe renderizar su tarjeta informativa en lugar del tile "no disponible".
   bool _mttHasResponse = false;
+  // SII respondió correctamente pero NO hay tasación homologada (versiones
+  // vacías: vehículos nuevos/recientes/re-homologados). Se renderiza una
+  // tarjeta informativa "[ SIN TASACIÓN REGISTRADA ]" — NO el tile de error
+  // "fuente no disponible".
+  bool _siiSinTasacion = false;
   bool _isLoadingSii = false;
 
   Map<String, dynamic>? _vehicleData;
@@ -301,6 +306,7 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
       _prtOmitido = false;
       _globalNoData = false;
       _mttHasResponse = false;
+      _siiSinTasacion = false;
       _lastPrtEvent = null;
     });
     _scannerController.repeat(reverse: true);
@@ -398,6 +404,8 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
       final ok = <String, bool>{};
       // MTT respondió OK pero con descarte "particular / no RNSTP".
       var mttHasResponse = false;
+      // SII respondió correctamente pero sin tasación homologada.
+      var siiSinTasacion = false;
 
       void add(String key, dynamic block) {
         if (block is! Map) {
@@ -433,6 +441,27 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
             // pero recordar que MTT SÍ entregó una respuesta válida.
             ok['mtt'] = false;
             mttHasResponse = true;
+          }
+        }
+
+        // ===== COMPUERTA SII: 'not_found' (respuesta válida sin tasación
+        // homologada) NO es un fallo de servicio. Se marca para renderizar la
+        // tarjeta informativa "[ SIN TASACIÓN REGISTRADA ]" en lugar del tile
+        // "fuente no disponible". Solo 'error' (red/timeout/5xx) conserva el
+        // tile de falla.
+        if (key == 'sii') {
+          if (status == 'not_found') {
+            ok['sii'] = false;
+            siiSinTasacion = true;
+          } else if (status == 'ok') {
+            final versiones = (data['versiones'] is List)
+                ? List<dynamic>.from(data['versiones'] as List)
+                : const <dynamic>[];
+            if (versiones.isEmpty) {
+              // ok con lista vacía: legalmente sin tasación homologada.
+              ok['sii'] = false;
+              siiSinTasacion = true;
+            }
           }
         }
       }
@@ -486,6 +515,7 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
         _prtOmitido = prtStatus == 'omitido';
         _globalNoData = globalNoData;
         _mttHasResponse = mttHasResponse;
+        _siiSinTasacion = siiSinTasacion;
         _dashboardMode = true;
         _vehicleData = first;
       });
@@ -1701,14 +1731,12 @@ Future<void> _searchPlateLegacy({bool forceNetwork = false, String? plateOverrid
     if (_isLoading) {
       return const SizedBox.shrink();
     }
-    // 3) Limpieza de banner residual: si el dashboard SII ya entregó 1 o
-    //    más variantes válidas (p. ej. las 8 del Morning 2022), ocultar por
-    //    completo la tarjeta de "no disponible".
+    // 2b) En MODO DASHBOARD, el bloque SII se renderiza EXCLUSIVAMENTE dentro
+    //     de _buildDashboard (tarjeta SII, tarjeta "sin tasación" o tile de
+    //     falla). Este banner global NUNCA debe pintarse en paralelo (evita
+    //     el doble aviso "no disponible").
     if (_dashboardMode && _dashboard != null) {
-      final siiVersiones = _dashboard!['sii']?['versiones'];
-      if (siiVersiones is List && siiVersiones.isNotEmpty) {
-        return const SizedBox.shrink();
-      }
+      return const SizedBox.shrink();
     }
     final sii = _vehicleData?["sii"] ??
         _siiData?["summary"] ??
@@ -2378,16 +2406,34 @@ Future<void> _searchPlateLegacy({bool forceNetwork = false, String? plateOverrid
                 _dashboardOk['mtt'] = false;
                 _mttHasResponse = true;
               }
+            } else if (engine == 'sii') {
+              // SII 'ok' con lista de versiones vacía → sin tasación homologada.
+              final versiones = (data['versiones'] is List)
+                  ? List<dynamic>.from(data['versiones'] as List)
+                  : const <dynamic>[];
+              if (versiones.isEmpty) {
+                _dashboardOk['sii'] = false;
+                _siiSinTasacion = true;
+              } else {
+                _dashboardOk['sii'] = true;
+                _siiSinTasacion = false;
+              }
             } else {
               _dashboardOk[engine] = true;
             }
+          } else if (engine == 'sii' && status == 'not_found') {
+            // SII válido sin tasación: tarjeta informativa, no tile de falla.
+            _dashboardOk['sii'] = false;
+            _siiSinTasacion = true;
           } else {
             _dashboardOk[engine] = false;
             if (isMtt) _mttHasResponse = false;
+            if (engine == 'sii') _siiSinTasacion = false;
           }
         } else {
           _dashboardOk[engine] = false;
           if (isMtt) _mttHasResponse = false;
+          if (engine == 'sii') _siiSinTasacion = false;
         }
       });
       _showSnack('${engine.toUpperCase()} re-consultado');
@@ -3943,10 +3989,83 @@ Future<void> _searchPlateLegacy({bool forceNetwork = false, String? plateOverrid
             if (_dashboardOk['sii'] == true) ...[
               _buildSiiCard(data: dash['sii']),
               const SizedBox(height: 16),
-            ] else
+            ] else if (_siiSinTasacion)
+              _buildSiiSinTasacionCard()
+            else
               _dashSourceTile('sii'),
           ],
           const SizedBox(height: 8),
+        ],
+      ),
+    );
+  }
+
+  /// Tarjeta informativa SII cuando NO hay tasación homologada (respuesta
+  /// válida del SII con lista de versiones vacía o 'not_found'). NO es un
+  /// fallo de servicio: muestra cabecera oficial + badge "[ SIN TASACIÓN
+  /// REGISTRADA ]" y una breve explicación. Reemplaza el tile de error
+  /// "fuente no disponible / REINTENTAR".
+  Widget _buildSiiSinTasacionCard() {
+    const Color accent = Color(0xFF34D399);
+    return Container(
+      width: double.infinity,
+      constraints: const BoxConstraints(maxWidth: 380),
+      margin: const EdgeInsets.only(bottom: 14),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFF0F172A).withOpacity(0.8),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: accent.withOpacity(0.45), width: 1.1),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.account_balance_rounded, color: accent, size: 20),
+              const SizedBox(width: 8),
+              const Expanded(
+                child: Text(
+                  'SII / TASACIÓN OFICIAL',
+                  softWrap: true,
+                  style: TextStyle(
+                    color: Color(0xFFE2E8F0),
+                    fontSize: 12,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 0.7,
+                  ),
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: accent.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(color: accent.withOpacity(0.45), width: 0.9),
+                ),
+                child: const Text(
+                  '[ SIN TASACIÓN REGISTRADA ]',
+                  style: TextStyle(
+                    color: accent,
+                    fontSize: 9.5,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 0.5,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          const Text(
+            'El Servicio de Impuestos Internos (SII) aún no publica una tasación fiscal homologada para este modelo/año. Habitual en vehículos nuevos, recién homologados o de reciente ingreso al parque automotriz.',
+            softWrap: true,
+            style: TextStyle(
+              color: Color(0xFF94A3B8),
+              fontSize: 11.5,
+              height: 1.5,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
         ],
       ),
     );
