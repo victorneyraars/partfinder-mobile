@@ -131,6 +131,12 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
   // NO el tile de error "fuente no disponible".
   bool _fuelEfficiencyNoRegistro = false;
   bool _isLoadingSii = false;
+  // Auto Seguro (encargo por robo) — A DEMANDA desde el dashboard.
+  // Resultado de la verificación P2P tras resolver el WebView:
+  //   { status, encargo, plate, mensaje, consultado_en }
+  // null → aún sin verificar (tarjeta idle con botón).
+  Map<String, dynamic>? _autoSeguroResult;
+  bool _isCheckingAutoSeguro = false;
 
   Map<String, dynamic>? _vehicleData;
   String _activeFormat = "AUTO NUEVO (4L+2N)";
@@ -312,6 +318,7 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
       _mttHasResponse = false;
       _siiSinTasacion = false;
       _fuelEfficiencyNoRegistro = false;
+      _autoSeguroResult = null;
       _lastPrtEvent = null;
     });
     _scannerController.repeat(reverse: true);
@@ -495,11 +502,20 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
         add('mtt', full['mtt']);
         add('sii', full['sii']);
         add('fuel_efficiency', full['fuel_efficiency']);
+        // Auto Seguro: se entrega en 'idle' (a demanda). Se conserva en dash
+        // para la tarjeta, pero NO es fuente de datos primaria (no influye en
+        // ok ni en _globalNoData).
+        if (full['auto_seguro'] is Map) {
+          dash['auto_seguro'] =
+              Map<String, dynamic>.from(full['auto_seguro'] as Map);
+        }
+        ok['auto_seguro'] = false;
       } else {
         ok['boostr'] = false;
         ok['mtt'] = false;
         ok['sii'] = false;
         ok['fuel_efficiency'] = false;
+        ok['auto_seguro'] = false;
       }
 
       // PRT: SOLO manda el resultado del pipeline PRT-First (paso A).
@@ -4015,6 +4031,8 @@ Future<void> _searchPlateLegacy({bool forceNetwork = false, String? plateOverrid
           if (_globalNoData) ...[
             _buildGlobalNoDataCard(),
             const SizedBox(height: 8),
+            _buildAutoSeguroCard(),
+            const SizedBox(height: 16),
           ] else ...[
             if (_dashboardOk['prt'] == true) ...[
               _buildPrtCard(data: dash['prt']),
@@ -4047,6 +4065,8 @@ Future<void> _searchPlateLegacy({bool forceNetwork = false, String? plateOverrid
               _buildFuelEfficiencyNoRegistroCard()
             else
               _dashSourceTile('fuel_efficiency'),
+            _buildAutoSeguroCard(),
+            const SizedBox(height: 16),
           ],
           const SizedBox(height: 8),
         ],
@@ -4360,6 +4380,247 @@ Future<void> _searchPlateLegacy({bool forceNetwork = false, String? plateOverrid
                   ),
                 ),
               ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Tarjeta AUTO SEGURO / ENCARGO POR ROBO (Carabineros - SPD) — A DEMANDA.
+  /// Estado inicial (idle): descripción + botón [ VERIFICAR ENCARGO POR ROBO ].
+  /// Post-verificación: sin encargo (verde) / encargo (rojo) / error (retry).
+  Widget _buildAutoSeguroCard() {
+    const Color accent = Color(0xFFF87171); // rojo institucional policial
+    final result = _autoSeguroResult;
+
+    // Estado de verificación finalizado.
+    if (result != null && result['status'] == 'ok') {
+      final bool encargo = result['encargo'] == true;
+      final String consultado = (result['consultado_en'] ?? '').toString();
+      final Color badgeColor = encargo ? const Color(0xFFEF4444) : const Color(0xFF34D399);
+      final String titulo = encargo
+          ? '[ ENCARGO POLICIAL POR ROBO VIGENTE ]'
+          : '[ SIN ENCARGO POR ROBO VIGENTE ]';
+      final String mensaje = (result['mensaje'] ?? '').toString();
+      return Container(
+        width: double.infinity,
+        constraints: const BoxConstraints(maxWidth: 380),
+        margin: const EdgeInsets.only(bottom: 14),
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: badgeColor.withOpacity(0.10),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: badgeColor.withOpacity(0.6), width: 1.4),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(
+                  encargo ? Icons.report_rounded : Icons.shield_rounded,
+                  color: badgeColor,
+                  size: 22,
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'AUTO SEGURO / ENCARGO POR ROBO (CARABINEROS - SPD)',
+                    softWrap: true,
+                    style: TextStyle(
+                      color: const Color(0xFFE2E8F0),
+                      fontSize: 11,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: 0.6,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: BoxDecoration(
+                color: badgeColor.withOpacity(0.14),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: badgeColor, width: 1),
+              ),
+              child: Text(
+                titulo,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: badgeColor,
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 0.5,
+                ),
+              ),
+            ),
+            const SizedBox(height: 10),
+            if (mensaje.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: Text(
+                  mensaje,
+                  softWrap: true,
+                  style: const TextStyle(
+                    color: Color(0xFFCBD5E1),
+                    fontSize: 12,
+                    height: 1.45,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            Text(
+              'Consulta oficial: $consultado',
+              style: const TextStyle(
+                color: Color(0xFF94A3B8),
+                fontSize: 10.5,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    // Error / sin respuesta → tarjeta con reintento aislado.
+    if (result != null &&
+        (result['status'] == 'error' || result['status'] == 'not_found')) {
+      return Container(
+        width: double.infinity,
+        constraints: const BoxConstraints(maxWidth: 380),
+        margin: const EdgeInsets.only(bottom: 14),
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: const Color(0xFF0F172A).withOpacity(0.8),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: const Color(0xFF64748B).withOpacity(0.6), width: 1.1),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Row(
+              children: [
+                Icon(Icons.shield_outlined, color: Color(0xFF94A3B8), size: 20),
+                SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'AUTO SEGURO / ENCARGO POR ROBO',
+                    softWrap: true,
+                    style: TextStyle(
+                      color: Color(0xFFE2E8F0),
+                      fontSize: 11,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: 0.6,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            const Text(
+              'No se pudo completar la verificación de encargo por robo. Reintenta cuando quieras.',
+              softWrap: true,
+              style: TextStyle(
+                color: Color(0xFF94A3B8),
+                fontSize: 11.5,
+                height: 1.45,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 10),
+            SizedBox(
+              width: double.infinity,
+              height: 40,
+              child: OutlinedButton.icon(
+                onPressed: () => unawaited(_verifyAutoSeguro()),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: accent,
+                  side: const BorderSide(color: Color(0xFFF87171), width: 1),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                ),
+                icon: const Icon(Icons.refresh, size: 16),
+                label: const Text('REINTENTAR', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w900, letterSpacing: 0.6)),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    // Estado IDLE → descripción + botón de acción.
+    return Container(
+      width: double.infinity,
+      constraints: const BoxConstraints(maxWidth: 380),
+      margin: const EdgeInsets.only(bottom: 14),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFF0F172A).withOpacity(0.8),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: accent.withOpacity(0.4), width: 1.2),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.shield_rounded, color: accent, size: 22),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'AUTO SEGURO / ENCARGO POR ROBO (CARABINEROS - SPD)',
+                  softWrap: true,
+                  style: TextStyle(
+                    color: const Color(0xFFE2E8F0),
+                    fontSize: 11,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 0.6,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'Consulta en tiempo real en la base ministerial y policial de Carabineros de Chile / PDI.',
+            softWrap: true,
+            style: TextStyle(
+              color: Color(0xFF94A3B8),
+              fontSize: 11.5,
+              height: 1.45,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            height: 44,
+            child: ElevatedButton.icon(
+              onPressed: _isCheckingAutoSeguro
+                  ? null
+                  : () => unawaited(_verifyAutoSeguro()),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: accent.withOpacity(0.15),
+                foregroundColor: accent,
+                disabledBackgroundColor: accent.withOpacity(0.08),
+                disabledForegroundColor: const Color(0xFF64748B),
+                side: const BorderSide(color: accent, width: 1.2),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              ),
+              icon: _isCheckingAutoSeguro
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFFF87171)),
+                    )
+                  : const Icon(Icons.gavel_rounded, size: 17),
+              label: Text(
+                _isCheckingAutoSeguro ? 'VERIFICANDO...' : 'VERIFICAR ENCARGO POR ROBO',
+                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w900, letterSpacing: 0.6),
+              ),
             ),
           ),
         ],
@@ -4790,6 +5051,61 @@ Future<void> _searchPlateLegacy({bool forceNetwork = false, String? plateOverrid
     final fromData = (_vehicleData?['patente'] ?? _vehicleData?['plate'])?.toString().trim() ?? '';
     if (fromData.isNotEmpty) return fromData.toUpperCase();
     return _plateController.text.replaceAll(RegExp(r'[^A-Za-z0-9]'), '').toUpperCase();
+  }
+
+  /// Verificación AUTO SEGURO (a demanda): abre el WebView asistido de
+  /// autoseguro.gob.cl, el usuario resuelve el reCAPTCHA y el script inyectado
+  /// extrae el resultado (encargo / sin encargo) → se integra SOLO en la
+  /// tarjeta Auto Seguro sin tocar el resto del dashboard.
+  Future<void> _verifyAutoSeguro() async {
+    if (_isCheckingAutoSeguro) return;
+    final plate = _currentPlateValue();
+    if (plate.isEmpty) return;
+    setState(() => _isCheckingAutoSeguro = true);
+    try {
+      final result = await Navigator.push<Map<String, dynamic>>(
+        context,
+        MaterialPageRoute(
+          builder: (_) => AutoSeguroVerificationScreen(targetPlate: plate),
+        ),
+      );
+      if (!mounted) return;
+      if (result != null && result is Map<String, dynamic>) {
+        setState(() {
+          _autoSeguroResult = result;
+          _dashboard?['auto_seguro'] = {
+            'fuente': 'Auto Seguro',
+            'patente': plate,
+            ...result,
+          };
+          _dashboardOk['auto_seguro'] = result['status'] == 'ok';
+        });
+      } else {
+        // Modal cerrado sin resultado (back/X): no se marca error de servicio.
+        setState(() {
+          _autoSeguroResult = <String, dynamic>{
+            'status': 'idle',
+            'plate': plate,
+            'mensaje': 'Verificación no completada.',
+          };
+          _dashboardOk['auto_seguro'] = false;
+        });
+      }
+    } catch (e) {
+      debugPrint('[AUTO-SEGURO] $e');
+      if (mounted) {
+        setState(() {
+          _autoSeguroResult = <String, dynamic>{
+            'status': 'error',
+            'plate': plate,
+            'mensaje': 'Error en la verificación: $e',
+          };
+          _dashboardOk['auto_seguro'] = false;
+        });
+      }
+    } finally {
+      if (mounted) setState(() => _isCheckingAutoSeguro = false);
+    }
   }
 
   /// Resuelve la fuente PRT dentro del dashboard: ejecuta el flujo P2P
@@ -7156,6 +7472,190 @@ class _ExecutiveTelemetryOverlayState extends State<_ExecutiveTelemetryOverlay>
                 label: const Text('Reintentar'),
               ),
             ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+
+// ============================================================
+// MODAL WEBVIEW AUTO SEGURO (ENCARGO POR ROBO) — A DEMANDA
+// ============================================================
+/// WebView asistido para la verificación de encargo por robo en
+/// https://www.autoseguro.gob.cl/ (Carabineros - SPD). Reutiliza la misma
+/// arquitectura P2P que PRT, pero de forma AUTOCONTENIDA y más simple:
+///  - Carga el sitio oficial y el usuario resuelve el reCAPTCHA.
+///  - El script hot-served (auto_seguro_injection.js) pre-rellena la PPU,
+///    detecta el token y extrae el resultado (encargo / sin encargo).
+///  - Al recibir el JSON de resultado por PrtBridge, hace pop con el mapa.
+class AutoSeguroVerificationScreen extends StatefulWidget {
+  final String targetPlate;
+  const AutoSeguroVerificationScreen({super.key, required this.targetPlate});
+  @override
+  State<AutoSeguroVerificationScreen> createState() =>
+      _AutoSeguroVerificationScreenState();
+}
+
+class _AutoSeguroVerificationScreenState
+    extends State<AutoSeguroVerificationScreen> {
+  late final WebViewController _controller;
+  bool _isReady = false;
+  bool _dataSent = false;
+  Timer? _humanTimeout;
+
+  @override
+  void initState() {
+    super.initState();
+    _humanTimeout = Timer(const Duration(seconds: 100), () {
+      // Sin resultado tras 100s: cerrar con error neutro (el usuario puede
+      // reintentar desde la tarjeta). NUNCA bloquear el dashboard.
+      if (mounted && !_dataSent) {
+        Navigator.of(context).pop(<String, dynamic>{
+          'status': 'error',
+          'plate': widget.targetPlate,
+          'mensaje': 'Tiempo de espera agotado en la verificación.',
+        });
+      }
+    });
+    _controller = WebViewController()
+      ..setJavaScriptMode(JavaScriptMode.unrestricted)
+      ..setBackgroundColor(const Color(0xFF0B132B))
+      ..setUserAgent(
+          "Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36")
+      ..enableZoom(false)
+      ..addJavaScriptChannel(
+        'PrtBridge',
+        onMessageReceived: (JavaScriptMessage message) {
+          final msg = message.message;
+          if (msg.startsWith('{')) {
+            try {
+              final obj = jsonDecode(msg);
+              if (obj is Map &&
+                  (obj['status'] == 'ok' ||
+                      obj['status'] == 'not_found' ||
+                      obj['status'] == 'error')) {
+                _dataSent = true;
+                _humanTimeout?.cancel();
+                if (mounted) {
+                  Navigator.of(context)
+                      .pop(Map<String, dynamic>.from(obj as Map));
+                }
+              }
+            } catch (_) {}
+          } else if (msg == 'READY') {
+            if (mounted && !_isReady) {
+              setState(() => _isReady = true);
+            }
+          }
+        },
+      )
+      ..setNavigationDelegate(
+        NavigationDelegate(
+          onPageFinished: (url) {
+            _fetchAndInjectDynamicScript();
+          },
+          onWebResourceError: (error) {
+            debugPrint('[AUTO-SEGURO-NET] ${error.toString()}');
+          },
+        ),
+      )
+      ..loadRequest(Uri.parse('https://www.autoseguro.gob.cl/'));
+  }
+
+  Future<void> _fetchAndInjectDynamicScript() async {
+    try {
+      final resp = await http
+          .get(Uri.parse(
+              'https://api.studiodigital360.com/api/debug/auto-seguro-script.js?v=${DateTime.now().millisecondsSinceEpoch}'))
+          .timeout(const Duration(seconds: 3));
+      if (resp.statusCode == 200) {
+        final script = utf8.decode(resp.bodyBytes);
+        final plate = widget.targetPlate.trim().toUpperCase();
+        final filled = script.replaceAll('{{PLATE}}', plate);
+        await _controller.runJavaScript(filled);
+        debugPrint('[AUTO-SEGURO-DYN] script inyectado');
+      }
+    } catch (e) {
+      debugPrint('[AUTO-SEGURO-DYN] error: $e');
+    }
+  }
+
+  @override
+  void dispose() {
+    _humanTimeout?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return PopScope(
+      canPop: false,
+      onPopInvoked: (didPop) {
+        if (!didPop) {
+          _humanTimeout?.cancel();
+          Navigator.of(context).pop();
+        }
+      },
+      child: Scaffold(
+        backgroundColor: const Color(0xFF0B132B),
+        resizeToAvoidBottomInset: false,
+        appBar: AppBar(
+          backgroundColor: const Color(0xFF1E293B),
+          automaticallyImplyLeading: false,
+          title: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Auto Seguro — Encargo por Robo',
+                style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white),
+              ),
+              Text(
+                'Patente: ' + widget.targetPlate,
+                style: const TextStyle(fontSize: 12, color: Color(0xFF38BDF8)),
+              ),
+            ],
+          ),
+          leading: IconButton(
+            icon: const Icon(Icons.close, color: Colors.white),
+            onPressed: () {
+              _humanTimeout?.cancel();
+              Navigator.of(context).pop();
+            },
+          ),
+        ),
+        body: Stack(
+          children: [
+            const ColoredBox(color: Color(0xFF0B132B)),
+            Positioned.fill(
+              child: WebViewWidget(
+                controller: _controller,
+              ),
+            ),
+            if (!_isReady)
+              Positioned.fill(
+                child: Container(
+                  color: const Color(0xFF0B132B),
+                  child: const Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        CircularProgressIndicator(color: Color(0xFF38BDF8)),
+                        SizedBox(height: 16),
+                        Text(
+                          'Cargando consulta de encargo por robo...',
+                          style:
+                              TextStyle(color: Colors.white70, fontSize: 13),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
           ],
         ),
       ),
