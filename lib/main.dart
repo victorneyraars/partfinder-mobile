@@ -7493,6 +7493,7 @@ class _ExecutiveTelemetryOverlayState extends State<_ExecutiveTelemetryOverlay>
 class AutoSeguroVerificationScreen extends StatefulWidget {
   final String targetPlate;
   const AutoSeguroVerificationScreen({super.key, required this.targetPlate});
+
   @override
   State<AutoSeguroVerificationScreen> createState() =>
       _AutoSeguroVerificationScreenState();
@@ -7504,13 +7505,26 @@ class _AutoSeguroVerificationScreenState
   bool _isReady = false;
   bool _dataSent = false;
   Timer? _humanTimeout;
+  Timer? _readyWatchdog;
+
+  PlatformWebViewWidgetCreationParams _hybridCompositionParams() {
+    PlatformWebViewWidgetCreationParams params = PlatformWebViewWidgetCreationParams(
+      controller: _controller.platform,
+      layoutDirection: TextDirection.ltr,
+    );
+    if (WebViewPlatform.instance is AndroidWebViewPlatform) {
+      params = AndroidWebViewWidgetCreationParams.fromPlatformWebViewWidgetCreationParams(
+        params,
+        displayWithHybridComposition: false,
+      );
+    }
+    return params;
+  }
 
   @override
   void initState() {
     super.initState();
     _humanTimeout = Timer(const Duration(seconds: 100), () {
-      // Sin resultado tras 100s: cerrar con error neutro (el usuario puede
-      // reintentar desde la tarjeta). NUNCA bloquear el dashboard.
       if (mounted && !_dataSent) {
         Navigator.of(context).pop(<String, dynamic>{
           'status': 'error',
@@ -7519,6 +7533,15 @@ class _AutoSeguroVerificationScreenState
         });
       }
     });
+
+    // Watchdog: si tras 3.5s no se ha recibido READY, desvanece el overlay e inyecta
+    _readyWatchdog = Timer(const Duration(milliseconds: 3500), () {
+      if (mounted && !_isReady) {
+        setState(() => _isReady = true);
+        _fetchAndInjectDynamicScript();
+      }
+    });
+
     _controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..setBackgroundColor(const Color(0xFF0B132B))
@@ -7538,6 +7561,7 @@ class _AutoSeguroVerificationScreenState
                       obj['status'] == 'error')) {
                 _dataSent = true;
                 _humanTimeout?.cancel();
+                _readyWatchdog?.cancel();
                 if (mounted) {
                   Navigator.of(context)
                       .pop(Map<String, dynamic>.from(obj as Map));
@@ -7555,9 +7579,15 @@ class _AutoSeguroVerificationScreenState
         NavigationDelegate(
           onPageFinished: (url) {
             _fetchAndInjectDynamicScript();
+            if (mounted && !_isReady) {
+              setState(() => _isReady = true);
+            }
           },
           onWebResourceError: (error) {
             debugPrint('[AUTO-SEGURO-NET] ${error.toString()}');
+            if (mounted && !_isReady) {
+              setState(() => _isReady = true);
+            }
           },
         ),
       )
@@ -7569,7 +7599,7 @@ class _AutoSeguroVerificationScreenState
       final resp = await http
           .get(Uri.parse(
               'https://api.studiodigital360.com/api/debug/auto-seguro-script.js?v=${DateTime.now().millisecondsSinceEpoch}'))
-          .timeout(const Duration(seconds: 3));
+          .timeout(const Duration(seconds: 4));
       if (resp.statusCode == 200) {
         final script = utf8.decode(resp.bodyBytes);
         final plate = widget.targetPlate.trim().toUpperCase();
@@ -7585,6 +7615,7 @@ class _AutoSeguroVerificationScreenState
   @override
   void dispose() {
     _humanTimeout?.cancel();
+    _readyWatchdog?.cancel();
     super.dispose();
   }
 
@@ -7595,6 +7626,7 @@ class _AutoSeguroVerificationScreenState
       onPopInvoked: (didPop) {
         if (!didPop) {
           _humanTimeout?.cancel();
+          _readyWatchdog?.cancel();
           Navigator.of(context).pop();
         }
       },
@@ -7624,6 +7656,7 @@ class _AutoSeguroVerificationScreenState
             icon: const Icon(Icons.close, color: Colors.white),
             onPressed: () {
               _humanTimeout?.cancel();
+              _readyWatchdog?.cancel();
               Navigator.of(context).pop();
             },
           ),
@@ -7632,30 +7665,35 @@ class _AutoSeguroVerificationScreenState
           children: [
             const ColoredBox(color: Color(0xFF0B132B)),
             Positioned.fill(
-              child: WebViewWidget(
-                controller: _controller,
+              child: WebViewWidget.fromPlatformCreationParams(
+                params: _hybridCompositionParams(),
               ),
             ),
-            if (!_isReady)
-              Positioned.fill(
-                child: Container(
-                  color: const Color(0xFF0B132B),
-                  child: const Center(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        CircularProgressIndicator(color: Color(0xFF38BDF8)),
-                        SizedBox(height: 16),
-                        Text(
-                          'Cargando consulta de encargo por robo...',
-                          style:
-                              TextStyle(color: Colors.white70, fontSize: 13),
-                        ),
-                      ],
+            Positioned.fill(
+              child: IgnorePointer(
+                ignoring: _isReady,
+                child: AnimatedOpacity(
+                  opacity: _isReady ? 0.0 : 1.0,
+                  duration: const Duration(milliseconds: 300),
+                  child: Container(
+                    color: const Color(0xFF0B132B),
+                    child: const Center(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          CircularProgressIndicator(color: Color(0xFF38BDF8)),
+                          SizedBox(height: 16),
+                          Text(
+                            'Cargando consulta de encargo por robo...',
+                            style: TextStyle(color: Colors.white70, fontSize: 13),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 ),
               ),
+            ),
           ],
         ),
       ),
