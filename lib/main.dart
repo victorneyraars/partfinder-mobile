@@ -108,11 +108,15 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
   // Estados formales del pipeline estricto PRT-FIRST:
   //  · _prtSinRegistro: el sistema ministerial respondió SIN historial de
   //    revisiones (homologado/exento) — tile formal, no es fallo de red.
-  //  · _prtOmitido: estado defensivo residual (modal abortado/descartado);
-  //    con el bloqueo estricto actual el dashboard solo avanza con
-  //    respuesta oficial de PRT ('ok' o 'sin_registro').
+  //  · _prtNoEncontrado: la patente NO existe en los registros de PRT ("La
+  //    placa ingresada no existe") — NO bloquea el dashboard; fuerza el
+  //    fallback Boostr / estado global "sin información".
+  //  · _prtOmitido: estado defensivo residual (modal abortado/descartado).
   bool _prtSinRegistro = false;
+  bool _prtNoEncontrado = false;
   bool _prtOmitido = false;
+  // Estado global cuando NINGUNA fuente (PRT ni Boostr) tiene datos.
+  bool _globalNoData = false;
   bool _isLoadingSii = false;
 
   Map<String, dynamic>? _vehicleData;
@@ -243,26 +247,27 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
     setState(() => _isLoadingSii = false);
   }
 
-  /// CONSULTA MULTIPROVEEDOR — PIPELINE SECUENCIAL ESTRICTO "PRT-FIRST"
-  /// (ZERO-BYPASS).
+  /// CONSULTA MULTIPROVEEDOR — PIPELINE SECUENCIAL "PRT-FIRST" CON
+  /// DEGRADACIÓN ELEGANTE (sin bloqueo mandatario por ausencia en PRT).
   ///
   /// Al pulsar CONSULTAR VEHÍCULO (única entrada; sin botones de bypass):
   ///  A. PASO OBLIGATORIO — PRT PRIMERO:
-  ///     1) Si existe historial PRT válido (caché local con revisiones o
-  ///        backend vigente) se usa directamente, SIN abrir el modal.
-  ///     2) Si NO existe: se abre DE INMEDIATO el modal interactivo P2P de
-  ///        PRT y se espera su resolución explícita:
-  ///        · Éxito con inspecciones → estado 'ok' (tarjeta PRT + Timeline).
-  ///        · "Sin registro" oficial (NOT_FOUND ministerial) → estado
-  ///          'sin_registro' (tile formal ministerial).
-  ///        · X / retroceso / CANCELAR → PRT_ABORTED: se aborta TODO (sin
-  ///          dashboard, sin Boostr/MTT/SII, vuelta al inicio limpio).
-  ///        · Timeout / cuota excedida / error de conexión → diálogo nativo
-  ///          estricto dentro del modal: REINTENTAR recarga el WebView con
-  ///          la patente; CANCELAR aborta. NUNCA se avanza al dashboard.
-  ///  B. SOLO con respuesta oficial PRT ('ok' o 'sin_registro') se disparan
-  ///     EN PARALELO Boostr + MTT + SII (endpoint /full) y se renderiza el
-  ///     dashboard integrado UNA sola vez.
+  ///     1) Si existe historial PRT válido (caché local o backend) se usa
+  ///        directamente, SIN abrir el modal.
+  ///     2) Si NO existe: se abre DE INMEDIATO el modal interactivo P2P.
+  ///        Resoluciones posibles:
+  ///        · 'ok'          → tarjeta PRT + Timeline.
+  ///        · 'sin_registro'→ tile "[ PRT: SIN REVISIONES REGISTRADAS ]".
+  ///        · 'not_found'   → la placa NO existe en los registros
+  ///          ministeriales ("La placa ingresada no existe"). NO bloquea:
+  ///          se cierra el modal y se recaba información de Boostr/MTT/SII.
+  ///        · 'abort' (X/retroceso) → aborta TODO.
+  ///        · 'sin_respuesta' (timeout/cuota/error) → diálogo REINTENTAR/
+  ///          CANCELAR (único bloqueo mandatario: sin respuesta real).
+  ///  B. Se disparan EN PARALELO Boostr + MTT + SII (endpoint /full):
+  ///     · Si alguna fuente tiene datos → dashboard con tarjetas parciales.
+  ///     · Si NINGUNA fuente tiene datos → estado global "No encontramos
+  ///       información para esta patente".
   Future<void> _searchPlate() async {
     final rawPlate = _plateController.text.replaceAll(RegExp(r'[^A-Za-z0-9]'), '').toUpperCase();
     if (rawPlate.length < 5) {
@@ -288,7 +293,9 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
       _dashboardMode = false;
       _prtQuotaExceeded = false;
       _prtSinRegistro = false;
+      _prtNoEncontrado = false;
       _prtOmitido = false;
+      _globalNoData = false;
       _lastPrtEvent = null;
     });
     _scannerController.repeat(reverse: true);
@@ -351,13 +358,19 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
         prtStatus = 'sin_respuesta';
       }
 
-      // ===== BLOQUEO ESTRICTO (ZERO-BYPASS): sin respuesta oficial de PRT
-      // NO hay dashboard ni fuentes secundarias =====
+      // ===== GATING DEL PIPELINE =====
+      // 'abort' → cancelar todo. 'sin_registro' y 'not_found' → CONTINÚAN
+      // (no bloquean): la ausencia de datos en PRT (ya sea "sin revisiones"
+      // o "placa no existe") NO debe congelar el dashboard; se recaba la
+      // información parcial de Boostr/MTT/SII. Solo timeout/cuota/error de
+      // conexión ('sin_respuesta') bloquean con el diálogo de reintento.
       if (prtStatus == 'abort') {
         _showSnack('Consulta cancelada — dashboard sin cambios');
         return;
       }
-      if (prtStatus != 'ok' && prtStatus != 'sin_registro') {
+      if (prtStatus != 'ok' &&
+          prtStatus != 'sin_registro' &&
+          prtStatus != 'not_found') {
         // Timeout / cuota / error de conexión / sin respuesta oficial.
         final retry = await _showPrtUnavailablePageDialog();
         if (retry == true && mounted) {
@@ -419,6 +432,10 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
         }
       }
 
+      // ¿Ninguna fuente tiene datos? (PRT sin registro + Boostr/MTT/SII
+      // vacíos) → estado global "No encontramos información".
+      final globalNoData = ok.values.every((v) => v == false);
+
       setState(() {
         _dashboard = dash;
         _dashboardOk = ok;
@@ -428,7 +445,9 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
                 ((full['boostr'] as Map)['status'] == 'exhausted'));
         _prtQuotaExceeded = prtQuota;
         _prtSinRegistro = prtStatus == 'sin_registro';
+        _prtNoEncontrado = prtStatus == 'not_found';
         _prtOmitido = prtStatus == 'omitido';
+        _globalNoData = globalNoData;
         _dashboardMode = true;
         _vehicleData = first;
       });
@@ -445,6 +464,9 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
       final snack = switch (prtStatus) {
         'ok' => 'Auditoría completa para $rawPlate: PRT verificado + Padrón, MTT y SII',
         'sin_registro' => 'PRT sin revisiones registradas para $rawPlate — fuentes secundarias cargadas',
+        'not_found' => globalNoData
+            ? 'No encontramos información para esta patente'
+            : 'Patente sin registros en PRT — mostrando datos de Padrón, MTT y SII',
         _ => 'PRT omitido para $rawPlate — reintenta la verificación desde la tarjeta',
       };
       _showSnack(snack);
@@ -461,11 +483,14 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
   }
 
   /// Mapea el evento del modal PRT al estado formal del pipeline PRT-First.
-  /// 'sin_registro' solo cuando el sistema ministerial respondió sin
-  /// historial; 'abort' cuando el usuario cerró el modal (X/retroceso);
-  /// todo lo demás es 'sin_respuesta' (bloqueo estricto: sin dashboard).
+  /// 'not_found' = la placa NO existe en los registros ministeriales ("La
+  /// placa ingresada no existe"); 'sin_registro' = el vehículo existe pero
+  /// sin historial de revisiones (homologado/exento); 'abort' = el usuario
+  /// cerró el modal (X/retroceso); lo demás es 'sin_respuesta'.
   String _prtEventToStatus(String? evt) {
     switch (evt) {
+      case 'PRT_NOT_FOUND':
+        return 'not_found';
       case 'PRT_SIN_REGISTRO':
         return 'sin_registro';
       case 'PRT_ABORTED':
@@ -3672,6 +3697,36 @@ Future<void> _searchPlateLegacy({bool forceNetwork = false, String? plateOverrid
     );
   }
 
+  /// Fila de viñeta para las listas informativas de causas (PRT sin registro,
+  /// patente no encontrada, estado global sin datos).
+  Widget _bulletRow(String text) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Padding(
+            padding: EdgeInsets.only(top: 5),
+            child: Icon(Icons.circle, size: 5, color: Color(0xFF94A3B8)),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              text,
+              softWrap: true,
+              style: const TextStyle(
+                color: Color(0xFF94A3B8),
+                fontSize: 11,
+                height: 1.4,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   /// Badge [ GASES ] cian atenuado con borde sutil.
   Widget _prtGasesBadge() {
     const color = Color(0xFF22D3EE);
@@ -3733,29 +3788,87 @@ Future<void> _searchPlateLegacy({bool forceNetwork = false, String? plateOverrid
             ),
           ),
           const SizedBox(height: 14),
-          if (_dashboardOk['prt'] == true) ...[
-            _buildPrtCard(data: dash['prt']),
-            const SizedBox(height: 16),
-          ] else
-            _dashSourceTile('prt'),
-          if (_dashboardOk['boostr'] == true) ...[
-            _buildBoostrCard(data: dash['boostr']),
-            const SizedBox(height: 16),
-          ] else if (_dashboardQueued)
-            _boostrQueueBanner()
-          else
-            _dashSourceTile('boostr'),
-          if (_dashboardOk['mtt'] == true) ...[
-            _buildMttCard(data: dash['mtt']),
-            const SizedBox(height: 16),
-          ] else
-            _dashSourceTile('mtt'),
-          if (_dashboardOk['sii'] == true) ...[
-            _buildSiiCard(data: dash['sii']),
-            const SizedBox(height: 16),
-          ] else
-            _dashSourceTile('sii'),
+          if (_globalNoData) ...[
+            _buildGlobalNoDataCard(),
+            const SizedBox(height: 8),
+          ] else ...[
+            if (_dashboardOk['prt'] == true) ...[
+              _buildPrtCard(data: dash['prt']),
+              const SizedBox(height: 16),
+            ] else
+              _dashSourceTile('prt'),
+            if (_dashboardOk['boostr'] == true) ...[
+              _buildBoostrCard(data: dash['boostr']),
+              const SizedBox(height: 16),
+            ] else if (_dashboardQueued)
+              _boostrQueueBanner()
+            else
+              _dashSourceTile('boostr'),
+            if (_dashboardOk['mtt'] == true) ...[
+              _buildMttCard(data: dash['mtt']),
+              const SizedBox(height: 16),
+            ] else
+              _dashSourceTile('mtt'),
+            if (_dashboardOk['sii'] == true) ...[
+              _buildSiiCard(data: dash['sii']),
+              const SizedBox(height: 16),
+            ] else
+              _dashSourceTile('sii'),
+          ],
           const SizedBox(height: 8),
+        ],
+      ),
+    );
+  }
+
+  /// Estado global "No encontramos información para esta patente": se
+  /// muestra cuando NINGUNA fuente (PRT, Boostr, MTT, SII) entregó datos.
+  Widget _buildGlobalNoDataCard() {
+    return Container(
+      width: double.infinity,
+      constraints: const BoxConstraints(maxWidth: 380),
+      margin: const EdgeInsets.only(bottom: 14),
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: const Color(0xFF0F172A).withOpacity(0.8),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFF64748B).withOpacity(0.6), width: 1.1),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Row(
+            children: [
+              Icon(Icons.search_off_rounded, color: Color(0xFF94A3B8), size: 24),
+              SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'No encontramos información para esta patente',
+                  softWrap: true,
+                  style: TextStyle(
+                    color: Color(0xFFE2E8F0),
+                    fontSize: 14.5,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 0.4,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          const Text(
+            'Posibles causas:',
+            softWrap: true,
+            style: TextStyle(
+              color: Color(0xFFCBD5E1),
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 6),
+          _bulletRow('Patente inexistente o digitada incorrectamente.'),
+          _bulletRow('Inscripción muy reciente en el Registro Civil (aún no sincronizada en bases de datos).'),
+          _bulletRow('Vehículo especial o de uso restringido (Fuerzas Armadas, cuerpo diplomático u oficial).'),
         ],
       ),
     );
@@ -3820,6 +3933,68 @@ Future<void> _searchPlateLegacy({bool forceNetwork = false, String? plateOverrid
                     style: TextStyle(fontSize: 11, fontWeight: FontWeight.w900, letterSpacing: 0.6)),
               ),
             ),
+          ],
+        ),
+      );
+    }
+
+    // PRT-FIRST — estado "NO ENCONTRADO": la placa NO existe en los
+    // registros ministeriales ("La placa ingresada no existe"). Tile
+    // informativo que explica los motivos habituales. NO es un fallo de red
+    // ni bloquea el resto del dashboard (Boostr/MTT/SII siguen visibles).
+    if (engine == 'prt' && _prtNoEncontrado) {
+      return Container(
+        width: double.infinity,
+        constraints: const BoxConstraints(maxWidth: 380),
+        margin: const EdgeInsets.only(bottom: 14),
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: const Color(0xFF0F172A).withOpacity(0.75),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: const Color(0xFF94A3B8).withOpacity(0.5), width: 1.1),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(Icons.search_off_rounded, color: Color(0xFF94A3B8), size: 22),
+                SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '[ PRT: SIN REGISTROS EN PRT ]',
+                        softWrap: true,
+                        style: TextStyle(
+                          color: Color(0xFFE2E8F0),
+                          fontSize: 12,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: 0.7,
+                        ),
+                      ),
+                      SizedBox(height: 6),
+                      Text(
+                        'La placa ingresada no existe en la base ministerial. Esto puede deberse a:',
+                        softWrap: true,
+                        style: TextStyle(
+                          color: Color(0xFF94A3B8),
+                          fontSize: 11.5,
+                          height: 1.4,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            _bulletRow('Vehículo nuevo o de reciente inscripción (aún homologado, exento de revisión técnica).'),
+            _bulletRow('Vehículo de importación reciente o rezagado en el traspaso de datos al Ministerio de Transportes.'),
+            _bulletRow('Patente con error de tipeo o formato no reconocido en la base ministerial.'),
           ],
         ),
       );
@@ -4093,6 +4268,7 @@ Future<void> _searchPlateLegacy({bool forceNetwork = false, String? plateOverrid
         setState(() {
           _prtQuotaExceeded = true;
           _prtSinRegistro = false;
+          _prtNoEncontrado = false;
           _prtOmitido = true;
         });
         _showSnack(
@@ -4103,6 +4279,7 @@ Future<void> _searchPlateLegacy({bool forceNetwork = false, String? plateOverrid
         setState(() {
           _prtQuotaExceeded = false;
           _prtSinRegistro = false;
+          _prtNoEncontrado = false;
           _prtOmitido = true;
         });
         _showSnack('Verificación PRT agotada por tiempo. Reintenta la auditoría cuando quieras.');
@@ -4112,16 +4289,29 @@ Future<void> _searchPlateLegacy({bool forceNetwork = false, String? plateOverrid
         setState(() {
           _prtQuotaExceeded = false;
           _prtSinRegistro = true;
+          _prtNoEncontrado = false;
           _prtOmitido = false;
         });
         _showSnack(
             'PRT: sin revisiones técnicas registradas para esta patente (homologado o exento).');
         return;
       }
+      if (evt == 'PRT_NOT_FOUND') {
+        setState(() {
+          _prtQuotaExceeded = false;
+          _prtSinRegistro = false;
+          _prtNoEncontrado = true;
+          _prtOmitido = false;
+        });
+        _showSnack(
+            'PRT: la placa ingresada no existe en los registros ministeriales. Mostrando datos de Padrón, MTT y SII.');
+        return;
+      }
       if (result.found && _prtDataCompleto(result.data)) {
         setState(() {
           _prtQuotaExceeded = false;
           _prtSinRegistro = false;
+          _prtNoEncontrado = false;
           _prtOmitido = false;
           _dashboard?['prt'] = Map<String, dynamic>.from(result.data);
           _dashboardOk['prt'] = true;
@@ -4135,6 +4325,7 @@ Future<void> _searchPlateLegacy({bool forceNetwork = false, String? plateOverrid
         // Modal descartado/abortado (X / retroceso / sin respuesta).
         setState(() {
           _prtSinRegistro = false;
+          _prtNoEncontrado = false;
           _prtOmitido = true;
         });
         _showSnack('PRT: consulta cancelada — reintenta desde la tarjeta');
@@ -4840,6 +5031,20 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
                 _humanTimeout?.cancel();
                 if (mounted) {
                   _showPrtNoResponseDialog();
+                }
+              } else if (obj is Map && obj['status'] == 'not_found') {
+                // "La placa ingresada no existe": el portal ministerial no
+                // tiene registros para esta patente. NO es un fallo de red
+                // ni timeout: cerrar el modal de inmediato con el evento
+                // formal PRT_NOT_FOUND y dejar que el pipeline caiga al
+                // fallback Boostr / estado global "sin información".
+                _postbackSafetyTimer?.cancel();
+                _humanTimeout?.cancel();
+                _dataOrErrorSent = true;
+                if (mounted) {
+                  Navigator.of(context).pop(<String, dynamic>{
+                    '__prtEvent': 'PRT_NOT_FOUND',
+                  });
                 }
               }
             } catch (_) {}
