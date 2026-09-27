@@ -403,6 +403,27 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
             : <String, dynamic>{};
         dash[key] = data;
         ok[key] = status == 'ok';
+
+        // ===== COMPUERTA MTT: el descarte "vehículo particular / no pertenece
+        // al RNSTP" NO es información vehicular útil. MTT responde status 'ok'
+        // incluso para el descarte negativo por defecto (es_transporte_publico
+        // == false y sin datos reales de flota/servicio). Ese resultado se
+        // trata como NEUTRO (no-data): no debe impedir el estado global
+        // "_globalNoData" cuando PRT y Boostr ya confirmaron 'not_found'.
+        if (key == 'mtt' && status == 'ok') {
+          final isPublic = data['es_transporte_publico'] == true ||
+              data['isPublicTransport'] == true;
+          // Datos reales de flota/servicio (cualquiera presente) también
+          // cuentan como dato útil aunque el flag no esté izado.
+          final hasServiceData = (data['tipo_servicio']?.toString().trim().isNotEmpty ?? false) ||
+              (data['region']?.toString().trim().isNotEmpty ?? false) ||
+              (data['folio_flota']?.toString().trim().isNotEmpty ?? false) ||
+              (data['fecha_vencimiento_permiso']?.toString().trim().isNotEmpty ?? false);
+          if (!isPublic && !hasServiceData) {
+            // Descarte negativo por defecto: neutralizar para el global.
+            ok['mtt'] = false;
+          }
+        }
       }
 
       if (full != null) {
@@ -432,8 +453,13 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
         }
       }
 
-      // ¿Ninguna fuente tiene datos? (PRT sin registro + Boostr/MTT/SII
-      // vacíos) → estado global "No encontramos información".
+      // ¿Sin datos reales de vehículo? → estado global "No encontramos
+      // información para esta patente".
+      // CRITERIO CASO B: basta con que las fuentes principales de datos del
+      // vehículo (PRT y Boostr) confirmen 'not_found' — el descarte genérico
+      // de MTT ("particular / no pertenece al RNSTP", ya neutralizado en
+      // add()) y el SII sin tasación NO deben impedirlo. Se exige además que
+      // ninguna fuente aporte datos reales (ok).
       final globalNoData = ok.values.every((v) => v == false);
 
       setState(() {
@@ -633,6 +659,21 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
         if (status == 'ok') {
           _dashboard![key] = data;
           _dashboardOk[key] = true;
+        }
+
+        // Compuerta MTT: el descarte "particular / no pertenece al RNSTP" no
+        // es dato vehicular útil; se neutraliza (idéntico al pipeline
+        // principal) para no bloquear el estado global sin datos.
+        if (key == 'mtt' && status == 'ok') {
+          final isPublic = data['es_transporte_publico'] == true ||
+              data['isPublicTransport'] == true;
+          final hasServiceData = (data['tipo_servicio']?.toString().trim().isNotEmpty ?? false) ||
+              (data['region']?.toString().trim().isNotEmpty ?? false) ||
+              (data['folio_flota']?.toString().trim().isNotEmpty ?? false) ||
+              (data['fecha_vencimiento_permiso']?.toString().trim().isNotEmpty ?? false);
+          if (!isPublic && !hasServiceData) {
+            _dashboardOk['mtt'] = false;
+          }
         }
       }
 
