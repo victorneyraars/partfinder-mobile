@@ -7505,15 +7505,17 @@ class _AutoSeguroVerificationScreenState
   bool _isReady = false;
   bool _dataSent = false;
   Timer? _humanTimeout;
-  Timer? _readyWatchdog;
+  Timer? _watchdogTimer;
 
   PlatformWebViewWidgetCreationParams _hybridCompositionParams() {
-    PlatformWebViewWidgetCreationParams params = PlatformWebViewWidgetCreationParams(
+    PlatformWebViewWidgetCreationParams params =
+        PlatformWebViewWidgetCreationParams(
       controller: _controller.platform,
       layoutDirection: TextDirection.ltr,
     );
     if (WebViewPlatform.instance is AndroidWebViewPlatform) {
-      params = AndroidWebViewWidgetCreationParams.fromPlatformWebViewWidgetCreationParams(
+      params =
+          AndroidWebViewWidgetCreationParams.fromPlatformWebViewWidgetCreationParams(
         params,
         displayWithHybridComposition: true,
       );
@@ -7524,35 +7526,37 @@ class _AutoSeguroVerificationScreenState
   @override
   void initState() {
     super.initState();
-    _humanTimeout = Timer(const Duration(seconds: 100), () {
+
+    _humanTimeout = Timer(const Duration(seconds: 90), () {
       if (mounted && !_dataSent) {
         Navigator.of(context).pop(<String, dynamic>{
           'status': 'error',
           'plate': widget.targetPlate,
-          'mensaje': 'Tiempo de espera agotado en la verificación.',
+          'mensaje': 'Tiempo agotado de consulta.',
         });
       }
     });
 
-    // Watchdog: si tras 3.5s no se ha recibido READY, desvanece el overlay e inyecta
-    _readyWatchdog = Timer(const Duration(milliseconds: 3500), () {
+    _watchdogTimer = Timer(const Duration(milliseconds: 3000), () {
       if (mounted && !_isReady) {
         setState(() => _isReady = true);
-        _fetchAndInjectDynamicScript();
+        _injectLogic();
       }
     });
 
     _controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
-      ..setBackgroundColor(const Color(0xFF0B132B))
-      ..setUserAgent(
-          "Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36")
+      ..setBackgroundColor(Colors.transparent)
       ..enableZoom(false)
       ..addJavaScriptChannel(
         'PrtBridge',
         onMessageReceived: (JavaScriptMessage message) {
           final msg = message.message;
-          if (msg.startsWith('{')) {
+          if (msg == 'READY') {
+            if (mounted && !_isReady) {
+              setState(() => _isReady = true);
+            }
+          } else if (msg.startsWith('{')) {
             try {
               final obj = jsonDecode(msg);
               if (obj is Map &&
@@ -7561,30 +7565,26 @@ class _AutoSeguroVerificationScreenState
                       obj['status'] == 'error')) {
                 _dataSent = true;
                 _humanTimeout?.cancel();
-                _readyWatchdog?.cancel();
+                _watchdogTimer?.cancel();
                 if (mounted) {
                   Navigator.of(context)
                       .pop(Map<String, dynamic>.from(obj as Map));
                 }
               }
             } catch (_) {}
-          } else if (msg == 'READY') {
-            if (mounted && !_isReady) {
-              setState(() => _isReady = true);
-            }
           }
         },
       )
       ..setNavigationDelegate(
         NavigationDelegate(
           onPageFinished: (url) {
-            _fetchAndInjectDynamicScript();
+            _injectLogic();
             if (mounted && !_isReady) {
               setState(() => _isReady = true);
             }
           },
           onWebResourceError: (error) {
-            debugPrint('[AUTO-SEGURO-NET] ${error.toString()}');
+            debugPrint('[AUTO-SEGURO-NET] ${error.description}');
             if (mounted && !_isReady) {
               setState(() => _isReady = true);
             }
@@ -7594,7 +7594,7 @@ class _AutoSeguroVerificationScreenState
       ..loadRequest(Uri.parse('https://www.autoseguro.gob.cl/'));
   }
 
-  Future<void> _fetchAndInjectDynamicScript() async {
+  Future<void> _injectLogic() async {
     try {
       final resp = await http
           .get(Uri.parse(
@@ -7605,17 +7605,14 @@ class _AutoSeguroVerificationScreenState
         final plate = widget.targetPlate.trim().toUpperCase();
         final filled = script.replaceAll('{{PLATE}}', plate);
         await _controller.runJavaScript(filled);
-        debugPrint('[AUTO-SEGURO-DYN] script inyectado');
       }
-    } catch (e) {
-      debugPrint('[AUTO-SEGURO-DYN] error: $e');
-    }
+    } catch (_) {}
   }
 
   @override
   void dispose() {
     _humanTimeout?.cancel();
-    _readyWatchdog?.cancel();
+    _watchdogTimer?.cancel();
     super.dispose();
   }
 
@@ -7626,12 +7623,12 @@ class _AutoSeguroVerificationScreenState
       onPopInvoked: (didPop) {
         if (!didPop) {
           _humanTimeout?.cancel();
-          _readyWatchdog?.cancel();
+          _watchdogTimer?.cancel();
           Navigator.of(context).pop();
         }
       },
       child: Scaffold(
-        backgroundColor: const Color(0xFF0B132B),
+        backgroundColor: const Color(0xFF0F172A),
         resizeToAvoidBottomInset: false,
         appBar: AppBar(
           backgroundColor: const Color(0xFF1E293B),
@@ -7642,7 +7639,7 @@ class _AutoSeguroVerificationScreenState
               const Text(
                 'Auto Seguro — Encargo por Robo',
                 style: TextStyle(
-                    fontSize: 15,
+                    fontSize: 16,
                     fontWeight: FontWeight.bold,
                     color: Colors.white),
               ),
@@ -7656,18 +7653,65 @@ class _AutoSeguroVerificationScreenState
             icon: const Icon(Icons.close, color: Colors.white),
             onPressed: () {
               _humanTimeout?.cancel();
-              _readyWatchdog?.cancel();
+              _watchdogTimer?.cancel();
               Navigator.of(context).pop();
             },
           ),
         ),
         body: Stack(
           children: [
-            const ColoredBox(color: Color(0xFF0B132B)),
-            Positioned.fill(
-              child: WebViewWidget.fromPlatformCreationParams(
-                params: _hybridCompositionParams(),
-              ),
+            Column(
+              children: [
+                SafeArea(
+                  bottom: false,
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(24, 14, 24, 8),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Text(
+                          'Resuelve el reCAPTCHA para consultar',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: Color(0xFF94A3B8),
+                            fontSize: 14,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.symmetric(vertical: 10),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF1E293B),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: const Color(0xFF38BDF8).withOpacity(0.45),
+                              width: 1.2,
+                            ),
+                          ),
+                          child: Text(
+                            widget.targetPlate,
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 26,
+                              fontWeight: FontWeight.w900,
+                              letterSpacing: 4,
+                              fontFamily: 'monospace',
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                Expanded(
+                  child: WebViewWidget.fromPlatformCreationParams(
+                    params: _hybridCompositionParams(),
+                  ),
+                ),
+              ],
             ),
             Positioned.fill(
               child: IgnorePointer(
@@ -7676,7 +7720,7 @@ class _AutoSeguroVerificationScreenState
                   opacity: _isReady ? 0.0 : 1.0,
                   duration: const Duration(milliseconds: 300),
                   child: Container(
-                    color: const Color(0xFF0B132B),
+                    color: const Color(0xFF0F172A),
                     child: const Center(
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
@@ -7684,8 +7728,9 @@ class _AutoSeguroVerificationScreenState
                           CircularProgressIndicator(color: Color(0xFF38BDF8)),
                           SizedBox(height: 16),
                           Text(
-                            'Cargando consulta de encargo por robo...',
-                            style: TextStyle(color: Colors.white70, fontSize: 13),
+                            'Cargando portal Auto Seguro...',
+                            style:
+                                TextStyle(color: Colors.white70, fontSize: 13),
                           ),
                         ],
                       ),
