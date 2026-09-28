@@ -6953,7 +6953,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
     if (WebViewPlatform.instance is AndroidWebViewPlatform) {
       params = AndroidWebViewWidgetCreationParams.fromPlatformWebViewWidgetCreationParams(
         params,
-        displayWithHybridComposition: false,
+        displayWithHybridComposition: true,
       );
     }
     return params;
@@ -7515,7 +7515,7 @@ class _AutoSeguroVerificationScreenState
     if (WebViewPlatform.instance is AndroidWebViewPlatform) {
       params = AndroidWebViewWidgetCreationParams.fromPlatformWebViewWidgetCreationParams(
         params,
-        displayWithHybridComposition: false,
+        displayWithHybridComposition: true,
       );
     }
     return params;
