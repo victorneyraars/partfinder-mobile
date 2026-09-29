@@ -710,7 +710,9 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
     final hasHist = hist is List && hist.isNotEmpty;
     final hasEstado = (d['rt_estado']?.toString().trim().isNotEmpty ?? false) ||
         (d['rt_vencimiento']?.toString().trim().isNotEmpty ?? false);
-    return hasHist || hasEstado;
+    final hasIdent = (d['marca']?.toString().trim().isNotEmpty ?? false) &&
+        (d['modelo']?.toString().trim().isNotEmpty ?? false);
+    return hasHist || hasEstado || hasIdent;
   }
 
   /// Descarga el dashboard agregado (/full) para Boostr/MTT/SII en paralelo.
