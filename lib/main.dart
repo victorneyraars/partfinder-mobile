@@ -5830,6 +5830,10 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
   bool _dataOrErrorSent = false;
   // Evita la superposición doble del diálogo estricto "sin respuesta PRT".
   bool _dialogVisible = false;
+  // HUD Auditoria
+  int _loadProgress = 0;
+  String _networkStatus = "Iniciando conexion TCP...";
+  String? _lastNetworkError;
 
   @override
   void initState() {
@@ -6102,8 +6106,12 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
       ..setNavigationDelegate(
         NavigationDelegate(
           onProgress: (progress) {
-            if (progress > 60 && !_pageLoaded && mounted) {
-              setState(() => _pageLoaded = true);
+            if (mounted) {
+              setState(() {
+                _loadProgress = progress;
+                _networkStatus = progress < 100 ? "Cargando portal PRT: $progress%" : "Conexion establecida";
+                if (progress > 60 && !_pageLoaded) _pageLoaded = true;
+              });
             }
           },
           onPageFinished: (url) {
@@ -6142,13 +6150,16 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             // Sin inyección de estilos/opacidad: dejar que la página pinte naturalmente.
           },
           onWebResourceError: (error) {
-            // Uso de toString() para ser robusto ante diferencias de versión
-            // del tipo WebResourceError (evita getters que pueden no existir).
-            final desc = 'WEBRESOURCE_ERROR ${error.toString()}';
+            final desc = error.toString();
             debugPrint('[PRT-NET-ERROR] $desc');
             _sendRemoteLog('[PRT-NET-ERROR] $desc');
             if (mounted) {
-              setState(() => _pageLoaded = true);
+              setState(() {
+                _pageLoaded = true;
+                _lastNetworkError = desc;
+                _networkStatus = "Fallo de red: $desc";
+                _isReady = true; // Desbloquear overlay para ver estado
+              });
             }
           },
           onHttpError: (error) {
@@ -6994,11 +7005,18 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
                 style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white),
               ),
               Text(
-                'Patente: ' + widget.targetPlate,
-                style: const TextStyle(fontSize: 12, color: Color(0xFF38BDF8)),
+                'Patente: ${widget.targetPlate}  •  V61-AUDIT',
+                style: const TextStyle(fontSize: 12, color: Color(0xFF38BDF8), fontWeight: FontWeight.bold),
               ),
             ],
           ),
+          actions: [
+            IconButton(
+              tooltip: "Recargar conexion",
+              icon: const Icon(Icons.refresh, color: Colors.amberAccent),
+              onPressed: _retryPrtLoad,
+            ),
+          ],
           // ÚNICA vía de salida: ABORTA la consulta completa (sin dashboard
           // ni Boostr/MTT/SII). No existe botón de bypass.
           leading: IconButton(
@@ -7008,6 +7026,45 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
         ),
         body: Stack(
         children: [
+          // HUD AUDITORIA INFERIOR
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            child: Container(
+              color: const Color(0xFF0F172A).withOpacity(0.95),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: Row(
+                children: [
+                  Container(
+                    width: 10,
+                    height: 10,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: _lastNetworkError != null ? Colors.redAccent : (_isReady ? Colors.greenAccent : Colors.amberAccent),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      _lastNetworkError ?? _networkStatus,
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: _lastNetworkError != null ? Colors.redAccent : Colors.blueGrey.shade200,
+                        fontFamily: "monospace",
+                      ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  Text(
+                    "$_loadProgress%",
+                    style: const TextStyle(fontSize: 11, color: Colors.cyanAccent, fontWeight: FontWeight.bold),
+                  ),
+                ],
+              ),
+            ),
+          ),
           // Fondo nativo del modal.
           const ColoredBox(color: Color(0xFF0B132B)),
 
