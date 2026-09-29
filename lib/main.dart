@@ -5949,9 +5949,20 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
               // Si el payload PRT llega sin datos de vehículo (marca/modelo
               // vacíos), el sistema ministerial no registra la patente:
               // estado formal 'sin_registro' del pipeline PRT-First.
-              final marca = (map['marca'] ?? '').toString().trim();
-              final modelo = (map['modelo'] ?? '').toString().trim();
-              if (marca.isEmpty && modelo.isEmpty) {
+              var marca = (map['marca'] ?? '').toString().trim();
+              var modelo = (map['modelo'] ?? '').toString().trim();
+              final raw = (map['raw_text'] ?? '').toString();
+              if (marca.isEmpty && raw.isNotEmpty) {
+                final matchMarca = RegExp(r"Marca\s*[:\s]\s*([A-Za-z0-9\-]+)", caseSensitive: false).firstMatch(raw);
+                if (matchMarca != null) marca = matchMarca.group(1)?.trim() ?? "";
+              }
+              if (modelo.isEmpty && raw.isNotEmpty) {
+                final matchMod = RegExp(r"Modelo\s*[:\s]\s*([A-Za-z0-9\-\s]+?)(?:A[ñn]o|Tipo|N°|Foto|$)", caseSensitive: false).firstMatch(raw);
+                if (matchMod != null) modelo = matchMod.group(1)?.trim() ?? "";
+              }
+              map['marca'] = marca;
+              map['modelo'] = modelo;
+              if (marca.isEmpty && modelo.isEmpty && !raw.contains("Información del Vehículo") && !raw.contains("Informacion del Vehiculo")) {
                 debugPrint('[PRT] DATA sin datos de vehículo → sin registro');
                 _humanTimeout?.cancel();
                 if (mounted) {
