@@ -6185,7 +6185,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
       debugPrint('clearCache/cookies error: $e');
     }
     try {
-      await _controller.loadRequest(Uri.parse('https://prt.cl/Paginas/RevisionTecnica.aspx'));
+      await _controller.loadRequest(Uri.parse('https://www.prt.cl/Paginas/RevisionTecnica.aspx'));
     } catch (e) {
       debugPrint('loadRequest error: $e');
       _sendRemoteLog('[PRT-LOAD-ERROR] $e');
@@ -7181,7 +7181,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
     _armReadyWatchdog();
     // Recargar la página PRT y reiniciar la inyección.
     try {
-      _controller.loadRequest(Uri.parse('https://prt.cl/Paginas/RevisionTecnica.aspx'));
+      _controller.loadRequest(Uri.parse('https://www.prt.cl/Paginas/RevisionTecnica.aspx'));
     } catch (e) {
       debugPrint('Error reintentando: $e');
     }
@@ -7331,7 +7331,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
         _readyReloads++;
         // Reinyectar el script y recargar para partir de un estado limpio.
         _fetchAndInjectDynamicScript();
-        _controller.loadRequest(Uri.parse('https://prt.cl/Paginas/RevisionTecnica.aspx'));
+        _controller.loadRequest(Uri.parse('https://www.prt.cl/Paginas/RevisionTecnica.aspx'));
         _armReadyWatchdog();
       } else {
         setState(() => _showRetryButton = true);
