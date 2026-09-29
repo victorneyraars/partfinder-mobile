@@ -347,30 +347,22 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
             //     registro vigente, el proveedor abre EL MODAL P2P en esta
             //     misma llamada (sin banners ni pasos intermedios).
             final result = await prtProvider.fetch(rawPlate, context: context);
-            if (result.found && _prtDataCompleto(result.data)) {
+            if (result.found && result.data.isNotEmpty) {
               prtPayload = Map<String, dynamic>.from(result.data);
               prtStatus = 'ok';
-              await prtProvider.cache.write(rawPlate, found: true, data: prtPayload, source: 'prt');
-            } else if (result.found) {
-              // El backend entregó ficha SIN revisiones (falso positivo
-              // prohibido): forzar la verificación P2P directa.
-              final raw = await _openPrtModalAndAwait(context, rawPlate);
+              try {
+                await prtProvider.cache.write(rawPlate, found: true, data: prtPayload, source: 'prt');
+              } catch (_) {}
+            } else {
               final evt = _lastPrtEvent;
               _lastPrtEvent = null;
-              if (raw != null && _prtDataCompleto(raw)) {
-                prtPayload = raw;
-                prtStatus = 'ok';
-                await prtProvider.cache.write(rawPlate, found: true, data: prtPayload, source: 'prt');
-              } else {
+              if (evt != null) {
                 prtStatus = _prtEventToStatus(evt);
                 prtQuota = evt == 'RECAPTCHA_QUOTA_EXCEEDED';
+              } else {
+                // Sin evento explícito de error/aborto: no bloquear pipeline
+                prtStatus = 'sin_registro';
               }
-            } else {
-              // El modal ya se resolvió dentro de fetch(): mapear su evento.
-              final evt = _lastPrtEvent;
-              _lastPrtEvent = null;
-              prtStatus = _prtEventToStatus(evt);
-              prtQuota = evt == 'RECAPTCHA_QUOTA_EXCEEDED';
             }
           } catch (e) {
             debugPrint('[PRT-FIRST] $e');
