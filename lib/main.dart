@@ -5859,7 +5859,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
     // CONGELADO (CHALLENGE_OPEN lo cancela y CHALLENGE_CLOSE lo rearma):
     // un humano resolviendo el grid puede tardar más de un minuto y Flutter
     // jamás debe cortarle la sesión a mitad del desafío.
-    _humanTimeout = Timer(const Duration(seconds: 90), () {
+    _humanTimeout = Timer(const Duration(seconds: 180), () {
       if (mounted && !_dataOrErrorSent) {
         try {
           _showPrtNoResponseDialog();
@@ -5990,7 +5990,10 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             if (!_isReady && mounted) {
               setState(() => _isReady = true);
             }
-          } else if (msg == 'CHALLENGE_OPEN') {
+          } else if (msg == 'CHALLENGE_OPEN' || msg.contains('interacting') || msg.contains('captcha_modal_open')) {
+            _humanTimeout?.cancel();
+            _humanTimeout = null;
+            if (mounted) setState(() => _challengeOpen = true);
             // Desafío de fotos abierto: ocultar la placa nativa (todo el
             // alto disponible para el popup de Google) y CONGELAR el
             // timeout humano: mientras el usuario resuelve el grid, Flutter
@@ -7229,7 +7232,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
     _dialogVisible = false;
     _postbackSafetyTimer?.cancel();
     _humanTimeout?.cancel();
-    _humanTimeout = Timer(const Duration(seconds: 90), () {
+    _humanTimeout = Timer(const Duration(seconds: 180), () {
       if (mounted && !_dataOrErrorSent) {
         try {
           _showPrtNoResponseDialog();
@@ -7527,7 +7530,7 @@ class _AutoSeguroVerificationScreenState
   void initState() {
     super.initState();
 
-    _humanTimeout = Timer(const Duration(seconds: 90), () {
+    _humanTimeout = Timer(const Duration(seconds: 180), () {
       if (mounted && !_dataSent) {
         Navigator.of(context).pop(<String, dynamic>{
           'status': 'error',
