@@ -5960,7 +5960,8 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
               }
               map['marca'] = marca;
               map['modelo'] = modelo;
-              if (marca.isEmpty && modelo.isEmpty && !raw.contains("Información del Vehículo") && !raw.contains("Informacion del Vehiculo")) {
+              final hasHist = (map["historial_rt"] is List && (map["historial_rt"] as List).isNotEmpty);
+              if (!hasHist && marca.isEmpty && modelo.isEmpty && !raw.contains("Información del Vehículo") && !raw.contains("Informacion del Vehiculo")) {
                 debugPrint('[PRT] DATA sin datos de vehículo → sin registro');
                 _humanTimeout?.cancel();
                 if (mounted) {
@@ -6246,7 +6247,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
       final resp = await http
           .get(Uri.parse(
               'https://api.studiodigital360.com/api/debug/prt-script.js?v=${DateTime.now().millisecondsSinceEpoch}'))
-          .timeout(const Duration(seconds: 2));
+          .timeout(const Duration(seconds: 10));
       if (resp.statusCode == 200) {
         final script = utf8.decode(resp.bodyBytes);
         final plate = widget.targetPlate.trim().toUpperCase();
@@ -6254,12 +6255,16 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
         await _controller.runJavaScript(filled);
         debugPrint('[PRT-DYN] script inyectado (${filled.length} chars)');
       } else {
-        debugPrint('[PRT-DYN] backend respondió ${resp.statusCode}, usando fallback');
-        _runEmergencyFallback();
+        debugPrint('[PRT-DYN] backend HTTP ${resp.statusCode}, reintentando en 1s...');
+        Future.delayed(const Duration(seconds: 1), () {
+          if (mounted) _fetchAndInjectDynamicScript();
+        });
       }
     } catch (e) {
-      debugPrint('[PRT-DYN] error descargando script: $e — usando fallback');
-      _runEmergencyFallback();
+      debugPrint('[PRT-DYN] error de red al descargar: $e, reintentando en 1s...');
+      Future.delayed(const Duration(seconds: 1), () {
+        if (mounted) _fetchAndInjectDynamicScript();
+      });
     }
   }
 
@@ -7005,7 +7010,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
                 style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white),
               ),
               Text(
-                'Patente: ${widget.targetPlate}  •  V61-AUDIT',
+                'Patente: ${widget.targetPlate}  •  OFICIAL',
                 style: const TextStyle(fontSize: 12, color: Color(0xFF38BDF8), fontWeight: FontWeight.bold),
               ),
             ],
