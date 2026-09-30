@@ -6104,8 +6104,13 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
           }
         },
       )
+      ..setBackgroundColor(const Color(0xFF0B132B))
       ..setNavigationDelegate(
         NavigationDelegate(
+          onPageStarted: (url) {
+            // Anti-flicker nativo: pinta la pantalla de oscuro milisegundos antes de que SharePoint despierte
+            _controller.runJavaScript("try { document.documentElement.style.backgroundColor = '#0B132B'; document.body.style.backgroundColor = '#0B132B'; } catch(e) {}");
+          },
           onProgress: (progress) {
             if (mounted) {
               setState(() {
