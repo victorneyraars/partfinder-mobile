@@ -6161,7 +6161,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
                  /* FIX: Trampa de red desactivada */
                 _lastNetworkError = desc;
                 _networkStatus = "Fallo de red: $desc";
-                _isReady = true; // Desbloquear overlay para ver estado
+                // _isReady = true; // [FIX EXTREMO] Bloqueado. Solo el script V87 puede mandar READY.
               });
             }
           },
