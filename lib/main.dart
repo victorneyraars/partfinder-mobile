@@ -6157,7 +6157,8 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             _sendRemoteLog('[PRT-NET-ERROR] $desc');
             if (mounted) {
               setState(() {
-                _pageLoaded = true;
+                // _pageLoaded = true;
+                 /* FIX: Trampa de red desactivada */
                 _lastNetworkError = desc;
                 _networkStatus = "Fallo de red: $desc";
                 _isReady = true; // Desbloquear overlay para ver estado
