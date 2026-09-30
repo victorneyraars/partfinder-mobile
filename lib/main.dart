@@ -6148,9 +6148,8 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             Future.delayed(const Duration(seconds: 4), () {
               if (mounted) _dumpDomToBackend();
             });
-            if (mounted) {
-              setState(() => _pageLoaded = true);
-            }
+            // [FIX EXTREMO] Eliminada la revelación en onPageFinished.
+            // El WebView permanecerá oculto hasta que el PrtBridge reciba el mensaje READY del servidor.
           },
           onWebResourceError: (error) {
             final desc = error.toString();
