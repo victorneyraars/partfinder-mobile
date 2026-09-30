@@ -6152,9 +6152,6 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
               setState(() => _pageLoaded = true);
             }
           },
-          onPageStarted: (url) {
-            // Sin inyección de estilos/opacidad: dejar que la página pinte naturalmente.
-          },
           onWebResourceError: (error) {
             final desc = error.toString();
             debugPrint('[PRT-NET-ERROR] $desc');
