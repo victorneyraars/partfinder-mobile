@@ -6116,7 +6116,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
               setState(() {
                 _loadProgress = progress;
                 _networkStatus = progress < 100 ? "Cargando portal PRT: $progress%" : "Conexion establecida";
-                if (progress > 60 && !_pageLoaded) _pageLoaded = true;
+                // if (progress > 60 && !_pageLoaded) _pageLoaded = true; // [FIX] Bloqueado para evitar revelación prematura
               });
             }
           },
