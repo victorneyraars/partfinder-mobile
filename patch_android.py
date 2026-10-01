@@ -54,18 +54,28 @@ if os.path.exists(manifest_path):
         m = m.replace('<application', '<application android:hardwareAccelerated="true"', 1)
         with open(manifest_path, 'w') as f:
             f.write(m)
-    # FIX V119: bloquear apertura automática del teclado virtual.
-    # El WebView de ASP.NET dispara autofocus nativo tras el postback; con
-    # stateAlwaysHidden Android ignora esa petición y NUNCA abre el IME solo.
-    # adjustNothing evita que el teclado redimensione la Activity.
-    if 'android:windowSoftInputMode' not in m:
+    # FIX V119.2: bloquear apertura automática del teclado virtual.
+    # Flutter 3.19+ ya incluye android:windowSoftInputMode="adjustResize" por
+    # defecto, por eso NO se puede usar un "if not in m". Hay que reemplazar
+    # el valor existente vía regex.
+    before = m
+    m = re.sub(
+        r'android:windowSoftInputMode="[^"]*"',
+        'android:windowSoftInputMode="stateAlwaysHidden|adjustNothing"',
+        m
+    )
+    if m == before and 'android:windowSoftInputMode' not in m:
+        # Si no existía (fallback de seguridad), insertar en <activity>.
         m = m.replace(
             '<activity',
             '<activity android:windowSoftInputMode="stateAlwaysHidden|adjustNothing"',
             1
         )
+    if m != before or 'stateAlwaysHidden' in m:
         with open(manifest_path, 'w') as f:
             f.write(m)
-        print(">>> windowSoftInputMode aplicado (teclado nunca se abre solo).")
+        print(">>> windowSoftInputMode aplicado (stateAlwaysHidden|adjustNothing).")
+    else:
+        print(">>> ADVERTENCIA: windowSoftInputMode NO se pudo aplicar.")
 
     print(">>> AndroidManifest.xml configurado con queries, permisos y hardwareAccelerated.")
