@@ -5828,6 +5828,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
   bool _showRetryButton = false;
   // Evita que el timeout humano cierre un modal que ya emitió DATA/ERROR.
   bool _dataOrErrorSent = false;
+  bool _postbackStarted = false;
   // Evita la superposición doble del diálogo estricto "sin respuesta PRT".
   bool _dialogVisible = false;
   // HUD Auditoria
@@ -6033,6 +6034,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
             debugPrint('[PRT-DISCOVER] $iframeUrl');
             _handleDiscoveredIframe(iframeUrl);
           } else if (msg == 'POSTBACK_START') {
+            _postbackStarted = true;
             // El JS está a punto de hacer clic en Buscar: activar de inmediato
             // el contenedor nativo opaco que cubre el WebView durante todo el
             // postback + recarga completa (cero parpadeo de la web de PRT).
@@ -7303,6 +7305,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
   void _retryPrtLoad() {
     if (!mounted) return;
     _dataOrErrorSent = false;
+    _postbackStarted = false;
     _dialogVisible = false;
     _postbackSafetyTimer?.cancel();
     _humanTimeout?.cancel();
@@ -7336,15 +7339,19 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
   /// nativa de carga JAMÁS se apaga sin el READY explícito del script.
   void _armReadyWatchdog() {
     _readyWatchdog?.cancel();
-    // V122: watchdog 12s (antes 6s). NO recargar la página, solo re-inyectar
-    // el JS — la página ya está cargada y recargarla pierde el estado de
-    // prt.cl y multiplica los ciclos.
+    // V123: watchdog 12s. NO reinjectar si el postback ya arrancó — el JS está
+    // trabajando y reinjectarlo resetea los flags (submitted/harvested) y
+    // pierde el postback en curso. Solo reinjectar si el JS NUNCA emitió
+    // POSTBACK_START (es decir, si ni siquiera detectó el captcha).
     _readyWatchdog = Timer(const Duration(seconds: 12), () {
       if (!mounted || _isReady) return;
-      debugPrint('[PRT] 12s sin READY: reintento ${_readyReloads + 1}/2');
+      if (_postbackStarted) {
+        debugPrint('[PRT] 12s sin READY pero postback en curso, esperando...');
+        return; // no reinjectar, dejar que el postback complete
+      }
+      debugPrint('[PRT] 12s sin READY ni postback: reintento ${_readyReloads + 1}/2');
       if (_readyReloads < 2) {
         _readyReloads++;
-        // Solo re-inyectar el script, sin recargar la página.
         _fetchAndInjectDynamicScript();
         _armReadyWatchdog();
       } else {
