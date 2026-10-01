@@ -61,20 +61,20 @@ if os.path.exists(manifest_path):
     before = m
     m = re.sub(
         r'android:windowSoftInputMode="[^"]*"',
-        'android:windowSoftInputMode="stateAlwaysHidden|adjustNothing"',
+        'android:windowSoftInputMode="stateAlwaysHidden"',
         m
     )
     if m == before and 'android:windowSoftInputMode' not in m:
         # Si no existía (fallback de seguridad), insertar en <activity>.
         m = m.replace(
             '<activity',
-            '<activity android:windowSoftInputMode="stateAlwaysHidden|adjustNothing"',
+            '<activity android:windowSoftInputMode="stateAlwaysHidden"',
             1
         )
     if m != before or 'stateAlwaysHidden' in m:
         with open(manifest_path, 'w') as f:
             f.write(m)
-        print(">>> windowSoftInputMode aplicado (stateAlwaysHidden|adjustNothing).")
+        print(">>> windowSoftInputMode aplicado (solo stateAlwaysHidden).")
     else:
         print(">>> ADVERTENCIA: windowSoftInputMode NO se pudo aplicar.")
 
