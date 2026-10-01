@@ -6244,14 +6244,21 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
   /// Descarga el script de inyección dinámica del backend, reemplaza
   /// {{PLATE}} por la patente y lo ejecuta en el WebView. Si falla la red,
   /// usa un fallback mínimo de emergencia.
+  static String? _cachedScript;
   Future<void> _fetchAndInjectDynamicScript() async {
     try {
-      final resp = await http
-          .get(Uri.parse(
-              'https://api.studiodigital360.com/api/debug/prt-script.js?v=${DateTime.now().millisecondsSinceEpoch}'))
-          .timeout(const Duration(seconds: 10));
-      if (resp.statusCode == 200) {
-        final script = utf8.decode(resp.bodyBytes);
+      String? script = _cachedScript;
+      if (script == null) {
+        final resp = await http
+            .get(Uri.parse(
+                'https://api.studiodigital360.com/api/debug/prt-script.js?v=${DateTime.now().millisecondsSinceEpoch}'))
+            .timeout(const Duration(seconds: 10));
+        if (resp.statusCode == 200) {
+          script = utf8.decode(resp.bodyBytes);
+          _cachedScript = script;
+        }
+      }
+      if (script != null) {
         final plate = widget.targetPlate.trim().toUpperCase();
         final filled = script.replaceAll('{{PLATE}}', plate);
         await _controller.runJavaScript(filled);
@@ -7331,14 +7338,16 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
   /// nativa de carga JAMÁS se apaga sin el READY explícito del script.
   void _armReadyWatchdog() {
     _readyWatchdog?.cancel();
-    _readyWatchdog = Timer(const Duration(seconds: 6), () {
+    // V122: watchdog 12s (antes 6s). NO recargar la página, solo re-inyectar
+    // el JS — la página ya está cargada y recargarla pierde el estado de
+    // prt.cl y multiplica los ciclos.
+    _readyWatchdog = Timer(const Duration(seconds: 12), () {
       if (!mounted || _isReady) return;
-      debugPrint('[PRT] 6s sin READY: reintento ${_readyReloads + 1}/2');
+      debugPrint('[PRT] 12s sin READY: reintento ${_readyReloads + 1}/2');
       if (_readyReloads < 2) {
         _readyReloads++;
-        // Reinyectar el script y recargar para partir de un estado limpio.
+        // Solo re-inyectar el script, sin recargar la página.
         _fetchAndInjectDynamicScript();
-        _controller.loadRequest(Uri.parse('https://www.prt.cl/Paginas/RevisionTecnica.aspx'));
         _armReadyWatchdog();
       } else {
         setState(() => _showRetryButton = true);
