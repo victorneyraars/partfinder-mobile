@@ -6073,10 +6073,10 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
               _imeKillTimer?.cancel();
               int imeTicks = 0;
               _imeKillTimer = Timer.periodic(
-                const Duration(milliseconds: 200),
+                const Duration(milliseconds: 50),
                 (t) async {
                   imeTicks++;
-                  if (imeTicks > 60) {
+                  if (imeTicks > 240) {
                     t.cancel();
                     return;
                   }

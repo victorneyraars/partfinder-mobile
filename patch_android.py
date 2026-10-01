@@ -91,6 +91,8 @@ _os.makedirs(_os.path.dirname(main_activity_path), exist_ok=True)
 main_activity_code = """package com.studiodigital360.partfinder360
 
 import android.content.Context
+import android.os.Bundle
+import android.view.ViewTreeObserver
 import android.view.inputmethod.InputMethodManager
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -98,6 +100,26 @@ import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterActivity() {
     private val CHANNEL = "com.studiodigital360/ime"
+    private var imeKilled = true
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        // V121: listener reactivo que cierra el IME en el mismo frame en que
+        // intenta abrirse. Se dispara en cada layout change global.
+        window.decorView.viewTreeObserver.addOnGlobalLayoutListener(
+            ViewTreeObserver.OnGlobalLayoutListener {
+                try {
+                    val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+                    // Si el IME está intentando mostrarse, cerrarlo inmediatamente
+                    if (imeKilled) {
+                        val token = window.decorView.windowToken
+                        imm.hideSoftInputFromWindow(token, 0)
+                    }
+                } catch (_: Exception) {
+                }
+            }
+        )
+    }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -105,7 +127,12 @@ class MainActivity : FlutterActivity() {
             .setMethodCallHandler { call, result ->
                 when (call.method) {
                     "hide" -> {
+                        imeKilled = true
                         hideIme()
+                        result.success(true)
+                    }
+                    "allow" -> {
+                        imeKilled = false
                         result.success(true)
                     }
                     else -> result.notImplemented()
@@ -125,12 +152,12 @@ class MainActivity : FlutterActivity() {
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
-        if (hasFocus) hideIme()
+        if (hasFocus && imeKilled) hideIme()
     }
 
     override fun onResume() {
         super.onResume()
-        hideIme()
+        if (imeKilled) hideIme()
     }
 }
 """
