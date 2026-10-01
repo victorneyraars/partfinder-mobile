@@ -54,5 +54,18 @@ if os.path.exists(manifest_path):
         m = m.replace('<application', '<application android:hardwareAccelerated="true"', 1)
         with open(manifest_path, 'w') as f:
             f.write(m)
+    # FIX V119: bloquear apertura automática del teclado virtual.
+    # El WebView de ASP.NET dispara autofocus nativo tras el postback; con
+    # stateAlwaysHidden Android ignora esa petición y NUNCA abre el IME solo.
+    # adjustNothing evita que el teclado redimensione la Activity.
+    if 'android:windowSoftInputMode' not in m:
+        m = m.replace(
+            '<activity',
+            '<activity android:windowSoftInputMode="stateAlwaysHidden|adjustNothing"',
+            1
+        )
+        with open(manifest_path, 'w') as f:
+            f.write(m)
+        print(">>> windowSoftInputMode aplicado (teclado nunca se abre solo).")
 
     print(">>> AndroidManifest.xml configurado con queries, permisos y hardwareAccelerated.")
