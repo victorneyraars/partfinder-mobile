@@ -6247,28 +6247,26 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
   static String? _cachedScript;
   Future<void> _fetchAndInjectDynamicScript() async {
     try {
-      String? script = _cachedScript;
-      if (script == null) {
+      if (_cachedScript == null) {
         final resp = await http
             .get(Uri.parse(
                 'https://api.studiodigital360.com/api/debug/prt-script.js?v=${DateTime.now().millisecondsSinceEpoch}'))
             .timeout(const Duration(seconds: 10));
         if (resp.statusCode == 200) {
-          script = utf8.decode(resp.bodyBytes);
-          _cachedScript = script;
+          _cachedScript = utf8.decode(resp.bodyBytes);
+        } else {
+          debugPrint('[PRT-DYN] backend HTTP ${resp.statusCode}, reintentando en 1s...');
+          Future.delayed(const Duration(seconds: 1), () {
+            if (mounted) _fetchAndInjectDynamicScript();
+          });
+          return;
         }
       }
-      if (script != null) {
-        final plate = widget.targetPlate.trim().toUpperCase();
-        final filled = script.replaceAll('{{PLATE}}', plate);
-        await _controller.runJavaScript(filled);
-        debugPrint('[PRT-DYN] script inyectado (${filled.length} chars)');
-      } else {
-        debugPrint('[PRT-DYN] backend HTTP ${resp.statusCode}, reintentando en 1s...');
-        Future.delayed(const Duration(seconds: 1), () {
-          if (mounted) _fetchAndInjectDynamicScript();
-        });
-      }
+      final script = _cachedScript!;
+      final plate = widget.targetPlate.trim().toUpperCase();
+      final filled = script.replaceAll('{{PLATE}}', plate);
+      await _controller.runJavaScript(filled);
+      debugPrint('[PRT-DYN] script inyectado (${filled.length} chars)');
     } catch (e) {
       debugPrint('[PRT-DYN] error de red al descargar: $e, reintentando en 1s...');
       Future.delayed(const Duration(seconds: 1), () {
