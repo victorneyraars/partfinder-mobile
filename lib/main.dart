@@ -5814,6 +5814,8 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
   // respuesta (DATA/ERROR), cierra el modal. La app jamás queda congelada.
   Timer? _postbackSafetyTimer;
   Timer? _readyFallbackTimer;
+  Timer? _imeKillTimer;
+  static const MethodChannel _imeChannel = MethodChannel('com.studiodigital360/ime');
   // TIMEOUT DE SEGURIDAD humano: 45s sin resolución exitosa del reCAPTCHA
   // (bucles infinitos de imágenes de Google) → emitir RECAPTCHA_TIMEOUT.
   Timer? _humanTimeout;
@@ -6055,8 +6057,6 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
               } catch (e) {
                 debugPrint('TextInput.hide error: $e');
               }
-              // Soltar el foco nativo del PlatformView (el teclado que abrió
-              // el WebView no responde a TextInput.hide de Flutter).
               try {
                 FocusManager.instance.primaryFocus?.unfocus();
               } catch (e) {
@@ -6067,6 +6067,24 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
               } catch (e) {
                 debugPrint('requestFocus error: $e');
               }
+              // V120: llamar al MethodChannel nativo cada 200ms durante 12s
+              // para forzar el cierre del IME a nivel Android (el WebView
+              // puede reabrirlo varias veces durante el postback).
+              _imeKillTimer?.cancel();
+              int imeTicks = 0;
+              _imeKillTimer = Timer.periodic(
+                const Duration(milliseconds: 200),
+                (t) async {
+                  imeTicks++;
+                  if (imeTicks > 60) {
+                    t.cancel();
+                    return;
+                  }
+                  try {
+                    await _imeChannel.invokeMethod('hide');
+                  } catch (_) {}
+                },
+              );
             }
             // Temporizador de seguridad: si en 25s no llega DATA/ERROR,
             // mostrar el diálogo estricto de "sin respuesta oficial"
@@ -6964,6 +6982,7 @@ class _PrtVerificationScreenState extends State<PrtVerificationScreen> {
     _humanTimeout?.cancel();
     _readyWatchdog?.cancel();
     _postbackSafetyTimer?.cancel();
+    _imeKillTimer?.cancel();
     super.dispose();
   }
 

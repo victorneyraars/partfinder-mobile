@@ -79,3 +79,122 @@ if os.path.exists(manifest_path):
         print(">>> ADVERTENCIA: windowSoftInputMode NO se pudo aplicar.")
 
     print(">>> AndroidManifest.xml configurado con queries, permisos y hardwareAccelerated.")
+
+# ============================================================
+# FIX V120: MethodChannel nativo para cerrar el IME del WebView.
+# windowSoftInputMode NO basta cuando el WebView nativo pide el IME
+# directamente. Este MainActivity llama a InputMethodManager.hideSoftInputFromWindow.
+# ============================================================
+main_activity_path = 'android/app/src/main/kotlin/com/studiodigital360/partfinder360/MainActivity.kt'
+import os as _os
+_os.makedirs(_os.path.dirname(main_activity_path), exist_ok=True)
+main_activity_code = """package com.studiodigital360.partfinder360
+
+import android.content.Context
+import android.view.inputmethod.InputMethodManager
+import io.flutter.embedding.android.FlutterActivity
+import io.flutter.embedding.engine.FlutterEngine
+import io.flutter.plugin.common.MethodChannel
+
+class MainActivity : FlutterActivity() {
+    private val CHANNEL = "com.studiodigital360/ime"
+
+    override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
+        super.configureFlutterEngine(flutterEngine)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL)
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "hide" -> {
+                        hideIme()
+                        result.success(true)
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+    }
+
+    private fun hideIme() {
+        try {
+            val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+            val token = window.decorView.windowToken
+            imm.hideSoftInputFromWindow(token, 0)
+            currentFocus?.let { imm.hideSoftInputFromWindow(it.windowToken, 0) }
+        } catch (_: Exception) {
+        }
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) hideIme()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        hideIme()
+    }
+}
+"""
+with open(main_activity_path, 'w') as f:
+    f.write(main_activity_code)
+print(">>> MainActivity.kt escrito con MethodChannel IME.")
+
+
+# ============================================================
+# FIX V120: MethodChannel nativo para cerrar el IME del WebView.
+# windowSoftInputMode NO basta cuando el WebView nativo pide el IME
+# directamente; esto llama a InputMethodManager.hideSoftInputFromWindow.
+# ============================================================
+main_activity_path = 'android/app/src/main/kotlin/com/studiodigital360/partfinder360/MainActivity.kt'
+import os as _os
+_os.makedirs(_os.path.dirname(main_activity_path), exist_ok=True)
+main_activity_code = '''package com.studiodigital360.partfinder360
+
+import android.content.Context
+import android.os.Bundle
+import android.view.inputmethod.InputMethodManager
+import io.flutter.embedding.android.FlutterActivity
+import io.flutter.embedding.engine.FlutterEngine
+import io.flutter.plugin.common.MethodChannel
+
+class MainActivity : FlutterActivity() {
+    private val CHANNEL = "com.studiodigital360/ime"
+
+    override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
+        super.configureFlutterEngine(flutterEngine)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL)
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "hide" -> {
+                        hideIme()
+                        result.success(true)
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+    }
+
+    private fun hideIme() {
+        try {
+            val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+            val token = window.decorView.windowToken
+            imm.hideSoftInputFromWindow(token, 0)
+            currentFocus?.let { imm.hideSoftInputFromWindow(it.windowToken, 0) }
+        } catch (_: Exception) {
+        }
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) hideIme()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        hideIme()
+    }
+}
+'''
+with open(main_activity_path, 'w') as f:
+    f.write(main_activity_code)
+print(">>> MainActivity.kt escrito con MethodChannel IME.")
+
