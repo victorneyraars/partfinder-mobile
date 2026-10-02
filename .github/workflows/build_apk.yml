@@ -84,5 +84,6 @@ jobs:
             build/app/outputs/bundle/release/app-release.aab
           draft: false
           prerelease: ${{ steps.release_meta.outputs.prerelease }}
+          make_latest: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -12,3 +12,7 @@ build/
 # Android (generado por CI)
 android/.gradle/
 android/app/.cxx/
+
+# Backups locales y lockfile
+*.bak
+pubspec.lock
