@@ -4,7 +4,7 @@ Todas las versiones notables de PartFinder 360.
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es/1.1.0/),
 versionado según [Semantic Versioning](https://semver.org/lang/es/).
 
-## [1.0.0] - 2026-10-01
+## [1.0.0] - 2026-10-01 (versionCode 3)
 
 ### Añadido
 - Consulta Técnica PRT con prellenado automático de patente
