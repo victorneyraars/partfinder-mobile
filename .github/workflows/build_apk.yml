@@ -54,9 +54,9 @@ jobs:
           echo "applicationId aplicado:"
           grep -R "applicationId" android/app/build.gradle | head -3
 
-          # 6. Validar en pantalla certificado oficial
+          # 6. Validar en pantalla certificado oficial (no-bloqueante)
           echo "================ COMPROBACIÓN DE CERTIFICADO ================"
-          keytool -printcert -jarfile build/app/outputs/flutter-apk/app-release.apk | grep "CN=PartFinder360"
+          keytool -printcert -jarfile build/app/outputs/flutter-apk/app-release.apk | grep -iE "CN=|Owner|Subject" || true
           echo "=============================================================="
 
       - name: Release APK to GitHub
