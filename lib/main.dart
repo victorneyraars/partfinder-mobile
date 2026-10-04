@@ -5128,6 +5128,8 @@ Future<void> _searchPlateLegacy({bool forceNetwork = false, String? plateOverrid
   /// tarjeta PRT del dashboard sin salir de la vista unificada.
   Future<void> _solvePrtForDashboard(String plate) async {
     if (plate.isEmpty) return;
+    // Tracking: consulta PRT iniciada (desde dashboard)
+    UsageTracker().track('prt_query_start', plate: plate, metadata: {'source': 'dashboard'});
     try {
       final provider = _providers['prt'];
       if (provider == null) return;
@@ -5172,6 +5174,8 @@ Future<void> _searchPlateLegacy({bool forceNetwork = false, String? plateOverrid
         return;
       }
       if (evt == 'PRT_NOT_FOUND') {
+        // Tracking: patente sin registro ministerial
+        UsageTracker().track('prt_query_fail', plate: plate, metadata: {'reason': 'not_found', 'source': 'dashboard'});
         setState(() {
           _prtQuotaExceeded = false;
           _prtSinRegistro = false;
@@ -5183,6 +5187,8 @@ Future<void> _searchPlateLegacy({bool forceNetwork = false, String? plateOverrid
         return;
       }
       if (result.found && _prtDataCompleto(result.data)) {
+        // Tracking: consulta PRT exitosa desde dashboard
+        UsageTracker().track('prt_query_success', plate: plate, metadata: {'source': 'dashboard'});
         setState(() {
           _prtQuotaExceeded = false;
           _prtSinRegistro = false;
