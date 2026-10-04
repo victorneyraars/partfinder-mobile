@@ -484,6 +484,7 @@ Si el updated_at es viejo, hacer cualquier consulta para forzar la actualizacion
 | pf_api | Docker | Activo | 8000 |
 | pf_database | Docker | Activo | 5432 (interno) |
 | pf_mtt_service | Docker | Activo | 3091 (interno) |
+| pf_boostr_service | Docker | Activo | 3092 (interno) |
 | prt-service | systemd | Activo | 3090 |
 
 ---
@@ -496,7 +497,45 @@ Si el updated_at es viejo, hacer cualquier consulta para forzar la actualizacion
 | victorneyraars/partfinder-admin | App admin Flutter |
 | victorneyraars/partfinder360 | Backend FastAPI |
 | victorneyraars/mtt-service | Microservicio MTT con cache |
+| victorneyraars/boostr-service | Microservicio Boostr con cache |
 
 ---
 
+## 19. Tests de servicios (admin)
+
+El panel admin tiene una pantalla ServiceTestScreen (icono llave inglesa
+en el dashboard) con tabs para verificar cada servicio/container del stack.
+
+### Arquitectura
+
+- Backend: partfinder/admin_tests.py (router /api/admin/test/*)
+- UI admin: lib/features/services/service_test_screen.dart
+- API client: metodos test*Service() en lib/core/api_client.dart
+
+Cada endpoint devuelve un formato comun:
+  {service, endpoint, status, latency_ms, checks[], warnings[], errors[], response{}}
+
+### Tests implementados
+
+| Tab      | Endpoint                              | Consume cuota  | Requiere patente |
+|----------|---------------------------------------|----------------|------------------|
+| MTT      | GET /api/admin/test/mtt-service       | No             | Si               |
+| BOOSTR   | GET /api/admin/test/boostr-service    | Solo cache miss| Si               |
+| DATABASE | GET /api/admin/test/pf-database       | No             | No               |
+
+Pendiente: agregar tab PRT (endpoint /api/admin/test/prt-service).
+
+### Agregar un test nuevo (patron)
+
+1. En admin_tests.py: funcion _test_<nombre>() que devuelve dict con
+   el formato comun (usar _empty(service, endpoint) como base).
+2. En admin_tests.py: @router.get("/<nombre>") con Depends(_auth_dep())
+   que llame a la funcion.
+3. En api_client.dart: metodo test<Nombre>Service() que hace
+   _getJson("/api/admin/test/<nombre>").
+4. En service_test_screen.dart: agregar caso al enum ServiceKind,
+   la extension ServiceKindX (label, title, buttonText, note, needsPlate)
+   y el switch en _runTest().
+
+---
 Ultima actualizacion: 2026-10-04

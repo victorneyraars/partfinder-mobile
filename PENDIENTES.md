@@ -104,10 +104,15 @@ Fase 3 - Refinamiento:
 **Stack:** Firebase Cloud Messaging (gratis)
 **Tiempo:** 4-6 horas.
 
-### 5. Tests de servicios en admin (MEDIA prioridad)
-**Estado:** pantalla ServiceTestScreen funcional para MTT.
+### 5. Tests de servicios en admin — PARCIAL 2026-10-04
+**Implementado:**
+- TabBar con 3 tabs en ServiceTestScreen (MTT, BOOSTR, DATABASE)
+- Endpoint GET /api/admin/test/mtt-service (con cache SQLite)
+- Endpoint GET /api/admin/test/boostr-service (con cache SQLite + cuota)
+- Endpoint GET /api/admin/test/pf-database (5 checks Postgres)
+- UI compartida (ServiceTestTab + enum ServiceKind)
+- Campo patente oculto para servicios que no lo requieren (needsPlate)
+**Validado en movil:** los 3 tabs (9ms MTT, 9ms Boostr, 34ms Database)
 **Pendiente:**
-- Agregar test de prt-service (endpoint backend + boton/tab en admin)
-- Agregar test de pf_database (SELECT 1, pg_stat_activity, version, tamaño)
-- Agregar test de boostr-service (ahora 0 cuota en cache hits)
-- Refactor UI: TabBar por servicio en vez de cards apiladas
+- Agregar tab PRT (endpoint /api/admin/test/prt-service)
+- Agregar tab Boostr fuel_efficiency (opcional, uso bajo)

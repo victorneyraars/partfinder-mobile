@@ -18,6 +18,11 @@ versionado según [Semantic Versioning](https://semver.org/lang/es/).
   3. App admin: metodo _decodeJson en lib/core/api_client.dart con el mismo
      patron.
 
+### Añadido
+- Pantalla admin ServiceTestScreen con 3 tabs (MTT, BOOSTR, DATABASE).
+  Cada tab expone health + consulta real + checks especificos del servicio.
+- Endpoints backend /api/admin/test/{mtt-service,boostr-service,pf-database}.
+
 ### Mejorado
 - Boostr: cache SQLite via microservicio boostr-service (TTL 15d).
   Primera consulta ~500ms + 1 cuota; siguientes ~7ms + 0 cuota.
