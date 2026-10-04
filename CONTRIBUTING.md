@@ -153,6 +153,44 @@ Endpoints utiles:
 - POST /api/vehicle/cache
 - POST /api/debug/log
 
+### 11.1 Encoding UTF-8 - Regla obligatoria
+
+El backend tiene un middleware que fuerza application/json; charset=utf-8
+en todas las respuestas JSON (ver _force_utf8_charset en main.py).
+
+Por que existe: FastAPI/Starlette devuelve application/json sin charset,
+y varios clientes HTTP (Dart http, curl viejo, apps iOS nativas) asumen
+Latin-1 por default. Sin el middleware, Vehículo/Público/Región llegan
+como VehÃculo/PÃºblico/RegiÃ³n a la UI (bug de mojibake).
+
+Regla al agregar un endpoint nuevo: no hay que hacer nada especial. El
+middleware cubre todas las respuestas automaticamente. Solo no devolver
+Response con un content-type custom que incluya charset distinto, o el
+middleware no lo pisara.
+
+### 11.2 Encoding UTF-8 en clientes Dart (Flutter)
+
+Regla obligatoria al parsear JSON desde Flutter: usar
+utf8.decode(resp.bodyBytes) en vez de resp.body.
+
+El paquete http de Dart asume Latin-1 cuando el Content-Type no declara
+charset=utf-8. Aunque el backend ya lo declare, algunos proxies/CDN pueden
+comerlo, y la app movil debe ser defensiva.
+
+Helpers existentes:
+
+- partfinder-mobile: lib/utils/http_json.dart
+
+    import 'utils/http_json.dart';
+    final raw = decodeJsonUtf8(resp) as Map<String, dynamic>;
+
+- partfinder-admin: metodo _decodeJson en lib/core/api_client.dart
+  (uso interno, no exportado)
+
+Si agregas un nuevo provider o llamada HTTP: siempre usar el helper.
+Nunca jsonDecode(resp.body) directo.
+
+
 ## 12. JS Injection
 
 Ubicacion:
@@ -318,7 +356,7 @@ Ultima actualizacion: 2026-10-02
 
 ## 9. Microservicios
 
-El ecosistema tiene 2 microservicios propios (aparte de pf_api):
+El ecosistema tiene 3 microservicios propios (aparte de pf_api):
 
 ### 9.1 mtt-service (Docker, puerto 3091)
 
@@ -354,9 +392,42 @@ El ecosistema tiene 2 microservicios propios (aparte de pf_api):
 
     journalctl -u prt-service -f
 
-### 9.3 Como agregar un servicio nuevo
+### 9.3 boostr-service (Docker, puerto 3092)
 
-Patron recomendado (usado por mtt-service):
+- Repo: victorneyraars/boostr-service
+- Path: /opt/servicios/boostr-service
+- Hace: consulta a api.boostr.cl (API comercial) con cache SQLite (TTL 15 dias)
+- Beneficio: primera consulta ~500ms + 1 cuota, siguientes ~7ms + 0 cuota
+- Como se usa desde pf_api:
+
+    BOOSTR_SERVICE_URL=http://boostr-service:3092
+    r = requests.get(f"{BOOSTR_SERVICE_URL}/api/v1/boostr/{plate}")
+    # pf_api propaga el ratelimit a Postgres (api_quota) desde la respuesta
+
+- Endpoints del micro:
+
+    GET    /health                        # estado + api_key_configured
+    GET    /api/v1/boostr/{plate}         # consulta con cache (?force=true bypasea)
+    GET    /api/v1/boostr/{plate}/cache   # info cache (no consume cuota)
+    DELETE /api/v1/boostr/{plate}/cache   # invalidar cache de una patente
+
+- Modificar el cliente: editar /opt/servicios/boostr-service/src/boostr_client.py
+- Rebuild despues de cambios:
+
+    cd /opt/servicios/boostr-service
+    docker build -t boostr-service:1.0.0 .
+    cd /opt/partfinder360
+    docker compose up -d --force-recreate boostr-service
+
+- Formato de respuesta (importante para integrar):
+    El campo `ratelimit` SOLO viene en cache miss (cuando se llamo a Boostr).
+    Trae los headers ratelimit-remaining/limit/reset, que pf_api propaga a
+    la tabla api_quota en Postgres.
+    El campo `status` puede ser: ok | not_found (V-02) | queued (429) | error.
+
+### 9.4 Como agregar un servicio nuevo
+
+Patron recomendado (usado por mtt-service y boostr-service):
 
 1. Crear directorio en /opt/servicios/{nombre}-service/
 2. Incluir: Dockerfile, main.py (o server.js), requirements.txt, src/

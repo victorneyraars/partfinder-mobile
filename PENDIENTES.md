@@ -17,6 +17,11 @@ cuando hay feedback real y capacidad.
 - [x] PRT: priorizar vehicle_cache antes que el microservicio
 - [x] Reduccion de timeout MTT (20s/25s -> 5s)
 - [x] Documentacion completa (ARQUITECTURA.md, CONTRIBUTING.md actualizado)
+- [x] Fix mojibake UTF-8 (3 capas: middleware backend + utf8.decode en admin + mobile)
+- [x] Microservicio boostr-service con cache SQLite (15d TTL, patron mtt-service)
+- [x] Refactor backend: 4 sitios de Boostr directo migrados al microservicio
+- [x] docker-compose.yml versionado en repo (partfinder/deploy/ + symlink)
+- [x] Test MTT end-to-end validado en APK admin (cache hit 9ms)
 
 ---
 
@@ -75,16 +80,16 @@ Fase 3 - Refinamiento:
 
 **Tiempo:** 2-3 horas.
 
-### 3. Cache de Boostr con TTL (MEDIA prioridad)
-
-**Objetivo:** reducir consumo de cuota Boostr (100/dia).
-
-**Propuesta:**
-- TTL 30 dias para ficha tecnica (no cambia)
-- Aplicar mismo patron que mtt-service
-- Priorizar vehicle_cache antes que la API externa
-
-**Beneficio:** ahorrar cuota Boostr (hoy se consulta en cada request).
+### 3. Cache de Boostr con TTL — COMPLETADO 2026-10-04
+**Implementado:**
+- Microservicio boostr-service (repo victorneyraars/boostr-service)
+- FastAPI puerto 3092 + cache SQLite TTL 15 dias
+- Endpoints: /health, /api/v1/boostr/{plate}, /{plate}/cache, DELETE /{plate}/cache
+- Backend pf_api: 4 sitios migrados (dashboard /full, /api/tasacion,
+  provider=boostr, /pdf, fallback-boostr)
+- Ratelimit propagado a Postgres (api_quota) via headers del micro
+- Medido: 493ms (scraper) -> 7ms (cache hit) + 0 cuota en hits
+**Pendiente menor:** fuel_efficiency sigue llamando Boostr directo (uso bajo).
 
 ### 4. Push notifications para alertas (MEDIA prioridad)
 
@@ -98,3 +103,11 @@ Fase 3 - Refinamiento:
 
 **Stack:** Firebase Cloud Messaging (gratis)
 **Tiempo:** 4-6 horas.
+
+### 5. Tests de servicios en admin (MEDIA prioridad)
+**Estado:** pantalla ServiceTestScreen funcional para MTT.
+**Pendiente:**
+- Agregar test de prt-service (endpoint backend + boton/tab en admin)
+- Agregar test de pf_database (SELECT 1, pg_stat_activity, version, tamaño)
+- Agregar test de boostr-service (ahora 0 cuota en cache hits)
+- Refactor UI: TabBar por servicio en vez de cards apiladas

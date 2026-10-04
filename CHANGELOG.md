@@ -4,6 +4,33 @@ Todas las versiones notables de PartFinder 360.
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es/1.1.0/),
 versionado según [Semantic Versioning](https://semver.org/lang/es/).
 
+## [Unreleased]
+
+### Corregido
+- Mojibake UTF-8 (vehÃculo -> vehículo, PÃºblico -> Público) en todos los
+  providers (MTT, PRT, Boostr, SII). Causa: el paquete http de Dart asume
+  Latin-1 cuando el Content-Type no declara charset=utf-8.
+  Fix en 3 capas:
+  1. Backend pf_api: middleware _force_utf8_charset que declara
+     application/json; charset=utf-8 en todas las respuestas JSON.
+  2. App publica: helper lib/utils/http_json.dart con decodeJsonUtf8(resp)
+     usando utf8.decode(resp.bodyBytes) en vez de resp.body.
+  3. App admin: metodo _decodeJson en lib/core/api_client.dart con el mismo
+     patron.
+
+### Mejorado
+- Boostr: cache SQLite via microservicio boostr-service (TTL 15d).
+  Primera consulta ~500ms + 1 cuota; siguientes ~7ms + 0 cuota.
+- Boostr: backend refactorizado, 4 sitios migrados al microservicio
+  (dashboard /full, /api/tasacion, provider=boostr, /pdf, fallback-boostr).
+- Boostr: ratelimit propagado a Postgres via headers del micro.
+
+### Infraestructura
+- docker-compose.yml versionado en repo (partfinder/deploy/) con symlink
+  en /opt/partfinder360/docker-compose.yml.
+- Nuevo repo victorneyraars/boostr-service (patron mtt-service).
+- .env.example y README de despliegue en partfinder/deploy/.
+
 ## [1.1.0] - 2026-10-04 (versionCode 4)
 
 ### Añadido

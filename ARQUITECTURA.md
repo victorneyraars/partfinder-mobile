@@ -89,12 +89,42 @@ Endpoints:
 
 Nota: migracion a Docker pendiente (ver PENDIENTES.md)
 
-### 2.5 APIs externas
+### 2.5 boostr-service (API Boostr con cache)
+
+- Tipo: Docker container
+- Puerto: 3092 (interno, solo accesible por otros contenedores)
+- Repo: victorneyraars/boostr-service
+- Path: /opt/servicios/boostr-service
+- Stack: Python 3.11 + FastAPI + SQLite
+
+Responsabilidades:
+- Envolver la API externa Boostr (api.boostr.cl)
+- Cache SQLite con TTL 15 dias (patente cacheada = 0 cuota)
+- Devolver el payload enriquecido (_boostr_enrich) al backend
+- Exponer headers ratelimit-* en el JSON para que pf_api los propague
+
+Endpoints:
+- GET /health
+- GET /api/v1/boostr/{plate}          (query ?force=true bypasea cache)
+- GET /api/v1/boostr/{plate}/cache    (no consume cuota)
+- DELETE /api/v1/boostr/{plate}/cache (invalida cache)
+
+Variables de entorno:
+- BOOSTR_CACHE_DB=/data/boostr_cache.db
+- BOOSTR_CACHE_TTL_DAYS=15
+- BOOSTR_API_KEY (via env_file .env)
+
+Beneficio medido:
+- Primera consulta: ~500ms + 1 cuota Boostr
+- Cache hit: ~7ms + 0 cuota
+
+### 2.6 APIs externas
 
 - Boostr - Ficha tecnica (api.boostr.cl)
   - 100 consultas/dia
   - Expone headers ratelimit-*
-  - Consulta real desde pf_api
+  - Consulta a traves del microservicio boostr-service (con cache SQLite)
+  - pf_api propaga el ratelimit a la tabla api_quota en Postgres
   
 - SII - Tasacion fiscal
   - Consulta via base local sii_tasaciones
@@ -152,7 +182,30 @@ Cache miss (primera vez o TTL expirado):
 - Respuesta: ~7s
 - Se guarda en SQLite para proximas consultas
 
-### 3.4 Tracking de uso
+### 3.4 Flujo Boostr
+
+Cache hit en el micro (mayoria de casos):
+- App -> pf_api -> boostr-service -> SQLite
+- Respuesta: ~7ms, 0 cuota consumida
+- pf_api NO propaga ratelimit (no viene en cache hits)
+
+Cache miss en el micro (primera vez o TTL expirado):
+- App -> pf_api -> boostr-service -> api.boostr.cl
+- Respuesta: ~500ms, 1 cuota consumida
+- boostr-service guarda en su SQLite + devuelve ratelimit en el JSON
+- pf_api propaga ratelimit a tabla api_quota (Postgres)
+- pf_api guarda el payload en vehicle_cache (para futuras consultas)
+
+Cache hit en pf_api (Postgres):
+- App -> pf_api -> vehicle_cache (ni siquiera toca boostr-service)
+- Respuesta: ~10ms, 0 cuota
+
+Sobre cuota agotada (429 / PLAN_LIMIT_EXCEEDED):
+- boostr-service devuelve status=queued
+- pf_api encola la patente en boostr_pending_queue
+- El worker procesa la cola cuando vuelve a haber cuota
+
+### 3.5 Tracking de uso
 
 - App publica envia eventos a POST /api/usage/track
 - Eventos: app_open, prt_query_start, prt_query_success, prt_query_fail
@@ -175,15 +228,21 @@ Tablas:
 - sii_tasaciones (codigo, marca, modelo, anio, tasacion, ...)
 - boostr_pending_queue (id, plate, status, created_at)
 
-### 4.2 SQLite (mtt-service)
+### 4.2 SQLite (mtt-service + boostr-service)
 
-Path: /data/mtt_cache.db (dentro del contenedor)
-Volumen: /opt/servicios/mtt-service/data
+Cada microservicio tiene su propio SQLite con cache de patentes.
 
-Tabla:
-- mtt_cache (plate, data TEXT JSON, updated_at TIMESTAMP)
+**mtt-service:**
+- Path: /data/mtt_cache.db (dentro del contenedor)
+- Volumen: /opt/servicios/mtt-service/data
+- Tabla: mtt_cache (plate, data TEXT JSON, updated_at TIMESTAMP)
+- TTL: 15 dias (MTT_CACHE_TTL_DAYS)
 
-TTL: 15 dias (configurable via MTT_CACHE_TTL_DAYS)
+**boostr-service:**
+- Path: /data/boostr_cache.db (dentro del contenedor)
+- Volumen: /opt/servicios/boostr-service/data
+- Tabla: boostr_cache (plate, data TEXT JSON, updated_at TIMESTAMP)
+- TTL: 15 dias (BOOSTR_CACHE_TTL_DAYS)
 
 ---
 
@@ -215,7 +274,31 @@ Usado via prt_client.consultar_revision_tecnica(patente).
 Nota: 'host.docker.internal' apunta al host (172.18.0.1) porque
 prt-service corre como systemd, no como contenedor.
 
-### 5.3 Comunicacion app publica <-> pf_api
+### 5.3 Comunicacion pf_api <-> boostr-service
+
+pf_api tiene la variable:
+  BOOSTR_SERVICE_URL=http://boostr-service:3092
+
+Codigo en pf_api (patron comun a los 4 sitios migrados):
+  r = requests.get(f"{BOOSTR_SERVICE_URL}/api/v1/boostr/{plate}", timeout=20)
+  payload = r.json()
+  # Propagar ratelimit a Postgres si viene (solo en cache miss)
+  if payload.get("ratelimit"):
+      _update_boostr_quota_from_response(payload["ratelimit"])
+  # status: ok | not_found | queued | error
+  return {"status": payload["status"], "data": payload.get("data", {})}
+
+Sitios donde pf_api consume boostr-service:
+- _full_boostr() (dashboard /full)
+- Fallback SII en /api/tasacion
+- provider=boostr en /api/patente/{patente}
+- Fallback Boostr en /api/patente/{patente}/pdf
+- /api/patente/fallback-boostr
+
+Nota: fuel_efficiency sigue llamando api.boostr.cl directo (endpoint distinto,
+uso bajo, no es de vehiculos).
+
+### 5.4 Comunicacion app publica <-> pf_api
 
 HTTPS via Cloudflare:
   api.studiodigital360.com -> 91.99.145.70:8000
@@ -228,7 +311,7 @@ Endpoints usados por la app:
 - GET /api/debug/prt-script.js
 - GET /api/debug/auto-seguro-script.js
 
-### 5.4 Comunicacion app admin <-> pf_api
+### 5.5 Comunicacion app admin <-> pf_api
 
 Mismos endpoints HTTPS pero con JWT en el header Authorization.
 Endpoints admin:
@@ -267,10 +350,10 @@ Disparadores: push a main
 Firma: usa secretos GitHub (keystore base64) en vez de archivo en repo
 Proceso similar pero con firma via ANDROID_KEYSTORE_BASE64
 
-### 6.3 mtt-service
+### 6.3 Microservicios (mtt-service, boostr-service)
 
 Sin CI/CD todavia (deploy manual con docker build + compose up)
-Pendiente: agregar workflow para build automatico
+Pendiente: agregar workflow para build automatico de ambos
 
 ---
 
@@ -294,8 +377,10 @@ Pendiente: agregar workflow para build automatico
 
 ### 7.4 Cuota Boostr desactualizada
 
-  curl -s http://localhost:8000/api/boostr/status | python3 -m json.tool
+  docker exec pf_database psql -U pf_user -d partfinder -c "SELECT provider, remaining, updated_at FROM api_quota WHERE provider='boostr';"
   # Deberia tener updated_at reciente. Si no, hacer una consulta para forzar actualizacion.
+  # NOTA: la cuota solo se actualiza en cache miss del boostr-service.
+  #       Cache hits (SQLite) NO tocan Boostr ni Postgres.
 
 ### 7.5 Cache MTT
 
@@ -304,6 +389,22 @@ Pendiente: agregar workflow para build automatico
 
   # Limpiar una patente especifica
   curl -X DELETE http://localhost:3091/api/v1/mtt/BBCC12/cache
+
+### 7.6 boostr-service no responde
+
+  docker logs pf_boostr_service --tail 20
+  docker exec pf_api python3 -c "import urllib.request; print(urllib.request.urlopen('http://boostr-service:3092/health').read().decode())"
+
+### 7.7 Cache Boostr
+
+  # Ver cache
+  docker exec pf_boostr_service python3 -c "import sqlite3; conn=sqlite3.connect('/data/boostr_cache.db'); print(conn.execute('SELECT plate, updated_at FROM boostr_cache ORDER BY updated_at DESC LIMIT 10').fetchall())"
+
+  # Info de una patente (no consume cuota)
+  docker exec pf_api python3 -c "import urllib.request; print(urllib.request.urlopen('http://boostr-service:3092/api/v1/boostr/KHFF35/cache').read().decode())"
+
+  # Invalidar cache
+  docker exec pf_api python3 -c "import urllib.request; req=urllib.request.Request('http://boostr-service:3092/api/v1/boostr/KHFF35/cache', method='DELETE'); print(urllib.request.urlopen(req).read().decode())"
 
 ---
 
@@ -314,8 +415,14 @@ Pendiente: agregar workflow para build automatico
   docker ps                                      # Ver contenedores activos
   docker logs -f pf_api                          # Logs en vivo
   docker logs -f pf_mtt_service                  # Logs del mtt-service
-  docker compose -f /opt/partfinder360/docker-compose.yml up -d
-  docker compose -f /opt/partfinder360/docker-compose.yml restart partfinder-api
+  docker logs -f pf_boostr_service               # Logs del boostr-service
+  cd /opt/partfinder360 && docker compose up -d  # Levantar todo el stack
+  cd /opt/partfinder360 && docker compose restart partfinder-api
+
+  # Rebuild de un microservicio tras cambio de codigo
+  cd /opt/servicios/mtt-service && docker build -t mtt-service:1.0.0 .
+  cd /opt/servicios/boostr-service && docker build -t boostr-service:1.0.0 .
+  cd /opt/partfinder360 && docker compose up -d boostr-service
 
 ### 8.2 Backend
 
@@ -334,6 +441,7 @@ Pendiente: agregar workflow para build automatico
   cd /opt/partfinder-admin && git log --oneline -5
   cd /opt/partfinder360/partfinder && git log --oneline -5
   cd /opt/servicios/mtt-service && git log --oneline -5
+  cd /opt/servicios/boostr-service && git log --oneline -5
 
 ---
 
