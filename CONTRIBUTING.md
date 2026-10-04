@@ -313,3 +313,119 @@ APK servicio temporal:
 ---
 
 Ultima actualizacion: 2026-10-02
+
+---
+
+## 9. Microservicios
+
+El ecosistema tiene 2 microservicios propios (aparte de pf_api):
+
+### 9.1 mtt-service (Docker, puerto 3091)
+
+- Repo: victorneyraars/mtt-service
+- Path: /opt/servicios/mtt-service
+- Hace: scraping de apps.mtt.cl con cache SQLite (TTL 15 dias)
+- Beneficio: primera consulta ~7s, siguientes ~0.15s
+- Como se usa desde pf_api:
+
+    MTT_SERVICE_URL=http://mtt-service:3091
+    result = _fetch_mtt_from_service(plate)  # si None, fallback al scraper local
+
+- Modificar el scraper: editar /opt/servicios/mtt-service/src/mtt_scraper.py
+- Rebuild despues de cambios:
+
+    cd /opt/servicios/mtt-service
+    docker build -t mtt-service:1.0.0 .
+    cd /opt/partfinder360
+    docker compose up -d --force-recreate mtt-service
+
+### 9.2 prt-service (systemd, puerto 3090)
+
+- Path: /opt/servicios/prt-service
+- Hace: scraping de prt.cl (modo actual: mock)
+- Modos: mock / prt (real) / verifik (API comercial)
+- Cambiar modo:
+
+    systemctl edit prt-service
+    # Ajustar: Environment=PRT_PROVIDER=prt
+    systemctl daemon-reload && systemctl restart prt-service
+
+- Logs:
+
+    journalctl -u prt-service -f
+
+### 9.3 Como agregar un servicio nuevo
+
+Patron recomendado (usado por mtt-service):
+
+1. Crear directorio en /opt/servicios/{nombre}-service/
+2. Incluir: Dockerfile, main.py (o server.js), requirements.txt, src/
+3. Exponer un /health para healthcheck
+4. Agregar variable de entorno en pf_api via docker-compose.yml
+5. Integrar en main.py con fallback al metodo local
+6. Crear repo en GitHub (victorneyraars/{nombre}-service)
+7. Agregar servicio al docker-compose.yml
+
+---
+
+## 10. Troubleshooting rapido
+
+### El /full tarda mucho (>2s)
+
+Verificar cache de MTT:
+
+    docker exec pf_mtt_service python3 -c "import sqlite3; conn=sqlite3.connect('/data/mtt_cache.db'); print(conn.execute('SELECT COUNT(*) FROM mtt_cache').fetchone())"
+
+Si tiene <10 patentes, es normal (cache miss). Despues de algunas consultas deberia bajar a <0.5s.
+
+### Boostr muestra cuota 0 o desactualizada
+
+    curl -s http://localhost:8000/api/boostr/status | python3 -m json.tool
+
+Si el updated_at es viejo, hacer cualquier consulta para forzar la actualizacion:
+
+    curl -s "http://localhost:8000/api/patente/KHFF35/full" -o /dev/null
+
+### mtt-service no responde
+
+    docker logs pf_mtt_service --tail 20
+    docker restart pf_mtt_service
+
+### prt-service devuelve datos mock
+
+    curl -s http://localhost:3090/health
+    # Si provider=mock, cambiar a PRT_PROVIDER=prt
+
+### Reiniciar todo el stack
+
+    cd /opt/partfinder360
+    docker compose down
+    docker compose up -d
+    # prt-service (systemd):
+    systemctl restart prt-service
+
+---
+
+## 11. Estado actual de servicios
+
+| Servicio | Tipo | Estado | Puerto |
+|---|---|---|---|
+| pf_api | Docker | Activo | 8000 |
+| pf_database | Docker | Activo | 5432 (interno) |
+| pf_mtt_service | Docker | Activo | 3091 (interno) |
+| prt-service | systemd | Activo | 3090 |
+
+---
+
+## 12. Repos GitHub
+
+| Repo | Contenido |
+|---|---|
+| victorneyraars/partfinder-mobile | App publica Flutter |
+| victorneyraars/partfinder-admin | App admin Flutter |
+| victorneyraars/partfinder360 | Backend FastAPI |
+| victorneyraars/mtt-service | Microservicio MTT con cache |
+
+---
+
+Ultima actualizacion: 2026-10-04
