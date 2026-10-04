@@ -721,8 +721,12 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
   /// Descarga el dashboard agregado (/full) para Boostr/MTT/SII en paralelo.
   Future<Map<String, dynamic>?> _fetchFullDashboard(String rawPlate) async {
     try {
+      final deviceId = UsageTracker().deviceId;
+      final url = deviceId != null
+          ? 'https://api.studiodigital360.com/api/patente/$rawPlate/full?device_id=$deviceId'
+          : 'https://api.studiodigital360.com/api/patente/$rawPlate/full';
       final res = await http
-          .get(Uri.parse('https://api.studiodigital360.com/api/patente/$rawPlate/full'))
+          .get(Uri.parse(url))
           .timeout(const Duration(seconds: 35));
       if (res.statusCode == 200) {
         return jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
