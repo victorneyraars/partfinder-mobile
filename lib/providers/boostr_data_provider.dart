@@ -1,9 +1,9 @@
-import 'dart:convert';
 
 import 'package:flutter/widgets.dart';
 import 'package:http/http.dart' as http;
 
 import '../cache/provider_cache.dart';
+import '../utils/http_json.dart';
 import '../models/vehicle_model.dart';
 import 'vehicle_data_provider.dart';
 
@@ -85,7 +85,7 @@ class BoostrDataProvider extends VehicleDataProvider {
 
     switch (resp.statusCode) {
       case 200:
-        final raw = jsonDecode(resp.body) as Map<String, dynamic>;
+        final raw = decodeJsonUtf8(resp) as Map<String, dynamic>;
         final data = (raw['data'] is Map)
             ? Map<String, dynamic>.from(raw['data'] as Map)
             : Map<String, dynamic>.from(raw);

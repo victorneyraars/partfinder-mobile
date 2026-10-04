@@ -1,9 +1,9 @@
-import 'dart:convert';
 
 import 'package:flutter/widgets.dart';
 import 'package:http/http.dart' as http;
 
 import '../cache/provider_cache.dart';
+import '../utils/http_json.dart';
 import 'vehicle_data_provider.dart';
 
 /// Motor PRT (P2P human-in-the-loop).
@@ -49,7 +49,7 @@ class PrtDataProvider extends VehicleDataProvider {
           .get(Uri.parse('$_base/api/patente/$plateClean?provider=prt'))
           .timeout(const Duration(seconds: 12));
       if (resp.statusCode == 200) {
-        final raw = jsonDecode(resp.body) as Map<String, dynamic>;
+        final raw = decodeJsonUtf8(resp) as Map<String, dynamic>;
         final requiere = raw['requiere_verificacion'] == true;
         final data = (raw['data'] is Map)
             ? Map<String, dynamic>.from(raw['data'] as Map)

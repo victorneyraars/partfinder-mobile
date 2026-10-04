@@ -20,6 +20,7 @@ import 'models/vehicle_model.dart';
 import 'models/prt_model.dart';
 import 'utils/plate_validator.dart';
 import 'utils/usage_tracker.dart';
+import 'utils/http_json.dart';
 
 
 String _getFreshRandomChileanPlate() {
@@ -264,7 +265,7 @@ class _LicensePlateDashboardState extends State<LicensePlateDashboard>
       final uri = Uri.parse('https://api.studiodigital360.com/api/tasacion?marca=${Uri.encodeComponent(marca)}&modelo=${Uri.encodeComponent(modelo)}&anio=$anioClean');
       final res = await http.get(uri).timeout(const Duration(seconds: 8));
       if (res.statusCode == 200) {
-        final decoded = jsonDecode(res.body);
+        final decoded = decodeJsonUtf8(res);
         if (decoded['status'] == 'SUCCESS') {
           setState(() {
             _siiData = decoded;
@@ -5745,7 +5746,7 @@ class PrtService {
           .get(Uri.parse('$baseUrl/api/patente/${patente.toUpperCase()}?provider=prt'))
           .timeout(const Duration(seconds: 10));
       if (resp.statusCode != 200) return null;
-      final raw = jsonDecode(resp.body) as Map<String, dynamic>;
+      final raw = decodeJsonUtf8(resp) as Map<String, dynamic>;
       final data = (raw['data'] is Map<String, dynamic>)
           ? Map<String, dynamic>.from(raw['data'] as Map)
           : Map<String, dynamic>.from(raw);
