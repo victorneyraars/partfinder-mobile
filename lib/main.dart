@@ -19,6 +19,7 @@ import 'providers/sii_data_provider.dart';
 import 'models/vehicle_model.dart';
 import 'models/prt_model.dart';
 import 'utils/plate_validator.dart';
+import 'utils/usage_tracker.dart';
 
 
 String _getFreshRandomChileanPlate() {
@@ -33,9 +34,19 @@ String _getFreshRandomChileanPlate() {
 }
 
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
+
+  // Inicializar tracker de uso (no bloqueante, silencioso)
+  try {
+    await UsageTracker().init();
+    // Enviar evento de apertura (fire-and-forget, no esperamos respuesta)
+    UsageTracker().track('app_open');
+  } catch (_) {
+    // Silencioso: si falla el tracking, la app sigue funcionando
+  }
+
   runApp(const PartFinderApp());
 }
 
@@ -961,6 +972,8 @@ Future<void> _searchPlateLegacy({bool forceNetwork = false, String? plateOverrid
   // MODAL INTERACTIVO PRT (HUMAN-IN-THE-LOOP)
   // ==========================================
   void _openPrtVerificationScreen(String targetPlate) {
+    // Tracking: consulta PRT iniciada
+    UsageTracker().track('prt_query_start', plate: targetPlate);
     // Cerrar el teclado ANTES de abrir el modal: al retornar (éxito o cierre)
     // no debe quedar foco residual en el TextField que reabra el IME.
     try { _focusNode.unfocus(); } catch (e) {}
@@ -973,6 +986,8 @@ Future<void> _searchPlateLegacy({bool forceNetwork = false, String? plateOverrid
         builder: (context) => PrtVerificationScreen(
           targetPlate: targetPlate,
           onErrorNotFound: () {
+            // Tracking: patente sin registro en PRT
+            UsageTracker().track('prt_query_fail', plate: targetPlate, metadata: {'reason': 'not_found'});
             // Devolver el foco al campo de patente de la pantalla principal.
             try { _focusNode.requestFocus(); } catch (e) {}
             // Aviso estilizado (fondo oscuro, texto claro).
@@ -990,6 +1005,8 @@ Future<void> _searchPlateLegacy({bool forceNetwork = false, String? plateOverrid
             }
           },
           onVehicleSaved: (scraped) async {
+            // Tracking: consulta PRT exitosa
+            UsageTracker().track('prt_query_success', plate: targetPlate, metadata: {'fuente': scraped['fuente'] ?? 'PRT'});
             // Consulta EXITOSA: NUNCA pedir foco al input de patente en esta
             // rama. Solo onErrorNotFound refocaliza (para reintentar).
             setState(() {
@@ -5055,6 +5072,8 @@ Future<void> _searchPlateLegacy({bool forceNetwork = false, String? plateOverrid
     if (_isCheckingAutoSeguro) return;
     final plate = _currentPlateValue();
     if (plate.isEmpty) return;
+    // Tracking: consulta AutoSeguro iniciada
+    UsageTracker().track('autoseguro_query_start', plate: plate);
     setState(() => _isCheckingAutoSeguro = true);
     try {
       final result = await Navigator.push<Map<String, dynamic>>(
@@ -5065,6 +5084,8 @@ Future<void> _searchPlateLegacy({bool forceNetwork = false, String? plateOverrid
       );
       if (!mounted) return;
       if (result != null && result is Map<String, dynamic>) {
+        // Tracking: consulta AutoSeguro completada
+        UsageTracker().track('autoseguro_query_success', plate: plate, metadata: {'encargo': result['encargo'] ?? false});
         setState(() {
           _autoSeguroResult = result;
           _dashboard?['auto_seguro'] = {
